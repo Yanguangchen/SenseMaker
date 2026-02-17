@@ -313,7 +313,8 @@ def _render_processed_records(rows: List[Dict[str, Any]]) -> None:
 
 def _bridge_secrets_to_env() -> None:
     """On Streamlit Cloud, populate os.environ from st.secrets so downstream
-    code that reads os.getenv() keeps working."""
+    code that reads os.getenv() keeps working.  Silently skips when no
+    secrets.toml exists (i.e. local development with .env)."""
     mapping = {
         "GEMINI_KEY": "GEMINI_KEY",
         "GEMINI_MODEL": "GEMINI_MODEL",
@@ -322,7 +323,7 @@ def _bridge_secrets_to_env() -> None:
         "FIREBASE_CREDENTIALS": "FIREBASE_CREDENTIALS",
     }
     try:
-        secrets = st.secrets
+        secrets = dict(st.secrets)
     except Exception:
         return
     for secret_key, env_key in mapping.items():
@@ -334,7 +335,7 @@ def main() -> None:
     load_dotenv()
     _bridge_secrets_to_env()
     st.set_page_config(page_title="Project Sentinel", layout="wide")
-    scrape_tab, gemini_tab = st.tabs(["Scrap data", "Gemini processing"])
+    scrape_tab, gemini_tab = st.tabs(["Scrap data", "Sentiment Analysis"])
 
     with scrape_tab:
         st.caption("Use this to test scraper output directly from the dashboard.")
@@ -343,7 +344,7 @@ def main() -> None:
             st.info(
                 "The web scraper requires Playwright browser binaries which are not "
                 "available in this environment (e.g. Streamlit Cloud). "
-                "Run scraping locally and use this deployment for Gemini processing."
+                "Run scraping locally and use this deployment for Sentiment Analysis."
             )
 
         with st.expander("log into facebook", expanded=False):
@@ -453,7 +454,7 @@ def main() -> None:
                 st.info("No posts detected for this URL with current selectors.")
 
     with gemini_tab:
-        st.subheader("Gemini processing")
+        st.subheader("Sentiment Analysis")
         st.caption("Select Firestore records, run analysis with Gemini, and view results.")
 
         # --- Settings row ---
