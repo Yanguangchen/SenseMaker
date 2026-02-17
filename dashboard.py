@@ -20,11 +20,11 @@ from modules.processor import analyze_posts_with_gemini
 
 try:
     from modules.scraper import scrape_group
-    # Playwright Python package imports fine on cloud, but browsers aren't installed.
-    # Detect Streamlit Cloud by its mount path.
-    SCRAPER_AVAILABLE = not os.path.exists("/mount/src")
+    SCRAPER_AVAILABLE = True
 except Exception:
     SCRAPER_AVAILABLE = False
+
+IS_CLOUD = os.path.exists("/mount/src")
 
 AUTH_STORAGE_STATE_FILE = "storage_state.json"
 AUTH_LOGIN_TIMEOUT_SECONDS = 240
@@ -342,36 +342,33 @@ def main() -> None:
     with scrape_tab:
         st.caption("Use this to test scraper output directly from the dashboard.")
 
-        if not SCRAPER_AVAILABLE:
-            st.info(
-                "The web scraper requires Playwright browser binaries which are not "
-                "available in this environment (e.g. Streamlit Cloud).\n\n"
-                "**Run scraping locally**, save data to Firestore, then use the "
-                "**Sentiment Analysis** tab here to process and view results."
-            )
-            st.stop()
-
         with st.expander("log into facebook", expanded=False):
             st.caption("Essential step for scrapping facebook posts")
             st.caption(
                 "Capture authenticated Playwright session. A Chrome window opens; "
                 "log in to Facebook there. Session saves automatically once login is detected."
             )
-            if st.button("Capture Facebook Login Session", key="capture_fb_session_btn"):
-                with st.spinner("Waiting for Facebook login in opened browser..."):
-                    try:
-                        auth_state_path = os.getenv("PLAYWRIGHT_STORAGE_STATE", AUTH_STORAGE_STATE_FILE).strip()
-                        saved_path = _capture_facebook_storage_state(
-                            storage_state_path=auth_state_path or AUTH_STORAGE_STATE_FILE,
-                            timeout_seconds=AUTH_LOGIN_TIMEOUT_SECONDS,
-                        )
-                        os.environ["PLAYWRIGHT_STORAGE_STATE"] = saved_path
-                        st.toast("Facebook auth session captured.")
-                    except Exception as exc:
-                        error_text = str(exc).strip() or repr(exc)
-                        st.error(f"Auth capture failed: {error_text}")
-                        with st.expander("Auth Error Details"):
-                            st.code(traceback.format_exc())
+            if IS_CLOUD:
+                st.warning(
+                    "Facebook login capture requires a local browser and is not available "
+                    "on Streamlit Cloud. Run this step locally instead."
+                )
+            else:
+                if st.button("Capture Facebook Login Session", key="capture_fb_session_btn"):
+                    with st.spinner("Waiting for Facebook login in opened browser..."):
+                        try:
+                            auth_state_path = os.getenv("PLAYWRIGHT_STORAGE_STATE", AUTH_STORAGE_STATE_FILE).strip()
+                            saved_path = _capture_facebook_storage_state(
+                                storage_state_path=auth_state_path or AUTH_STORAGE_STATE_FILE,
+                                timeout_seconds=AUTH_LOGIN_TIMEOUT_SECONDS,
+                            )
+                            os.environ["PLAYWRIGHT_STORAGE_STATE"] = saved_path
+                            st.toast("Facebook auth session captured.")
+                        except Exception as exc:
+                            error_text = str(exc).strip() or repr(exc)
+                            st.error(f"Auth capture failed: {error_text}")
+                            with st.expander("Auth Error Details"):
+                                st.code(traceback.format_exc())
 
         urls_text = st.text_area(
             "Paste up to 5 links (one per line)",
