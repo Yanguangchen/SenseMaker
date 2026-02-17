@@ -26,62 +26,52 @@ def _get_collection_name() -> str:
     return os.getenv("FIREBASE_COLLECTION", "raw_posts").strip() or "raw_posts"
 
 
-def _get_streamlit_secrets() -> Dict[str, Any]:
-    """Safely read st.secrets as a dict.  Returns empty dict when unavailable."""
+def _read_firebase_from_secrets() -> Dict[str, Any]:
+    """Read the [firebase] section from st.secrets, converting all proxy
+    objects to plain Python types.  Returns empty dict when unavailable."""
     try:
         import streamlit as st
-        return dict(st.secrets)
+        fb = st.secrets["firebase"]
+        # Force every value to a plain Python str/int/float.
+        return {str(k): str(v) if isinstance(v, str) else v for k, v in fb.items()}
     except Exception:
         return {}
 
 
-def _get_firebase_cred(
-    cloud_secrets: Dict[str, Any],
-) -> Optional[credentials.Certificate]:
-    """Resolve Firebase credentials from multiple sources.
-
-    Priority:
-    1. cloud_secrets["firebase"] (Streamlit Cloud — JSON dict in secrets.toml)
-    2. FIREBASE_CREDENTIALS env var (local — path to service-account JSON file)
-    3. None (fall back to Application Default Credentials)
-    """
-    # 1) Streamlit secrets
+def _read_secret(key: str, default: str = "") -> str:
+    """Read a single top-level key from st.secrets, or return default."""
     try:
-        fb_section = cloud_secrets.get("firebase")
-        if fb_section:
-            fb_dict = dict(fb_section)
-            if fb_dict:
-                return credentials.Certificate(fb_dict)
+        import streamlit as st
+        return str(st.secrets[key])
     except Exception:
-        pass
-
-    # 2) Local file path
-    creds_path = os.getenv("FIREBASE_CREDENTIALS", "").strip()
-    if creds_path:
-        return credentials.Certificate(creds_path)
-
-    return None
+        return default
 
 
 def init_db() -> firestore.Client:
     """Initialize and return Firestore client."""
-    cloud_secrets = _get_streamlit_secrets()
-
-    # Project ID: env var > st.secrets top-level > firebase section > fallback
-    project_id = (
-        os.getenv("FIREBASE_PROJECT_ID", "").strip()
-        or str(cloud_secrets.get("FIREBASE_PROJECT_ID", "")).strip()
-    )
-    if not project_id:
-        try:
-            fb_section = cloud_secrets.get("firebase")
-            if fb_section:
-                project_id = str(dict(fb_section).get("project_id", "")).strip()
-        except Exception:
-            pass
-
     if not firebase_admin._apps:
-        cred = _get_firebase_cred(cloud_secrets)
+        cred: Optional[credentials.Certificate] = None
+        project_id = ""
+
+        # 1) Try st.secrets [firebase] section  (Streamlit Cloud)
+        fb_dict = _read_firebase_from_secrets()
+        if fb_dict:
+            cred = credentials.Certificate(fb_dict)
+            project_id = fb_dict.get("project_id", "")
+
+        # 2) Try local file path
+        if cred is None:
+            creds_path = os.getenv("FIREBASE_CREDENTIALS", "").strip()
+            if creds_path:
+                cred = credentials.Certificate(creds_path)
+
+        # Resolve project_id: env var > st.secrets top-level > cred dict
+        project_id = (
+            os.getenv("FIREBASE_PROJECT_ID", "").strip()
+            or _read_secret("FIREBASE_PROJECT_ID")
+            or project_id
+        )
+
         app_options: Dict[str, Any] = {"projectId": project_id} if project_id else {}
         if cred:
             firebase_admin.initialize_app(cred, app_options)
