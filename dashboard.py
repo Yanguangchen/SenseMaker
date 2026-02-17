@@ -343,9 +343,11 @@ def main() -> None:
         if not SCRAPER_AVAILABLE:
             st.info(
                 "The web scraper requires Playwright browser binaries which are not "
-                "available in this environment (e.g. Streamlit Cloud). "
-                "Run scraping locally and use this deployment for Sentiment Analysis."
+                "available in this environment (e.g. Streamlit Cloud).\n\n"
+                "**Run scraping locally**, save data to Firestore, then use the "
+                "**Sentiment Analysis** tab here to process and view results."
             )
+            st.stop()
 
         with st.expander("log into facebook", expanded=False):
             st.caption("Essential step for scrapping facebook posts")
