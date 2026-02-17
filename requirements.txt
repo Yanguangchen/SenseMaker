@@ -1,0 +1,5 @@
+python-dotenv
+playwright
+firebase-admin
+google-generativeai
+streamlit

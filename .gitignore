@@ -1,0 +1,8 @@
+.env
+storage_state.json
+project-sentinel-9ab8e-firebase-adminsdk-fbsvc-5432b7dfc9.json
+__pycache__/
+.pytest_cache/
+*.pyc
+*.pyo
+*.pyd
