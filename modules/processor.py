@@ -123,6 +123,7 @@ def analyze_posts_with_gemini(
 
     # Retry loop with truncated exponential backoff for 429 errors.
     last_exc: Optional[Exception] = None
+    response = None
     for attempt in range(1, MAX_RETRIES + 1):
         try:
             _status(f"Calling Gemini ({target_model}), attempt {attempt}/{MAX_RETRIES}...")
@@ -130,6 +131,8 @@ def analyze_posts_with_gemini(
             break
         except Exception as exc:
             last_exc = exc
+            exc_msg = str(exc).strip() or repr(exc)
+            _status(f"Attempt {attempt} error: {exc_msg}")
             if _is_rate_limit_error(exc) and attempt < MAX_RETRIES:
                 wait = INITIAL_BACKOFF_S * (2 ** (attempt - 1))
                 _status(
@@ -139,9 +142,11 @@ def analyze_posts_with_gemini(
                 time.sleep(wait)
             else:
                 raise
-    else:
+
+    if response is None:
         raise RuntimeError(
-            f"Gemini API still rate-limited after {MAX_RETRIES} retries."
+            f"Gemini API still rate-limited after {MAX_RETRIES} retries. "
+            f"Last error: {last_exc}"
         ) from last_exc
 
     raw_text = (getattr(response, "text", "") or "").strip()
