@@ -20,7 +20,9 @@ from modules.processor import analyze_posts_with_gemini
 
 try:
     from modules.scraper import scrape_group
-    SCRAPER_AVAILABLE = True
+    # Playwright Python package imports fine on cloud, but browsers aren't installed.
+    # Detect Streamlit Cloud by its mount path.
+    SCRAPER_AVAILABLE = not os.path.exists("/mount/src")
 except Exception:
     SCRAPER_AVAILABLE = False
 
