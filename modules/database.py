@@ -26,19 +26,41 @@ def _get_collection_name() -> str:
     return os.getenv("FIREBASE_COLLECTION", "raw_posts").strip() or "raw_posts"
 
 
+def _get_firebase_cred() -> Optional[credentials.Certificate]:
+    """Resolve Firebase credentials from multiple sources.
+
+    Priority:
+    1. st.secrets["firebase"] (Streamlit Cloud — JSON dict in secrets.toml)
+    2. FIREBASE_CREDENTIALS env var (local — path to service-account JSON file)
+    3. None (fall back to Application Default Credentials)
+    """
+    # 1) Streamlit secrets (works on Streamlit Cloud)
+    try:
+        import streamlit as st
+        fb_secrets = dict(st.secrets["firebase"])
+        if fb_secrets:
+            return credentials.Certificate(fb_secrets)
+    except Exception:
+        pass
+
+    # 2) Local file path
+    creds_path = os.getenv("FIREBASE_CREDENTIALS", "").strip()
+    if creds_path:
+        return credentials.Certificate(creds_path)
+
+    return None
+
+
 def init_db() -> firestore.Client:
     """Initialize and return Firestore client."""
-    creds_path = os.getenv("FIREBASE_CREDENTIALS")
     project_id = os.getenv("FIREBASE_PROJECT_ID", "").strip()
 
     if not firebase_admin._apps:
-        if creds_path:
-            cred = credentials.Certificate(creds_path)
-            app_options: Dict[str, Any] = {"projectId": project_id} if project_id else {}
+        cred = _get_firebase_cred()
+        app_options: Dict[str, Any] = {"projectId": project_id} if project_id else {}
+        if cred:
             firebase_admin.initialize_app(cred, app_options)
         else:
-            # Fallback path for environments that already have ADC configured.
-            app_options = {"projectId": project_id} if project_id else {}
             firebase_admin.initialize_app(options=app_options)
 
     return firestore.client()

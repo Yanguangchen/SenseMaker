@@ -17,7 +17,12 @@ from dotenv import load_dotenv
 
 from modules.database import init_db, mark_post_processed, upsert_post
 from modules.processor import analyze_posts_with_gemini
-from modules.scraper import scrape_group
+
+try:
+    from modules.scraper import scrape_group
+    SCRAPER_AVAILABLE = True
+except Exception:
+    SCRAPER_AVAILABLE = False
 
 AUTH_STORAGE_STATE_FILE = "storage_state.json"
 AUTH_LOGIN_TIMEOUT_SECONDS = 240
@@ -306,13 +311,41 @@ def _render_processed_records(rows: List[Dict[str, Any]]) -> None:
         _render_analysis_cards(card_data)
 
 
+def _bridge_secrets_to_env() -> None:
+    """On Streamlit Cloud, populate os.environ from st.secrets so downstream
+    code that reads os.getenv() keeps working."""
+    mapping = {
+        "GEMINI_KEY": "GEMINI_KEY",
+        "GEMINI_MODEL": "GEMINI_MODEL",
+        "FIREBASE_PROJECT_ID": "FIREBASE_PROJECT_ID",
+        "FIREBASE_COLLECTION": "FIREBASE_COLLECTION",
+        "FIREBASE_CREDENTIALS": "FIREBASE_CREDENTIALS",
+    }
+    try:
+        secrets = st.secrets
+    except Exception:
+        return
+    for secret_key, env_key in mapping.items():
+        if secret_key in secrets and not os.getenv(env_key):
+            os.environ[env_key] = str(secrets[secret_key])
+
+
 def main() -> None:
     load_dotenv()
+    _bridge_secrets_to_env()
     st.set_page_config(page_title="Project Sentinel", layout="wide")
     scrape_tab, gemini_tab = st.tabs(["Scrap data", "Gemini processing"])
 
     with scrape_tab:
         st.caption("Use this to test scraper output directly from the dashboard.")
+
+        if not SCRAPER_AVAILABLE:
+            st.info(
+                "The web scraper requires Playwright browser binaries which are not "
+                "available in this environment (e.g. Streamlit Cloud). "
+                "Run scraping locally and use this deployment for Gemini processing."
+            )
+
         with st.expander("log into facebook", expanded=False):
             st.caption("Essential step for scrapping facebook posts")
             st.caption(
@@ -425,7 +458,7 @@ def main() -> None:
 
         # --- Settings row ---
         gc1, gc2 = st.columns([1, 1])
-        status_filter = gc1.selectbox("Record status", options=["pending", "processed", "error", "all"], index=0)
+        status_filter = gc1.selectbox("Record status", options=["all", "pending", "processed", "error"], index=0)
         load_limit = gc2.slider("Load limit", min_value=1, max_value=200, value=50)
         gemini_key_input = st.text_input(
             "Gemini API key",
