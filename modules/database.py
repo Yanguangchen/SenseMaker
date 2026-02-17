@@ -26,20 +26,32 @@ def _get_collection_name() -> str:
     return os.getenv("FIREBASE_COLLECTION", "raw_posts").strip() or "raw_posts"
 
 
-def _get_firebase_cred() -> Optional[credentials.Certificate]:
+def _get_streamlit_secrets() -> Dict[str, Any]:
+    """Safely read st.secrets as a dict.  Returns empty dict when unavailable."""
+    try:
+        import streamlit as st
+        return dict(st.secrets)
+    except Exception:
+        return {}
+
+
+def _get_firebase_cred(
+    cloud_secrets: Dict[str, Any],
+) -> Optional[credentials.Certificate]:
     """Resolve Firebase credentials from multiple sources.
 
     Priority:
-    1. st.secrets["firebase"] (Streamlit Cloud — JSON dict in secrets.toml)
+    1. cloud_secrets["firebase"] (Streamlit Cloud — JSON dict in secrets.toml)
     2. FIREBASE_CREDENTIALS env var (local — path to service-account JSON file)
     3. None (fall back to Application Default Credentials)
     """
-    # 1) Streamlit secrets (works on Streamlit Cloud)
+    # 1) Streamlit secrets
     try:
-        import streamlit as st
-        fb_secrets = dict(st.secrets["firebase"])
-        if fb_secrets:
-            return credentials.Certificate(fb_secrets)
+        fb_section = cloud_secrets.get("firebase")
+        if fb_section:
+            fb_dict = dict(fb_section)
+            if fb_dict:
+                return credentials.Certificate(fb_dict)
     except Exception:
         pass
 
@@ -53,10 +65,23 @@ def _get_firebase_cred() -> Optional[credentials.Certificate]:
 
 def init_db() -> firestore.Client:
     """Initialize and return Firestore client."""
-    project_id = os.getenv("FIREBASE_PROJECT_ID", "").strip()
+    cloud_secrets = _get_streamlit_secrets()
+
+    # Project ID: env var > st.secrets top-level > firebase section > fallback
+    project_id = (
+        os.getenv("FIREBASE_PROJECT_ID", "").strip()
+        or str(cloud_secrets.get("FIREBASE_PROJECT_ID", "")).strip()
+    )
+    if not project_id:
+        try:
+            fb_section = cloud_secrets.get("firebase")
+            if fb_section:
+                project_id = str(dict(fb_section).get("project_id", "")).strip()
+        except Exception:
+            pass
 
     if not firebase_admin._apps:
-        cred = _get_firebase_cred()
+        cred = _get_firebase_cred(cloud_secrets)
         app_options: Dict[str, Any] = {"projectId": project_id} if project_id else {}
         if cred:
             firebase_admin.initialize_app(cred, app_options)
