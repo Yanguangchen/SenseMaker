@@ -1,0 +1,16 @@
+rules_version = '2';
+
+// OYOSHI stores published FAQ edits in faq/oyoshi through the server Admin SDK.
+// Admin SDK requests use IAM and bypass these rules. The server checks the
+// editor's session and FAQ_EDITOR_EMAILS before accepting changes.
+// This policy covers the entire database. Reconcile other apps' rules before
+// deploying it to a shared database.
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Deny direct client reads and writes, including authenticated editors,
+    // collection queries and access to nested subcollections.
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

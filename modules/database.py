@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 import hashlib
-import os
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
 import firebase_admin
 from firebase_admin import credentials, firestore
+
+from modules.config import firebase_credentials, get_setting
 
 PostData = Dict[str, Any]
 
@@ -23,62 +24,40 @@ def get_post_id(url: str) -> str:
 
 
 def _get_collection_name() -> str:
-    return os.getenv("FIREBASE_COLLECTION", "raw_posts").strip() or "raw_posts"
+    return get_setting("FIREBASE_COLLECTION", "raw_posts") or "raw_posts"
 
 
-def _read_firebase_from_secrets() -> Dict[str, Any]:
-    """Read the [firebase] section from st.secrets, converting all proxy
-    objects to plain Python types.  Returns empty dict when unavailable."""
+def init_firebase() -> firebase_admin.App:
+    """Initialize the server Admin SDK; client Firestore rules stay untouched."""
     try:
-        import streamlit as st
-        fb = st.secrets["firebase"]
-        # Force every value to a plain Python str/int/float.
-        return {str(k): str(v) if isinstance(v, str) else v for k, v in fb.items()}
-    except Exception:
-        return {}
+        return firebase_admin.get_app()
+    except ValueError:
+        pass
 
+    cred: Optional[credentials.Certificate] = None
+    fb_dict = firebase_credentials()
+    project_id = get_setting("FIREBASE_PROJECT_ID") or fb_dict.get("project_id", "")
+    if fb_dict:
+        cred = credentials.Certificate(fb_dict)
+    elif get_setting("FIREBASE_CREDENTIALS"):
+        cred = credentials.Certificate(get_setting("FIREBASE_CREDENTIALS"))
+    elif get_setting("FIREBASE_CLIENT_EMAIL") and get_setting("FIREBASE_PRIVATE_KEY"):
+        # Also accept OYOSHI's server environment format.
+        cred = credentials.Certificate({
+            "type": "service_account",
+            "project_id": project_id,
+            "client_email": get_setting("FIREBASE_CLIENT_EMAIL"),
+            "private_key": get_setting("FIREBASE_PRIVATE_KEY").replace("\\n", "\n"),
+            "token_uri": "https://oauth2.googleapis.com/token",
+        })
 
-def _read_secret(key: str, default: str = "") -> str:
-    """Read a single top-level key from st.secrets, or return default."""
-    try:
-        import streamlit as st
-        return str(st.secrets[key])
-    except Exception:
-        return default
+    options: Dict[str, Any] = {"projectId": project_id} if project_id else {}
+    return firebase_admin.initialize_app(cred, options)
 
 
 def init_db() -> firestore.Client:
-    """Initialize and return Firestore client."""
-    if not firebase_admin._apps:
-        cred: Optional[credentials.Certificate] = None
-        project_id = ""
-
-        # 1) Try st.secrets [firebase] section  (Streamlit Cloud)
-        fb_dict = _read_firebase_from_secrets()
-        if fb_dict:
-            cred = credentials.Certificate(fb_dict)
-            project_id = fb_dict.get("project_id", "")
-
-        # 2) Try local file path
-        if cred is None:
-            creds_path = os.getenv("FIREBASE_CREDENTIALS", "").strip()
-            if creds_path:
-                cred = credentials.Certificate(creds_path)
-
-        # Resolve project_id: env var > st.secrets top-level > cred dict
-        project_id = (
-            os.getenv("FIREBASE_PROJECT_ID", "").strip()
-            or _read_secret("FIREBASE_PROJECT_ID")
-            or project_id
-        )
-
-        app_options: Dict[str, Any] = {"projectId": project_id} if project_id else {}
-        if cred:
-            firebase_admin.initialize_app(cred, app_options)
-        else:
-            firebase_admin.initialize_app(options=app_options)
-
-    return firestore.client()
+    """Return a server Firestore client authenticated through IAM."""
+    return firestore.client(app=init_firebase())
 
 
 def upsert_post(db: firestore.Client, post_data: PostData) -> str:

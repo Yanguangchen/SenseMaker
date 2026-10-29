@@ -3,20 +3,29 @@
 from __future__ import annotations
 
 import asyncio
+import html
 import os
 import sys
-import time
 import traceback
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Callable, Dict, List, Optional
 
 import pandas as pd
 import streamlit as st
 from dotenv import load_dotenv
 
+from modules.auth import require_access
+from modules.config import get_setting
 from modules.database import init_db, mark_post_processed, upsert_post
+from modules.facebook_session import (
+    FacebookSession,
+    capture_facebook_session,
+    check_facebook_session,
+    saved_facebook_user_id,
+)
 from modules.processor import analyze_posts_with_gemini
+from modules.saved_links import library_owner_id, load_saved_links, parse_links, remove_saved_links, save_links
 
 try:
     from modules.scraper import scrape_group
@@ -59,7 +68,7 @@ def _write_results_to_firestore(posts: List[Dict[str, Any]], custom_title: str) 
 
 def _fetch_firestore_posts(status_filter: str, limit: int) -> List[Dict[str, Any]]:
     db = init_db()
-    query = db.collection(os.getenv("FIREBASE_COLLECTION", "raw_posts")).limit(limit)
+    query = db.collection(get_setting("FIREBASE_COLLECTION", "raw_posts")).limit(limit)
     if status_filter != "all":
         query = query.where("status", "==", status_filter)
     docs = query.stream()
@@ -131,11 +140,18 @@ def _run_scrape_sync(url: str, headless: bool, scroll_times: int) -> List[Dict[s
     return asyncio.run(_runner())
 
 
-def _run_multi_scrape_sync(urls: List[str], headless: bool, scroll_times: int) -> List[Dict[str, Any]]:
+def _run_multi_scrape_sync(
+    urls: List[str], headless: bool, scroll_times: int,
+    concurrency: int = 3,
+    on_progress: Optional[Callable[[int, int, str], None]] = None,
+) -> List[Dict[str, Any]]:
     if sys.platform.startswith("win") and hasattr(asyncio, "WindowsProactorEventLoopPolicy"):
         asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
 
     async def _runner() -> List[Dict[str, Any]]:
+        semaphore = asyncio.Semaphore(max(1, concurrency))
+        completed = 0
+
         async def scrape_one(url: str) -> List[Dict[str, Any]]:
             try:
                 rows = await scrape_group(
@@ -160,7 +176,16 @@ def _run_multi_scrape_sync(urls: List[str], headless: bool, scroll_times: int) -
                     }
                 ]
 
-        tasks = [scrape_one(url) for url in urls]
+        async def bounded_scrape(url: str) -> List[Dict[str, Any]]:
+            nonlocal completed
+            async with semaphore:
+                rows = await scrape_one(url)
+                completed += 1
+                if on_progress:
+                    on_progress(completed, len(urls), url)
+                return rows
+
+        tasks = [bounded_scrape(url) for url in urls]
         batches = await asyncio.gather(*tasks)
         merged: List[Dict[str, Any]] = []
         for batch in batches:
@@ -170,56 +195,168 @@ def _run_multi_scrape_sync(urls: List[str], headless: bool, scroll_times: int) -
     return asyncio.run(_runner())
 
 
-def _capture_facebook_storage_state(
-    storage_state_path: str,
-    timeout_seconds: int = 240,
-) -> str:
-    """
-    Open an interactive browser and save Playwright storage state
-    when Facebook login is detected.
-    """
-    if sys.platform.startswith("win") and hasattr(asyncio, "WindowsProactorEventLoopPolicy"):
-        asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
+@st.cache_data(ttl=300, show_spinner=False)
+def _check_facebook_session(path: str, modified: int, size: int) -> FacebookSession:
+    # Recheck whenever login saves a new file, and at least every five minutes.
+    return check_facebook_session(path)
 
-    from playwright.async_api import async_playwright
 
-    if sys.platform.startswith("win") and hasattr(asyncio, "WindowsProactorEventLoopPolicy"):
-        asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
+def _get_facebook_session(path: str) -> FacebookSession:
+    if not saved_facebook_user_id(path):
+        return FacebookSession()
+    if IS_CLOUD:
+        return FacebookSession(status="unavailable")
+    try:
+        info = Path(path).stat()
+    except OSError:
+        return FacebookSession()
+    with st.spinner("Checking Facebook connection…"):
+        return _check_facebook_session(path, info.st_mtime_ns, info.st_size)
 
-    output = Path(storage_state_path or "storage_state.json").expanduser().resolve()
-    output.parent.mkdir(parents=True, exist_ok=True)
 
-    async def _runner() -> str:
-        async with async_playwright() as p:
-            browser = await p.chromium.launch(channel="chrome", headless=False)
-            context = await browser.new_context()
-            page = await context.new_page()
-            await page.goto("https://www.facebook.com/", wait_until="domcontentloaded")
+def _render_facebook_connection() -> FacebookSession:
+    path = str(Path(os.getenv("PLAYWRIGHT_STORAGE_STATE", "").strip() or AUTH_STORAGE_STATE_FILE).expanduser().resolve())
+    session = _get_facebook_session(path)
+    with st.container(border=True, key="facebook_connection"):
+        identity, action = st.columns([3, 1], vertical_alignment="center")
+        if session.status == "connected":
+            os.environ["PLAYWRIGHT_STORAGE_STATE"] = path
+            name = session.name or f"Facebook account {session.user_id}"
+            initials = "".join(word[0] for word in name.split()[:2])
+            identity.markdown(
+                f'<div class="fb-identity"><div class="fb-avatar">{html.escape(initials)}</div>'
+                '<div><p class="fb-label">FACEBOOK</p>'
+                f'<p class="fb-name">{html.escape(name)}</p>'
+                '<p class="fb-detail">Ready to collect posts.</p></div></div>',
+                unsafe_allow_html=True,
+            )
+            action.markdown('<span class="fb-status">Connected</span>', unsafe_allow_html=True)
+        else:
+            identity.markdown(
+                '<div class="fb-identity"><div class="fb-avatar" aria-hidden="true">f</div>'
+                '<div><p class="fb-label">FACEBOOK</p><p class="fb-name">Connect your account</p>'
+                '<p class="fb-detail">Log in once to collect Facebook posts.</p></div></div>',
+                unsafe_allow_html=True,
+            )
+            if action.button(
+                "Log in to Facebook", key="capture_fb_session_btn", type="primary",
+                use_container_width=True, disabled=IS_CLOUD,
+            ):
+                with st.spinner("Finish logging in in the browser window…"):
+                    try:
+                        capture_facebook_session(path, timeout_seconds=AUTH_LOGIN_TIMEOUT_SECONDS)
+                        os.environ["PLAYWRIGHT_STORAGE_STATE"] = path
+                        _check_facebook_session.clear()
+                        st.rerun()
+                    except Exception:
+                        st.error("Facebook login did not finish. Please try again.")
+            if IS_CLOUD:
+                st.caption("Log in from SenseMaker on your computer to collect Facebook posts.")
+            elif session.status == "unavailable":
+                st.caption("We couldn’t confirm your saved session. Log in again to reconnect.")
+    return session
 
-            deadline = time.time() + timeout_seconds
-            logged_in = False
-            while time.time() < deadline:
-                cookies = await context.cookies()
-                if any(
-                    cookie.get("name") == "c_user" and "facebook.com" in cookie.get("domain", "")
-                    for cookie in cookies
-                ):
-                    logged_in = True
-                    break
-                await page.wait_for_timeout(1000)
 
-            if not logged_in:
-                await browser.close()
-                raise RuntimeError(
-                    "Facebook login not detected before timeout. "
-                    "Please log in in the opened browser, then retry."
+def _render_link_workspace(user_email: str) -> tuple[List[str], bool]:
+    owner = library_owner_id(user_email)
+    library_key = f"saved_links_{owner}"
+    selection_key = f"selected_links_{owner}"
+    pending_key = f"next_selected_links_{owner}"
+    input_key = f"new_links_{owner}"
+    clear_key = f"clear_new_links_{owner}"
+    message_key = f"links_message_{owner}"
+
+    def refresh() -> None:
+        try:
+            with st.spinner("Loading saved links…"):
+                urls = load_saved_links(init_db(), user_email)
+            st.session_state[library_key] = {"urls": urls, "error": False}
+        except Exception:
+            previous = st.session_state.get(library_key, {})
+            st.session_state[library_key] = {"urls": previous.get("urls", []), "error": True}
+
+    if library_key not in st.session_state:
+        refresh()
+    library = st.session_state[library_key]
+    saved = library["urls"]
+    saved_set = set(saved)
+    if pending_key in st.session_state:
+        st.session_state[selection_key] = st.session_state.pop(pending_key)
+    # A refresh may include removals made on another device.
+    if selection_key in st.session_state:
+        st.session_state[selection_key] = [url for url in st.session_state[selection_key] if url in saved_set]
+    if st.session_state.pop(clear_key, False):
+        st.session_state[input_key] = ""
+
+    with st.container(border=True, key="link_workspace"):
+        st.subheader("Your links")
+        st.caption("Save sources once, then choose them whenever you want to collect posts.")
+        if message_key in st.session_state:
+            st.success(st.session_state.pop(message_key))
+        if library["error"]:
+            st.warning("Saved links couldn’t be loaded. Refresh to try again, or paste links below.")
+
+        selected = st.multiselect(
+            f"Saved links ({len(saved)})", options=saved, key=selection_key,
+            placeholder="Search and choose saved links", disabled=not saved,
+        )
+        select_action, clear_action, refresh_action = st.columns(3)
+        if select_action.button("Select all", key="select_all_links", use_container_width=True, disabled=not saved):
+            st.session_state[pending_key] = saved.copy()
+            st.rerun()
+        if clear_action.button("Clear selection", key="clear_selected_links", use_container_width=True, disabled=not selected):
+            st.session_state[pending_key] = []
+            st.rerun()
+        if refresh_action.button("Refresh", key="refresh_saved_links", use_container_width=True):
+            refresh()
+            st.rerun()
+
+        if selected and st.button(
+            f"Remove {len(selected)} saved link{'s' if len(selected) != 1 else ''}",
+            key="remove_selected_links", use_container_width=True,
+            help="Removes these links from your library. Collected posts are kept.",
+        ):
+            try:
+                remove_saved_links(init_db(), user_email, selected)
+                removed = set(selected)
+                st.session_state[library_key]["urls"] = [url for url in saved if url not in removed]
+                st.session_state[pending_key] = []
+                st.session_state[message_key] = f"Removed {len(selected)} saved links."
+                st.rerun()
+            except Exception:
+                st.error("Some links couldn’t be removed. Refresh your library and try again.")
+
+        text = st.text_area(
+            "Add links (one per line)", key=input_key, height=160,
+            placeholder="https://www.facebook.com/groups/your-community\nhttps://example.com/news",
+            help="Paste as many links as you need. You can collect them now or save them for later.",
+        )
+        pasted, invalid = parse_links(text)
+        if invalid:
+            st.error("Correct the invalid links before continuing. Use one http or https web link per line.")
+            st.code("\n".join(invalid[:5]), language=None)
+        save_clicked = st.button("Save links", key="save_source_links", use_container_width=True)
+        if save_clicked and not pasted and not invalid:
+            st.info("Add at least one link to save.")
+        if save_clicked and pasted and not invalid:
+            new_links = [url for url in pasted if url not in saved_set]
+            try:
+                if new_links:
+                    save_links(init_db(), user_email, new_links)
+                st.session_state[library_key]["urls"] = list(dict.fromkeys(saved + pasted))
+                st.session_state[pending_key] = list(dict.fromkeys(selected + pasted))
+                st.session_state[clear_key] = True
+                st.session_state[message_key] = (
+                    f"Saved {len(new_links)} new links. Your links are selected and ready to collect."
+                    if new_links else "These links are already saved. They’re selected and ready to collect."
                 )
+                st.rerun()
+            except Exception:
+                st.error("Some links couldn’t be saved. Refresh your library and retry; saved links are kept.")
 
-            await context.storage_state(path=str(output))
-            await browser.close()
-        return str(output)
-
-    return asyncio.run(_runner())
+    targets = list(dict.fromkeys(selected + pasted))
+    st.caption(f"{len(targets)} link{'s' if len(targets) != 1 else ''} ready to collect")
+    return targets, not invalid
 
 
 SENTIMENT_COLORS = {
@@ -333,82 +470,185 @@ def _bridge_secrets_to_env() -> None:
             os.environ[env_key] = str(secrets[secret_key])
 
 
+_UI_THEME = """
+<style>
+@import url("https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700&display=swap");
+
+.stApp,
+.stApp button,
+.stApp input,
+.stApp textarea,
+.stApp select,
+.stApp label,
+.stApp p,
+.stApp span,
+.stApp div,
+.stApp h1,
+.stApp h2,
+.stApp h3,
+.stApp h4,
+.stApp h5,
+.stApp h6,
+.stApp li,
+.stApp a,
+.stApp summary {
+  font-family: Outfit, sans-serif;
+}
+
+button[data-testid^="stBaseButton-"],
+a[data-testid^="stBaseLinkButton-"],
+[data-testid="stDownloadButton"] button,
+[data-testid="stExpander"] summary,
+button[data-baseweb="tab"],
+button[role="tab"],
+[data-baseweb="input"],
+[data-baseweb="textarea"],
+[data-baseweb="select"] > div,
+[data-testid="stCheckbox"] label,
+[data-testid="stRadio"] label,
+[data-testid="stToggle"] label,
+[data-testid="stSlider"] [role="slider"],
+[data-testid="stFileUploaderDropzone"],
+[data-testid="stMultiSelect"] [data-baseweb="tag"],
+[data-baseweb="menu"] [role="option"],
+a[href] {
+  transition: transform 180ms cubic-bezier(0.22, 1, 0.36, 1), box-shadow 180ms ease, background-color 180ms ease, border-color 180ms ease, color 180ms ease, filter 180ms ease, opacity 180ms ease;
+}
+
+button[data-testid^="stBaseButton-"]:hover:not(:disabled),
+a[data-testid^="stBaseLinkButton-"]:hover,
+[data-testid="stDownloadButton"] button:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 18px rgba(38, 39, 48, 0.14);
+  filter: brightness(1.04);
+}
+
+button[data-testid^="stBaseButton-"]:active:not(:disabled),
+a[data-testid^="stBaseLinkButton-"]:active,
+[data-testid="stDownloadButton"] button:active {
+  transform: translateY(0) scale(0.98);
+  box-shadow: 0 2px 6px rgba(38, 39, 48, 0.1);
+}
+
+button[data-testid="stBaseButton-header"]:hover:not(:disabled),
+button[data-testid="stBaseButton-headerNoPadding"]:hover:not(:disabled),
+button[data-testid="stBaseButton-minimal"]:hover:not(:disabled),
+button[data-testid="stBaseButton-borderlessIcon"]:hover:not(:disabled),
+button[data-testid="stBaseButton-borderlessIconActive"]:hover:not(:disabled) {
+  transform: scale(1.08);
+  box-shadow: none;
+  filter: none;
+  background-color: rgba(74, 144, 217, 0.12);
+}
+
+button[data-baseweb="tab"]:hover,
+button[role="tab"]:hover,
+[data-testid="stExpander"] summary:hover {
+  transform: none;
+  box-shadow: none;
+  background-color: rgba(74, 144, 217, 0.1);
+  color: #4A90D9;
+}
+
+[data-baseweb="input"]:hover,
+[data-baseweb="textarea"]:hover,
+[data-baseweb="select"]:hover > div,
+[data-testid="stFileUploaderDropzone"]:hover {
+  border-color: #4A90D9 !important;
+  box-shadow: 0 0 0 3px rgba(74, 144, 217, 0.16);
+}
+
+[data-testid="stCheckbox"]:hover label,
+[data-testid="stRadio"]:hover label,
+[data-testid="stToggle"]:hover label,
+[data-testid="stMultiSelect"] [data-baseweb="tag"]:hover,
+[data-baseweb="menu"] [role="option"]:hover {
+  color: #4A90D9;
+}
+
+[data-testid="stSlider"]:hover [role="slider"] {
+  transform: scale(1.16);
+  box-shadow: 0 0 0 6px rgba(74, 144, 217, 0.18);
+}
+
+a[href]:hover { opacity: 0.78; }
+
+/* Comfortable tap targets and a persistent Facebook connection card. */
+.stButton > button, .stLinkButton > a { min-height: 48px; border-radius: 12px; font-weight: 600; }
+[data-baseweb="tab"] { min-height: 48px; padding-inline: 20px; }
+.stTextInput input, .stTextArea textarea { font-size: 16px; }
+.st-key-facebook_connection { border-radius: 18px; }
+.fb-identity { display: flex; align-items: center; gap: 14px; padding: 4px 0; }
+.fb-avatar { display: grid; place-items: center; flex: 0 0 48px; height: 48px;
+  border-radius: 14px; background: #edf3ff; color: #165dcc; font-size: 20px; font-weight: 700; }
+.st-key-facebook_connection .fb-label { margin: 0 0 3px; font-size: 12px; font-weight: 700; letter-spacing: .08em; color: #56657a; }
+.st-key-facebook_connection .fb-name { margin: 0; font-size: 18px; font-weight: 650; line-height: 1.4; overflow-wrap: anywhere; }
+.st-key-facebook_connection .fb-detail { margin: 4px 0 0; color: #56657a; font-size: 14px; }
+.fb-status { display: inline-flex; align-items: center; gap: 8px; padding: 9px 14px;
+  border-radius: 999px; background: #eaf7ef; color: #17633b; font-size: 14px; font-weight: 600; }
+.fb-status::before { content: ''; width: 8px; height: 8px; border-radius: 50%; background: #25804d; }
+@media (max-width: 640px) {
+  [data-baseweb="tab"] { padding-inline: 14px; }
+  .block-container { padding-inline: 20px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .stApp button,
+  .stApp a,
+  .stApp summary,
+  .stApp [data-baseweb="input"],
+  .stApp [data-baseweb="select"],
+  .stApp [role="slider"] {
+    transition: none !important;
+    transform: none !important;
+  }
+}
+</style>
+"""
+
+
+def _apply_ui_theme() -> None:
+    st.markdown(_UI_THEME, unsafe_allow_html=True)
+
+
 def main() -> None:
     load_dotenv()
     _bridge_secrets_to_env()
-    st.set_page_config(page_title="Project Sentinel", layout="wide")
+    st.set_page_config(page_title="SenseMaker", layout="wide")
+    _apply_ui_theme()
+    user_email = require_access()
+    st.title("SenseMaker")
     scrape_tab, gemini_tab = st.tabs(["Scrap data", "Sentiment Analysis"])
 
     with scrape_tab:
-        st.caption("Use this to test scraper output directly from the dashboard.")
+        facebook_session = _render_facebook_connection()
 
-        with st.expander("log into facebook", expanded=False):
-            st.caption("Essential step for scrapping facebook posts")
-            st.caption(
-                "Capture authenticated Playwright session. A Chrome window opens; "
-                "log in to Facebook there. Session saves automatically once login is detected."
-            )
-            if IS_CLOUD:
-                st.warning(
-                    "Facebook login capture requires a local browser and is not available "
-                    "on Streamlit Cloud. Run this step locally instead."
-                )
-            else:
-                if st.button("Capture Facebook Login Session", key="capture_fb_session_btn"):
-                    with st.spinner("Waiting for Facebook login in opened browser..."):
-                        try:
-                            auth_state_path = os.getenv("PLAYWRIGHT_STORAGE_STATE", AUTH_STORAGE_STATE_FILE).strip()
-                            saved_path = _capture_facebook_storage_state(
-                                storage_state_path=auth_state_path or AUTH_STORAGE_STATE_FILE,
-                                timeout_seconds=AUTH_LOGIN_TIMEOUT_SECONDS,
-                            )
-                            os.environ["PLAYWRIGHT_STORAGE_STATE"] = saved_path
-                            st.toast("Facebook auth session captured.")
-                        except Exception as exc:
-                            error_text = str(exc).strip() or repr(exc)
-                            st.error(f"Auth capture failed: {error_text}")
-                            with st.expander("Auth Error Details"):
-                                st.code(traceback.format_exc())
+        target_urls, links_valid = _render_link_workspace(user_email)
 
-        urls_text = st.text_area(
-            "Paste up to 5 links (one per line)",
-            value="https://sg.news.yahoo.com/bangladesh-pm-tarique-rahman-lawmakers-052056107.html",
-            height=140,
-        )
-        input_urls = [line.strip() for line in urls_text.splitlines() if line.strip()]
-        unique_urls: List[str] = []
-        seen = set()
-        for item in input_urls:
-            if item in seen:
-                continue
-            seen.add(item)
-            unique_urls.append(item)
-        target_urls = unique_urls[:5]
-        if len(unique_urls) > 5:
-            st.warning("Only first 5 links will be used in one run.")
-
-        storage_state_path = os.getenv("PLAYWRIGHT_STORAGE_STATE", "").strip()
-        if any("facebook.com" in u.lower() for u in target_urls) and not storage_state_path:
-            st.warning(
-                "Facebook usually requires authenticated session context. "
-                "Set PLAYWRIGHT_STORAGE_STATE in .env for better results."
-            )
+        if any("facebook.com" in u.lower() for u in target_urls) and facebook_session.status != "connected":
+            st.info("Connect your Facebook account above before collecting Facebook posts.")
         tc1, tc2 = st.columns(2)
         use_headless = tc1.checkbox("Headless Browser", value=True)
         scroll_times = tc2.slider("Scroll Iterations", min_value=1, max_value=50, value=10)
 
-        if st.button("Run Scrape Test", type="primary"):
-            if not target_urls:
+        if st.button("Collect posts", type="primary", use_container_width=True):
+            if not links_valid:
+                st.error("Correct the invalid links above before collecting posts.")
+            elif not target_urls:
                 st.error("Please provide at least one URL.")
             else:
                 st.session_state["last_scrape_urls"] = target_urls
                 st.session_state["last_scrape_error"] = ""
+                progress = st.progress(0, text=f"Starting collection for {len(target_urls)} links…")
                 with st.spinner("Running scraper..."):
                     try:
                         results = _run_multi_scrape_sync(
                             urls=target_urls,
                             headless=use_headless,
                             scroll_times=scroll_times,
+                            on_progress=lambda done, total, _url: progress.progress(
+                                done / total, text=f"Processed {done} of {total} links"
+                            ),
                         )
                         st.session_state["last_scrape_results"] = results
                     except Exception as exc:
@@ -422,8 +662,8 @@ def main() -> None:
         scrape_error = st.session_state.get("last_scrape_error", "")
         if scrape_results is not None:
             if scrape_urls:
-                st.write("**Last target URLs:**")
-                st.code("\n".join(scrape_urls))
+                with st.expander(f"Sources in the last collection ({len(scrape_urls)})"):
+                    st.code("\n".join(scrape_urls))
             if scrape_error:
                 st.caption(f"Last error: {scrape_error}")
             st.write(f"**Posts found:** {len(scrape_results)}")
