@@ -9,6 +9,7 @@ from unittest.mock import patch
 from streamlit.testing.v1 import AppTest
 
 from modules.saved_links import load_saved_links, parse_links, remove_saved_links, save_links
+from modules.reddit import CAMBODIA_URL
 
 
 class MemoryCollection:
@@ -114,22 +115,23 @@ class LinkWorkspaceTests(unittest.TestCase):
         with patch("dashboard.init_db", return_value=db):
             app = AppTest.from_string(self.script).run()
             app.text_area[0].input("\n".join(urls + urls[:1])).run()
-            self.assertEqual(json.loads(app.json[0].value), urls)
+            self.assertEqual(json.loads(app.json[0].value), [CAMBODIA_URL] + urls)
             app.button(key="save_source_links").click().run()
             self.assertFalse(list(app.exception))
             self.assertEqual(app.text_area[0].value, "")
-            self.assertEqual(len(app.multiselect[0].value), 40)
+            self.assertEqual(len(app.multiselect[0].value), 41)
             self.assertEqual(len(db.records), 40)
 
             # A new session reads its sources from persistent storage.
             reopened = AppTest.from_string(self.script).run()
-            self.assertEqual(len(reopened.multiselect[0].options), 40)
+            self.assertEqual(len(reopened.multiselect[0].options), 41)
             self.assertEqual(reopened.text_area[0].value, "")
             reopened.button(key="select_all_links").click().run()
-            self.assertEqual(set(json.loads(reopened.json[0].value)), set(urls))
+            self.assertEqual(set(json.loads(reopened.json[0].value)), set([CAMBODIA_URL] + urls))
             reopened.button(key="remove_selected_links").click().run()
             self.assertFalse(list(reopened.exception))
-            self.assertEqual(reopened.multiselect[0].options, [])
+            self.assertEqual(reopened.multiselect[0].options, [CAMBODIA_URL])
+            self.assertEqual(reopened.multiselect[0].value, [CAMBODIA_URL])
             self.assertEqual(len(db.records), 0)
 
     def test_invalid_links_cannot_be_saved(self):
@@ -141,15 +143,17 @@ class LinkWorkspaceTests(unittest.TestCase):
             self.assertEqual(len(app.error), 1)
             self.assertEqual(db.records, {})
 
-    def test_cambodia_shortcut_saves_and_selects_a_reusable_source(self):
-        from modules.reddit import CAMBODIA_URL
+    def test_cambodia_is_selected_by_default_and_can_be_deselected(self):
         db = MemoryDB()
         with patch("dashboard.init_db", return_value=db):
             app = AppTest.from_string(self.script).run()
-            app.button(key="add_cambodia_source").click().run()
             self.assertFalse(list(app.exception))
             self.assertEqual(json.loads(app.json[0].value), [CAMBODIA_URL])
-            self.assertEqual(load_saved_links(db, "owner@example.com"), [CAMBODIA_URL])
+            self.assertFalse(any(button.key == "add_cambodia_source" for button in app.button))
+            app.button(key="clear_selected_links").click().run()
+            app.button(key="refresh_saved_links").click().run()
+            self.assertEqual(json.loads(app.json[0].value), [])
+            self.assertEqual(app.multiselect[0].options, [CAMBODIA_URL])
 
 
 class LargeScrapeTests(unittest.TestCase):

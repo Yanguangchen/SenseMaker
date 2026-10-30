@@ -59,7 +59,7 @@ evaluation with your configured Gemini key and representative, human-labeled dat
 
 ## Reddit collection: r/cambodia
 
-1. Click **Add r/cambodia** in **Your links** to save and select the subreddit.
+1. **r/cambodia** is included and selected by default in **Your links**. Deselect it when you only want to collect other sources.
 2. Choose up to **500 posts per source** and **0–100 sampled comments per post**.
 3. Click **Collect posts**, inspect the results and save them to Firestore.
 4. Select saved records in **Sentiment Analysis**, set your watchlist and run analysis.

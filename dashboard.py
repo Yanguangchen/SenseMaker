@@ -314,6 +314,7 @@ def _render_link_workspace(user_email: str) -> tuple[List[str], bool]:
     input_key = f"new_links_{owner}"
     clear_key = f"clear_new_links_{owner}"
     message_key = f"links_message_{owner}"
+    defaults_key = f"default_links_initialized_{owner}"
 
     def refresh() -> None:
         try:
@@ -327,8 +328,12 @@ def _render_link_workspace(user_email: str) -> tuple[List[str], bool]:
     if library_key not in st.session_state:
         refresh()
     library = st.session_state[library_key]
-    saved = library["urls"]
+    saved = list(dict.fromkeys([CAMBODIA_URL] + library["urls"]))
     saved_set = set(saved)
+    if not st.session_state.get(defaults_key):
+        st.session_state[selection_key] = list(dict.fromkeys(
+            st.session_state.get(selection_key, []) + [CAMBODIA_URL]))
+        st.session_state[defaults_key] = True
     if pending_key in st.session_state:
         st.session_state[selection_key] = st.session_state.pop(pending_key)
     # A refresh may include removals made on another device.
@@ -339,24 +344,14 @@ def _render_link_workspace(user_email: str) -> tuple[List[str], bool]:
 
     with st.container(border=True, key="link_workspace"):
         st.subheader("Your links")
-        st.caption("Save sources once, then choose them whenever you want to collect posts.")
-        if st.button("Add r/cambodia", key="add_cambodia_source", use_container_width=True):
-            try:
-                save_links(init_db(), user_email, [CAMBODIA_URL])
-                st.session_state[library_key]["urls"] = list(dict.fromkeys(saved + [CAMBODIA_URL]))
-                st.session_state[pending_key] = list(dict.fromkeys(
-                    st.session_state.get(selection_key, []) + [CAMBODIA_URL]))
-                st.session_state[message_key] = "r/cambodia saved and selected."
-                st.rerun()
-            except Exception:
-                st.error("Couldn’t save r/cambodia. Refresh and try again.")
+        st.caption("r/cambodia is included by default. Save other sources here and choose which to collect.")
         if message_key in st.session_state:
             st.success(st.session_state.pop(message_key))
         if library["error"]:
             st.warning("Saved links couldn’t be loaded. Refresh to try again, or paste links below.")
 
         selected = st.multiselect(
-            f"Saved links ({len(saved)})", options=saved, key=selection_key,
+            f"Sources ({len(saved)})", options=saved, key=selection_key,
             placeholder="Search and choose saved links", disabled=not saved,
         )
         select_action, clear_action, refresh_action = st.columns(3)
@@ -370,17 +365,18 @@ def _render_link_workspace(user_email: str) -> tuple[List[str], bool]:
             refresh()
             st.rerun()
 
-        if selected and st.button(
-            f"Remove {len(selected)} saved link{'s' if len(selected) != 1 else ''}",
+        removable = [url for url in selected if url != CAMBODIA_URL]
+        if removable and st.button(
+            f"Remove {len(removable)} saved link{'s' if len(removable) != 1 else ''}",
             key="remove_selected_links", use_container_width=True,
             help="Removes these links from your library. Collected posts are kept.",
         ):
             try:
-                remove_saved_links(init_db(), user_email, selected)
-                removed = set(selected)
+                remove_saved_links(init_db(), user_email, removable)
+                removed = set(removable)
                 st.session_state[library_key]["urls"] = [url for url in saved if url not in removed]
-                st.session_state[pending_key] = []
-                st.session_state[message_key] = f"Removed {len(selected)} saved links."
+                st.session_state[pending_key] = [url for url in selected if url not in removed]
+                st.session_state[message_key] = f"Removed {len(removable)} saved links."
                 st.rerun()
             except Exception:
                 st.error("Some links couldn’t be removed. Refresh your library and try again.")
