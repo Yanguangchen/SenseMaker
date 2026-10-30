@@ -8,7 +8,10 @@ from unittest.mock import patch
 
 from streamlit.testing.v1 import AppTest
 
-from modules.processor import DEFAULT_MODEL, _generate_content, analyze_posts_with_gemini
+from modules.processor import _generate_content, analyze_posts_with_gemini
+from modules.gemini import GeminiError
+
+TEST_MODEL = "models/gemini-test-flash"
 from modules.signals import MAX_TEXT, is_flagged, normalize_analysis
 
 
@@ -73,19 +76,24 @@ class EvidenceTests(unittest.TestCase):
 
 
 class AnalysisBatchTests(unittest.TestCase):
+    def setUp(self):
+        resolver = patch("modules.processor.resolve_model", return_value=TEST_MODEL)
+        resolver.start()
+        self.addCleanup(resolver.stop)
+
     def test_rest_transport_uses_request_local_key_and_rejects_partial_generation(self):
         reply = {"candidates": [{"finishReason": "STOP", "content": {"parts": [{"text": "{}"}]}}]}
         from unittest.mock import MagicMock
         response = MagicMock()
         response.__enter__.side_effect = lambda: io.StringIO(json.dumps(reply))
         with patch("modules.processor.urlopen", return_value=response) as request:
-            self.assertEqual(_generate_content("prompt", "local-key", DEFAULT_MODEL), "{}")
+            self.assertEqual(_generate_content("prompt", "local-key", TEST_MODEL), "{}")
             sent = request.call_args.args[0]
             self.assertEqual(sent.get_header("X-goog-api-key"), "local-key")
             self.assertNotIn("local-key", sent.full_url)
             reply["candidates"][0]["finishReason"] = "MAX_TOKENS"
-            with self.assertRaisesRegex(ValueError, "complete"):
-                _generate_content("prompt", "local-key", DEFAULT_MODEL)
+            with self.assertRaisesRegex(GeminiError, "complete"):
+                _generate_content("prompt", "local-key", TEST_MODEL)
 
     def posts(self, count):
         return [{"_id": f"real-{i}", "raw_text": "Boycott the Thai project."} for i in range(count)]
@@ -98,9 +106,11 @@ class AnalysisBatchTests(unittest.TestCase):
             result = analyze_posts_with_gemini(self.posts(2), api_key="test")
         self.assertEqual(result["real-0"]["translation"], "first")
         with patch("modules.processor._generate_content", return_value=json.dumps({"results": [assessment("wrong"), assessment("wrong2")]})):
-            self.assertEqual(analyze_posts_with_gemini(self.posts(2), api_key="test"), {})
+            with self.assertRaisesRegex(GeminiError, "record IDs"):
+                analyze_posts_with_gemini(self.posts(2), api_key="test")
         with patch("modules.processor._generate_content", return_value=json.dumps({"results": [assessment(), assessment()]})):
-            self.assertEqual(analyze_posts_with_gemini(self.posts(1), api_key="test"), {})
+            with self.assertRaisesRegex(GeminiError, "record IDs"):
+                analyze_posts_with_gemini(self.posts(1), api_key="test")
 
     def test_large_jobs_batch_and_preserve_success_when_one_batch_fails(self):
         replies = [json.dumps({"results": [assessment(f"post_{i}") for i in range(1, 9)]}),

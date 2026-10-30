@@ -251,7 +251,7 @@ Optional:
 
 ```env
 PLAYWRIGHT_STORAGE_STATE=path/to/storage_state.json
-GEMINI_MODEL=models/gemini-3.6-flash
+GEMINI_MODEL=auto
 ```
 
 Notes:
@@ -262,7 +262,7 @@ Notes:
   The dashboard also needs `FIREBASE_API_KEY`, `FIREBASE_AUTH_DOMAIN`,
   `FIREBASE_APP_ID` and `FAQ_EDITOR_EMAILS` for Google sign-in. Copy these values
   from OYOSHI; keep the service-account private key on the server.
-- `GEMINI_MODEL` defaults to `models/gemini-3.6-flash` if not set.
+- `GEMINI_MODEL` defaults to `auto`: Google’s model catalogue is checked using the supplied API key before each run.
 
 ## Run the Dashboard (Local)
 
@@ -358,7 +358,7 @@ Known limitations:
 - Exact ID matching; unknown and duplicate IDs are rejected rather than assigned to another record
 - Robust JSON extraction from Gemini responses (handles markdown fences, surrounding text)
 - Live status callback for UI progress updates during retries
-- Default model: `models/gemini-3.6-flash` (configurable via UI or `GEMINI_MODEL` env var)
+- Default model: `auto` (an available stable Flash model is preferred); use **Refresh available models** to choose an explicit text model returned by Google. Bare names and `models/` names are both accepted in server configuration.
 
 Analysis output per post:
 - `translation` — English translation (unchanged if already English)
@@ -496,8 +496,25 @@ If it still fails:
 - Check your [Google AI Studio](https://aistudio.google.com/) quota dashboard
 - Consider enabling billing for higher rate limits
 
-### Gemini `processed=0, error=N`
+### Gemini analysis fails or a model is unavailable
 
-This previously occurred because Gemini could not match MD5 hash IDs back to posts.
-The processor sends simple index keys (`post_1`, `post_2`) and accepts only matching, unique IDs. It never assigns results by position.
-If it recurs, try processing fewer records at a time.
+The dashboard now displays the actual Google HTTP error and redacted diagnostic,
+or a specific content-blocking, output-length, JSON/ID validation or time-budget error.
+It no longer assumes that every failure is caused by unmatched record IDs.
+
+1. Enter your Gemini API key and click **Refresh available models**.
+2. Choose **Automatic** or an available text model and retry your selection.
+3. For HTTP 400/401/403, check the key, API restrictions and project permissions.
+4. For HTTP 404, refresh models; the chosen model may not support `generateContent`
+   for your key/API version. For HTTP 429, check quota and billing before retrying.
+
+Automatic selection prefers stable Flash text models returned by Google's
+[`models.list` API](https://ai.google.dev/api/models). It never silently selects a
+Pro model. The catalogue confirms API-method availability, not remaining quota or
+support for every generation option. An explicit model must appear in that catalogue.
+Model/key validation happens before saved records are changed. Successful batches
+survive later failures, with diagnostics shown alongside partial results. API keys
+are sent in headers and redacted from Google error messages.
+
+Google lists Gemini 2.0 Flash as retired; consult its
+[model lifecycle](https://ai.google.dev/gemini-api/docs/deprecations) for current dates.

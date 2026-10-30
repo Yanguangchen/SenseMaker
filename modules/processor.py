@@ -5,11 +5,10 @@ from __future__ import annotations
 import json
 import logging
 import os
-import re
 import ssl
 import time
 from typing import Any, Dict, List, Optional
-from urllib.error import HTTPError
+from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 import certifi
@@ -19,6 +18,7 @@ from firebase_admin.firestore import Client
 from modules.database import get_pending_posts, mark_post_processed
 from modules.signals import content_sources, is_analyzable, normalize_analysis, watch_terms
 from modules.config import get_setting
+from modules.gemini import AUTO_MODEL, GeminiError, api_error, normalize_model_name, redact, resolve_model
 
 Analysis = Dict[str, Any]
 log = logging.getLogger(__name__)
@@ -27,14 +27,15 @@ MAX_RETRIES = 5
 INITIAL_BACKOFF_S = 2.0
 
 
-DEFAULT_MODEL = "models/gemini-3.6-flash"
+DEFAULT_MODEL = AUTO_MODEL
 BATCH_SIZE = 8
 
 
 def _generate_content(prompt: str, api_key: str, model_name: str, timeout: float = 90) -> str:
     """Request-local credentials avoid sharing one user's key across sessions."""
-    if not re.fullmatch(r"models/[A-Za-z0-9._-]+", model_name):
-        raise ValueError("Use a model name such as models/gemini-3.6-flash.")
+    model_name = normalize_model_name(model_name)
+    if model_name == AUTO_MODEL:
+        raise GeminiError("Resolve an available model before generating an analysis.")
     body = {"contents": [{"role": "user", "parts": [{"text": prompt}]}],
             "generationConfig": {"responseMimeType": "application/json"}}
     request = Request(
@@ -46,10 +47,21 @@ def _generate_content(prompt: str, api_key: str, model_name: str, timeout: float
         with urlopen(request, timeout=timeout, context=ssl.create_default_context(cafile=certifi.where())) as response:
             result = json.load(response)
     except HTTPError as exc:
-        raise RuntimeError(f"Gemini returned HTTP {exc.code}.") from None
+        raise api_error(exc, api_key) from None
+    except (URLError, TimeoutError):
+        raise GeminiError("The Gemini request timed out or could not connect. Retry a smaller selection.") from None
+    except ValueError:
+        raise GeminiError("Google returned an invalid API response. Try again later.") from None
+    if not isinstance(result, dict):
+        raise GeminiError("Google returned an invalid API response.")
     candidates = result.get("candidates", [])
-    if not candidates or candidates[0].get("finishReason") != "STOP":
-        raise ValueError("Gemini did not return a complete analysis.")
+    if not candidates:
+        reason = redact(str(result.get("promptFeedback", {}).get("blockReason", "no candidates")), api_key)
+        raise GeminiError(f"Gemini returned no analysis ({reason}). Review the selected content before retrying.")
+    finish = candidates[0].get("finishReason", "UNKNOWN")
+    if finish != "STOP":
+        hint = "Try fewer or shorter records." if finish == "MAX_TOKENS" else "Review the selected content before retrying."
+        raise GeminiError(f"Gemini did not return a complete analysis (finish reason: {redact(str(finish), api_key)}). {hint}")
     return "".join(part.get("text", "") for part in candidates[0].get("content", {}).get("parts", [])
                    if not part.get("thought"))
 
@@ -131,7 +143,14 @@ def _extract_json_object(text: str) -> Dict[str, Any]:
 def _is_rate_limit_error(exc: Exception) -> bool:
     """Return True if the exception is a retryable 429 / ResourceExhausted error."""
     msg = str(exc).lower()
-    return "429" in msg or "resource exhausted" in msg or "resourceexhausted" in msg
+    return (isinstance(exc, GeminiError) and exc.retryable) or "429" in msg or "resource exhausted" in msg or "resourceexhausted" in msg
+
+
+class AnalysisResults(dict):
+    """Keep successful records and actionable errors for partially completed runs."""
+    def __init__(self):
+        super().__init__()
+        self.errors: list[str] = []
 
 
 def analyze_posts_with_gemini(
@@ -171,12 +190,18 @@ def analyze_posts_with_gemini(
         if is_analyzable(post):
             selected.append(post)
     targets = list(dict.fromkeys(str(t).strip() for t in (targets or []) if str(t).strip()))[:100]
-    target_model = (model_name or "").strip() or DEFAULT_MODEL
-    out: Dict[str, Analysis] = {}
+    if not selected:
+        return {}
+    _status("Checking available Gemini models…")
+    target_model = resolve_model(gemini_key, model_name)
+    _status(f"Using {target_model}.")
+    out = AnalysisResults()
     deadline = time.monotonic() + 180
     for offset in range(0, len(selected), BATCH_SIZE):
         if time.monotonic() >= deadline - 1:
-            _status("Analysis time budget reached. Completed results are kept; retry the remaining error records.")
+            message = "Analysis time budget reached. Completed results are kept; retry the remaining error records."
+            out.errors.append(message)
+            _status(message)
             break
         batch = selected[offset:offset + BATCH_SIZE]
         index_map = {f"post_{i}": p["_id"] for i, p in enumerate(batch, 1)}
@@ -198,7 +223,7 @@ def analyze_posts_with_gemini(
                         wait = INITIAL_BACKOFF_S * (2 ** (attempt - 1))
                         if wait + 1 >= deadline - time.monotonic():
                             raise TimeoutError("Analysis time budget reached.") from None
-                        _status(f"Rate limited; retrying in {wait:.0f}s…")
+                        _status(f"Temporary API error; retrying in {wait:.0f}s…")
                         time.sleep(wait)
                     else:
                         raise
@@ -224,13 +249,27 @@ def analyze_posts_with_gemini(
                 doc_id = index_map[key]
                 try:
                     out[doc_id] = normalize_analysis(item, by_id[doc_id], targets, target_model)
-                except ValueError:
-                    _status("A result failed validation and must be retried.")
-        except Exception:
-            # Completed batches survive a later API failure; the caller marks missing records as errors.
-            log.warning("Analysis batch failed", exc_info=False)
-            _status("This batch could not be analyzed. Check model access and quota, then retry its error records.")
+                except (ValueError, TypeError):
+                    pass
+            missing = len(batch) - sum(doc_id in out for doc_id in by_id)
+            if missing:
+                message = (f"{missing} of {len(batch)} responses had missing/duplicate record IDs or an invalid "
+                           "analysis structure. Retry those error records in a smaller selection.")
+                out.errors.append(message)
+                _status(message)
+        except Exception as exc:
+            # Preserve completed batches and report the actual failure without exposing keys.
+            if isinstance(exc, (GeminiError, ValueError, TimeoutError)):
+                message = redact(str(exc), gemini_key)
+            else:
+                message = "The analysis request failed unexpectedly. Retry, or check the server connection."
+            out.errors.append(message)
+            _status(message)
+            if isinstance(exc, GeminiError) and exc.status_code in {400, 401, 403, 404}:
+                break
     _status(f"Validated {len(out)} of {len(posts)} record(s).")
+    if not out and out.errors:
+        raise GeminiError(" ".join(dict.fromkeys(out.errors)))
     return out
 
 

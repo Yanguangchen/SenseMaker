@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import asyncio
 import html
+import hashlib
 import os
 import sys
-import traceback
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
@@ -25,6 +25,7 @@ from modules.facebook_session import (
     saved_facebook_user_id,
 )
 from modules.processor import DEFAULT_MODEL, analyze_posts_with_gemini
+from modules.gemini import AUTO_MODEL, GeminiError, list_text_models, normalize_model_name, redact
 from modules.reddit import CAMBODIA_URL, is_reddit_url, reddit_configured
 from modules.signals import NON_CONTENT_TYPES, SIGNAL_LABELS, is_analyzable, is_flagged, watch_terms
 from modules.saved_links import library_owner_id, load_saved_links, parse_links, remove_saved_links, save_links
@@ -129,7 +130,45 @@ def _process_selected_firestore_posts(
         else:
             mark_post_processed(db, doc_id=doc_id, analysis=None, status="error")
             errored += 1
-    return {"processed": processed, "error": errored, "analyses": analyses}
+    return {"processed": processed, "error": errored, "analyses": analyses,
+            "errors": list(getattr(analysis_by_id, "errors", []))}
+
+
+def _render_gemini_settings() -> str:
+    api_key = st.text_input("Gemini API key", value=os.getenv("GEMINI_KEY", ""),
+                            type="password", help="Used only for your Gemini requests.")
+    fingerprint = hashlib.sha256(api_key.strip().encode()).hexdigest()
+    if st.session_state.get("gemini_catalog_key") != fingerprint:
+        st.session_state["gemini_catalog_key"] = fingerprint
+        st.session_state.pop("gemini_available_models", None)
+        st.session_state.pop("gemini_catalog_error", None)
+    if st.button("Refresh available models", key="refresh_gemini_models", use_container_width=True):
+        try:
+            with st.spinner("Checking models available to this API key…"):
+                st.session_state["gemini_available_models"] = list_text_models(api_key.strip())
+            st.session_state.pop("gemini_catalog_error", None)
+        except GeminiError as exc:
+            st.session_state.pop("gemini_available_models", None)
+            st.session_state["gemini_catalog_error"] = str(exc)
+    if st.session_state.get("gemini_catalog_error"):
+        st.error(st.session_state["gemini_catalog_error"])
+    available = st.session_state.get("gemini_available_models")
+    options = [AUTO_MODEL] + (available or [])
+    try:
+        current = normalize_model_name(st.session_state.get("gemini_model_name", os.getenv("GEMINI_MODEL", DEFAULT_MODEL)))
+    except GeminiError:
+        current = AUTO_MODEL
+    if current not in options:
+        if available is None:
+            options.append(current)  # Preserve explicit settings until Google validates them.
+        else:
+            st.info(f"{current} was not returned by Google. Switched to Automatic.")
+            current = AUTO_MODEL
+    st.session_state["gemini_model_name"] = current
+    st.selectbox("Gemini model", options, key="gemini_model_name",
+                 format_func=lambda name: "Automatic · available Flash model" if name == AUTO_MODEL else name.removeprefix("models/"))
+    st.caption("Automatic checks the available models before analysis. Model availability does not guarantee remaining quota.")
+    return api_key
 
 
 def _run_scrape_sync(url: str, headless: bool, scroll_times: int) -> List[Dict[str, Any]]:
@@ -782,18 +821,7 @@ def main() -> None:
         gc1, gc2 = st.columns([1, 1])
         status_filter = gc1.selectbox("Record status", options=["all", "pending", "processed", "error"], index=0)
         load_limit = gc2.slider("Load limit", min_value=1, max_value=200, value=50)
-        gemini_key_input = st.text_input(
-            "Gemini API key",
-            value=os.getenv("GEMINI_KEY", ""),
-            type="password",
-            help="Uses this key for Gemini analysis.",
-        )
-        st.text_input(
-            "Gemini model",
-            value=os.getenv("GEMINI_MODEL", DEFAULT_MODEL),
-            key="gemini_model_name",
-            help="Model identifier, e.g. models/gemini-3.6-flash.",
-        )
+        gemini_key_input = _render_gemini_settings()
 
         # --- Load records ---
         if st.button("Load records from Firestore", key="load_firestore_records_btn"):
@@ -869,16 +897,17 @@ def main() -> None:
                                 f"Done — {summary['processed']} processed, "
                                 f"{summary['error']} error(s)"
                             ),
-                            state="complete",
+                            state="error" if summary["error"] else "complete",
                         )
                     except Exception as exc:
-                        error_text = str(exc).strip() or repr(exc)
+                        error_text = redact(str(exc).strip() or "Analysis failed. Please try again.", gemini_key_input.strip())
                         status_container.update(
                             label=f"Failed: {error_text}",
                             state="error",
                         )
-                        with st.expander("Error details"):
-                            st.code(traceback.format_exc())
+                        st.session_state["gemini_last_results"] = {
+                            "processed": 0, "error": len(selected_posts), "analyses": [], "errors": [error_text],
+                        }
 
         # --- Display Gemini results ---
         gemini_results = st.session_state.get("gemini_last_results")
@@ -890,6 +919,8 @@ def main() -> None:
             res_c1.metric("Processed", gemini_results.get("processed", 0))
             res_c2.metric("Errors", gemini_results.get("error", 0))
 
+            for message in dict.fromkeys(gemini_results.get("errors", [])):
+                st.error(message)
             analyses = gemini_results.get("analyses", [])
             if analyses:
                 visible = _render_signal_overview(analyses, "latest_signals_filter")
@@ -897,10 +928,9 @@ def main() -> None:
                 with st.expander("Raw analysis JSON"):
                     st.json(analyses)
             elif gemini_results.get("error", 0) > 0:
-                st.warning(
-                    "No analysis could be extracted. This usually means Gemini could not "
-                    "match posts back. Try processing fewer records or check the raw text."
-                )
+                st.warning("No records were analyzed. Resolve the error above and retry."
+                           if gemini_results.get("errors") else
+                           "This result was created before detailed errors were available. Run analysis again to see the cause.")
 
         # --- View previously processed records ---
         st.divider()
