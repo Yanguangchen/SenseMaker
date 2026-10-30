@@ -141,6 +141,16 @@ class LinkWorkspaceTests(unittest.TestCase):
             self.assertEqual(len(app.error), 1)
             self.assertEqual(db.records, {})
 
+    def test_cambodia_shortcut_saves_and_selects_a_reusable_source(self):
+        from modules.reddit import CAMBODIA_URL
+        db = MemoryDB()
+        with patch("dashboard.init_db", return_value=db):
+            app = AppTest.from_string(self.script).run()
+            app.button(key="add_cambodia_source").click().run()
+            self.assertFalse(list(app.exception))
+            self.assertEqual(json.loads(app.json[0].value), [CAMBODIA_URL])
+            self.assertEqual(load_saved_links(db, "owner@example.com"), [CAMBODIA_URL])
+
 
 class LargeScrapeTests(unittest.TestCase):
     def test_every_link_runs_with_bounded_parallelism_progress_and_error_isolation(self):

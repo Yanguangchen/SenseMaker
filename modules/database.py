@@ -10,6 +10,7 @@ import firebase_admin
 from firebase_admin import credentials, firestore
 
 from modules.config import firebase_credentials, get_setting
+from modules.signals import NON_CONTENT_TYPES
 
 PostData = Dict[str, Any]
 
@@ -70,12 +71,15 @@ def upsert_post(db: firestore.Client, post_data: PostData) -> str:
     url = post_data.get("url")
     if not url:
         raise ValueError("post_data must include a non-empty 'url'.")
+    if post_data.get("source_type") in NON_CONTENT_TYPES:
+        raise ValueError("Collection errors and fallback pages are not source posts.")
 
     doc_id = get_post_id(url)
     doc_ref = db.collection(_get_collection_name()).document(doc_id)
     existing = doc_ref.get()
 
-    if existing.exists:
+    is_reddit = post_data.get("source_type") in {"reddit_post", "reddit_comment"}
+    if existing.exists and not is_reddit:
         return doc_id
 
     payload: PostData = {
@@ -97,6 +101,27 @@ def upsert_post(db: firestore.Client, post_data: PostData) -> str:
         payload["saved_at"] = str(post_data.get("saved_at", "")).strip()
     if "target_url" in post_data:
         payload["target_url"] = str(post_data.get("target_url", "")).strip()
+
+    if is_reddit:
+        for key in ("platform", "subreddit", "reddit_id", "created_at", "parent_url", "parent_text",
+                    "thread_id", "comment_sample_limit", "content_removed"):
+            if key in post_data:
+                payload[key] = post_data[key]
+        previous = (existing.to_dict() or {}) if existing.exists else {}
+        changed = any(previous.get(k, "") != payload.get(k, "")
+                      for k in ("raw_text", "parent_text", "content_removed"))
+        if existing.exists and not changed:
+            payload["status"] = previous.get("status", "pending")
+        elif existing.exists:
+            payload.update(analysis=firestore.DELETE_FIELD, processed_at=firestore.DELETE_FIELD)
+        if post_data.get("content_removed"):
+            payload["status"] = "removed"
+            payload["raw_text"] = ""
+            if existing.exists:
+                payload.update(parent_text=firestore.DELETE_FIELD, analysis=firestore.DELETE_FIELD,
+                               processed_at=firestore.DELETE_FIELD)
+        doc_ref.set(payload, merge=True)
+        return doc_id
 
     doc_ref.set(payload)
     return doc_id
@@ -126,6 +151,8 @@ def mark_post_processed(
     }
     if analysis is not None:
         update_payload["analysis"] = analysis
+    elif status == "error":
+        update_payload["analysis"] = firestore.DELETE_FIELD
 
     db.collection(_get_collection_name()).document(doc_id).set(update_payload, merge=True)
 

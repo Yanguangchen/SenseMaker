@@ -24,7 +24,9 @@ from modules.facebook_session import (
     check_facebook_session,
     saved_facebook_user_id,
 )
-from modules.processor import analyze_posts_with_gemini
+from modules.processor import DEFAULT_MODEL, analyze_posts_with_gemini
+from modules.reddit import CAMBODIA_URL, is_reddit_url, reddit_configured
+from modules.signals import NON_CONTENT_TYPES, SIGNAL_LABELS, is_analyzable, is_flagged, watch_terms
 from modules.saved_links import library_owner_id, load_saved_links, parse_links, remove_saved_links, save_links
 
 try:
@@ -53,7 +55,7 @@ def _write_results_to_firestore(posts: List[Dict[str, Any]], custom_title: str) 
 
     for post in posts:
         url = str(post.get("url", "")).strip()
-        if not url:
+        if not url or post.get("source_type") in NON_CONTENT_TYPES:
             skipped += 1
             continue
         payload = dict(post)
@@ -90,12 +92,13 @@ def _process_selected_firestore_posts(
     Returns dict with 'processed', 'error' counts and 'analyses' list.
     """
     db = init_db()
-    model_name = st.session_state.get("gemini_model_name", "models/gemini-2.0-flash")
+    model_name = st.session_state.get("gemini_model_name", DEFAULT_MODEL)
     analysis_by_id = analyze_posts_with_gemini(
         selected_posts,
         api_key=gemini_key,
         model_name=model_name,
         on_status=status_callback,
+        targets=watch_terms(st.session_state.get("thailand_watch_terms", "")),
     )
     processed = 0
     errored = 0
@@ -110,7 +113,12 @@ def _process_selected_firestore_posts(
             mark_post_processed(db, doc_id=doc_id, analysis=analysis, status="processed")
             processed += 1
             analyses.append({
+                **analysis,
                 "_id": doc_id,
+                "platform": post.get("platform", "web"),
+                "source_type": post.get("source_type", ""),
+                "created_at": post.get("created_at", ""),
+                "parent_url": post.get("parent_url", ""),
                 "url": post.get("url", ""),
                 "raw_text_preview": str(post.get("raw_text", ""))[:200],
                 "translation": analysis.get("translation", ""),
@@ -144,6 +152,7 @@ def _run_multi_scrape_sync(
     urls: List[str], headless: bool, scroll_times: int,
     concurrency: int = 3,
     on_progress: Optional[Callable[[int, int, str], None]] = None,
+    reddit_limit: int = 50, reddit_comments: int = 20,
 ) -> List[Dict[str, Any]]:
     if sys.platform.startswith("win") and hasattr(asyncio, "WindowsProactorEventLoopPolicy"):
         asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
@@ -159,6 +168,7 @@ def _run_multi_scrape_sync(
                     headless=headless,
                     scroll_min=scroll_times,
                     scroll_max=scroll_times,
+                    reddit_limit=reddit_limit, reddit_comments=reddit_comments,
                 )
                 # Preserve which input URL produced each row.
                 for row in rows:
@@ -291,6 +301,16 @@ def _render_link_workspace(user_email: str) -> tuple[List[str], bool]:
     with st.container(border=True, key="link_workspace"):
         st.subheader("Your links")
         st.caption("Save sources once, then choose them whenever you want to collect posts.")
+        if st.button("Add r/cambodia", key="add_cambodia_source", use_container_width=True):
+            try:
+                save_links(init_db(), user_email, [CAMBODIA_URL])
+                st.session_state[library_key]["urls"] = list(dict.fromkeys(saved + [CAMBODIA_URL]))
+                st.session_state[pending_key] = list(dict.fromkeys(
+                    st.session_state.get(selection_key, []) + [CAMBODIA_URL]))
+                st.session_state[message_key] = "r/cambodia saved and selected."
+                st.rerun()
+            except Exception:
+                st.error("Couldn’t save r/cambodia. Refresh and try again.")
         if message_key in st.session_state:
             st.success(st.session_state.pop(message_key))
         if library["error"]:
@@ -328,7 +348,7 @@ def _render_link_workspace(user_email: str) -> tuple[List[str], bool]:
 
         text = st.text_area(
             "Add links (one per line)", key=input_key, height=160,
-            placeholder="https://www.facebook.com/groups/your-community\nhttps://example.com/news",
+            placeholder="https://www.facebook.com/groups/your-community\nhttps://www.reddit.com/r/cambodia/",
             help="Paste as many links as you need. You can collect them now or save them for later.",
         )
         pasted, invalid = parse_links(text)
@@ -381,36 +401,71 @@ def _risk_color(score: Any) -> str:
 
 
 def _render_analysis_cards(analyses: List[Dict[str, Any]]) -> None:
-    """Display Gemini analysis results as visual cards."""
+    """Render model text as escaped text and show its source-level evidence."""
     for item in analyses:
-        sentiment = item.get("sentiment", "Unknown")
-        risk = item.get("risk_score", "?")
-        topics = item.get("topics", "")
-        translation = item.get("translation", "")
-        preview = item.get("raw_text_preview", "")
-        url = item.get("url", "")
-        sent_color = SENTIMENT_COLORS.get(sentiment, "#888888")
-        risk_col = _risk_color(risk)
+        with st.container(border=True):
+            monitor = item.get("monitor", {})
+            if monitor:
+                signal = monitor.get("signal_type", "unclear")
+                st.subheader(SIGNAL_LABELS.get(signal, "Needs review"))
+                st.caption(
+                    f"{item.get('source_type', 'post').replace('_', ' ').title()} · "
+                    f"Confidence: {monitor.get('confidence', 'low')} · AI assessment, unreviewed"
+                )
+                st.text(monitor.get("summary", ""))
+                target = ", ".join(monitor.get("target_names", [])) or "No named project established"
+                st.caption(f"Target: {target} · {monitor.get('target_kind', 'unclear').replace('_', ' ')}")
+                for evidence in monitor.get("evidence", []):
+                    st.caption(f"{evidence['purpose'].title()} evidence · {evidence['source'].replace('_', ' ')}")
+                    st.text(evidence["quote"])
+                for note in monitor.get("validation_notes", []):
+                    st.warning(note)
+                scope = monitor.get("watch_terms", [])
+                st.caption("Analysis scope: " + (", ".join(scope) if scope else "Thailand generally"))
+            else:
+                st.caption("Older analysis — run analysis again to detect Thailand and boycott signals.")
+            st.caption(f"Sentiment: {item.get('sentiment', 'Unknown')} · Review priority: {item.get('risk_score', '?')}/10")
+            with st.expander("Translation and original excerpt"):
+                st.text(item.get("translation", ""))
+                st.text(item.get("raw_text_preview", ""))
+            url = str(item.get("url", ""))
+            if url.startswith(("https://", "http://")):
+                st.link_button("Open source", url, use_container_width=True)
 
-        st.markdown(
-            f"""
-<div style="border:1px solid #ddd; border-radius:8px; padding:16px; margin-bottom:12px;">
-  <div style="display:flex; gap:12px; align-items:center; margin-bottom:8px;">
-    <span style="background:{sent_color}; color:#fff; padding:4px 10px; border-radius:4px; font-weight:600;">
-      {sentiment}
-    </span>
-    <span style="background:{risk_col}; color:#fff; padding:4px 10px; border-radius:4px; font-weight:600;">
-      Risk: {risk}/10
-    </span>
-    <span style="color:#888; font-size:0.85em;">{topics}</span>
-  </div>
-  <div style="margin-bottom:6px;"><strong>Translation:</strong> {translation}</div>
-  <div style="color:#666; font-size:0.85em;"><strong>Original:</strong> {preview}</div>
-  {"<div style='margin-top:4px;'><a href='" + url + "' target='_blank' style='font-size:0.8em;'>Source</a></div>" if url else ""}
-</div>
-""",
-            unsafe_allow_html=True,
-        )
+
+def _render_signal_overview(analyses: List[Dict[str, Any]], key: str) -> List[Dict[str, Any]]:
+    assessed = [a for a in analyses if a.get("monitor")]
+    if not assessed:
+        return analyses
+    st.caption("Counts cover only these collected records. Posts and comments are separate observations; "
+               "they do not measure unique people or public opinion. Classifications need human review.")
+    cols = st.columns(3)
+    cols[0].metric("Records assessed", len(assessed))
+    cols[1].metric("Thailand signals", sum(is_flagged(a) for a in assessed))
+    cols[2].metric("Boycott calls", sum(a["monitor"].get("signal_type") == "boycott_call" for a in assessed))
+    choice = st.selectbox("Show findings", ["All records", "Flagged signals", "Boycott calls", "Boycott reports",
+                                         "Negative sentiment", "Reported tensions", "Needs review"], key=key)
+    signal_filter = {"Boycott calls": "boycott_call", "Boycott reports": "boycott_report",
+                     "Negative sentiment": "negative_sentiment", "Reported tensions": "tension", "Needs review": "unclear"}
+    visible = [a for a in analyses if choice == "All records"
+               or (choice == "Flagged signals" and is_flagged(a))
+               or a.get("monitor", {}).get("signal_type") == signal_filter.get(choice, "__none__")]
+    export = [{"url": a.get("url", ""), "source_type": a.get("source_type", ""),
+               "created_at": a.get("created_at", ""), "signal": a.get("monitor", {}).get("signal_type", "not_assessed"),
+               "relevance": a.get("monitor", {}).get("thailand_relevance", ""),
+               "targets": ", ".join(a.get("monitor", {}).get("target_names", [])),
+               "summary": a.get("monitor", {}).get("summary", ""),
+               "confidence": a.get("monitor", {}).get("confidence", ""),
+               "evidence": " | ".join(f"{e['source']}: {e['quote']}" for e in a.get("monitor", {}).get("evidence", []))}
+              for a in visible]
+    if export:
+        # Quotes and titles are untrusted spreadsheet cells.
+        safe = pd.DataFrame(export).map(lambda v: "'" + v if isinstance(v, str) and v.lstrip().startswith(("=", "+", "-", "@")) else v)
+        st.download_button("Export findings CSV", safe.to_csv(index=False).encode("utf-8-sig"),
+                           "sensemaker-findings.csv", "text/csv", key=f"{key}_export")
+    else:
+        st.info("No records match this filter.")
+    return visible
 
 
 def _render_processed_records(rows: List[Dict[str, Any]]) -> None:
@@ -439,6 +494,9 @@ def _render_processed_records(rows: List[Dict[str, Any]]) -> None:
     for r in has_analysis:
         a = r.get("analysis", {})
         card_data.append({
+            **a,
+            "source_type": r.get("source_type", ""),
+            "created_at": r.get("created_at", ""),
             "sentiment": a.get("sentiment", "Unknown"),
             "risk_score": a.get("risk_score", "?"),
             "topics": ", ".join(a.get("topics", [])) if isinstance(a.get("topics"), list) else str(a.get("topics", "")),
@@ -446,8 +504,8 @@ def _render_processed_records(rows: List[Dict[str, Any]]) -> None:
             "raw_text_preview": str(r.get("raw_text", ""))[:200],
             "url": r.get("url", ""),
         })
-    with st.expander("Detailed analysis cards", expanded=True):
-        _render_analysis_cards(card_data)
+    card_data = _render_signal_overview(card_data, "saved_signals_filter")
+    _render_analysis_cards(card_data)
 
 
 def _bridge_secrets_to_env() -> None:
@@ -628,6 +686,19 @@ def main() -> None:
 
         if any("facebook.com" in u.lower() for u in target_urls) and facebook_session.status != "connected":
             st.info("Connect your Facebook account above before collecting Facebook posts.")
+        reddit_limit, reddit_comments = 50, 20
+        if any(is_reddit_url(url) for url in target_urls):
+            with st.container(border=True):
+                st.subheader("Reddit · r/cambodia")
+                if reddit_configured():
+                    st.caption("API credentials configured. Access is checked when collecting.")
+                else:
+                    st.info("Reddit is not connected yet. An administrator needs to configure approved Reddit API access.")
+                rc1, rc2 = st.columns(2)
+                reddit_limit = rc1.number_input("Reddit posts per source", min_value=1, max_value=500, value=50, step=25)
+                reddit_comments = rc2.number_input("Comments per post", min_value=0, max_value=100, value=20, step=10)
+                st.caption("Collects newest posts by default and samples the newest returned comments. "
+                           "This is not a complete subreddit archive. Large runs may return partial results.")
         tc1, tc2 = st.columns(2)
         use_headless = tc1.checkbox("Headless Browser", value=True, disabled=IS_CLOUD)
         scroll_times = tc2.slider("Scroll Iterations", min_value=1, max_value=50, value=10)
@@ -647,6 +718,7 @@ def main() -> None:
                             urls=target_urls,
                             headless=use_headless,
                             scroll_times=scroll_times,
+                            reddit_limit=int(reddit_limit), reddit_comments=int(reddit_comments),
                             on_progress=lambda done, total, _url: progress.progress(
                                 done / total, text=f"Processed {done} of {total} links"
                             ),
@@ -667,7 +739,11 @@ def main() -> None:
                     st.code("\n".join(scrape_urls))
             if scrape_error:
                 st.caption(f"Last error: {scrape_error}")
-            st.write(f"**Posts found:** {len(scrape_results)}")
+            issues = [r for r in scrape_results if r.get("source_type") in NON_CONTENT_TYPES]
+            for issue in issues:
+                st.warning(f"{issue.get('target_url', issue.get('url', 'Source'))}: {issue.get('raw_text', 'Collection incomplete')}")
+            scrape_results = [r for r in scrape_results if r.get("source_type") not in NON_CONTENT_TYPES]
+            st.write(f"**Records collected:** {len(scrape_results)}")
             if scrape_results:
                 custom_title = st.text_input(
                     "Custom title",
@@ -693,11 +769,14 @@ def main() -> None:
                 with st.expander("Raw JSON Output"):
                     st.json(scrape_results)
             else:
-                st.info("No posts detected for this URL with current selectors.")
+                st.info("No source records were collected. Check any connection notices above.")
 
     with gemini_tab:
         st.subheader("Sentiment Analysis")
-        st.caption("Select Firestore records, run analysis with Gemini, and view results.")
+        st.caption("Detect Thailand-related criticism, tensions and boycott calls, with source evidence.")
+        st.text_area("Thai projects, companies and brands to watch (one name or alias per line)",
+                     value=get_setting("THAILAND_WATCH_TERMS"), key="thailand_watch_terms",
+                     help="Leave blank for Thailand generally. Add the names and local-language aliases of your Thai-linked targets.")
 
         # --- Settings row ---
         gc1, gc2 = st.columns([1, 1])
@@ -711,9 +790,9 @@ def main() -> None:
         )
         st.text_input(
             "Gemini model",
-            value=os.getenv("GEMINI_MODEL", "models/gemini-2.0-flash"),
+            value=os.getenv("GEMINI_MODEL", DEFAULT_MODEL),
             key="gemini_model_name",
-            help="Model identifier, e.g. models/gemini-2.0-flash.",
+            help="Model identifier, e.g. models/gemini-3.6-flash.",
         )
 
         # --- Load records ---
@@ -757,7 +836,7 @@ def main() -> None:
                 )
             st.dataframe(pd.DataFrame(display_rows), use_container_width=True, hide_index=True)
 
-            id_options = [str(r.get("_id", "")) for r in firestore_rows if r.get("_id")]
+            id_options = [str(r.get("_id", "")) for r in firestore_rows if r.get("_id") and is_analyzable(r)]
             selected_ids = st.multiselect(
                 "Select records to process",
                 options=id_options,
@@ -813,7 +892,8 @@ def main() -> None:
 
             analyses = gemini_results.get("analyses", [])
             if analyses:
-                _render_analysis_cards(analyses)
+                visible = _render_signal_overview(analyses, "latest_signals_filter")
+                _render_analysis_cards(visible)
                 with st.expander("Raw analysis JSON"):
                     st.json(analyses)
             elif gemini_results.get("error", 0) > 0:

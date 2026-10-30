@@ -15,7 +15,7 @@ SenseMaker/
 ├── .gitignore
 ├── requirements.txt
 ├── main.py
-├── dashboard.py              # Streamlit UI (scraping + Gemini tabs)
+├── dashboard.py              # Streamlit UI (collection + analysis tabs)
 ├── .streamlit/
 │   ├── config.toml           # Streamlit theme & server config
 │   └── secrets.toml.example  # Template for Streamlit Cloud secrets
@@ -29,6 +29,71 @@ SenseMaker/
 ```
 
 ---
+
+## Thailand tensions and boycott watch
+
+The **Sentiment Analysis** tab now assesses Thailand-related discussion in English,
+Khmer and Thai. Enter Thai-linked project, company or brand names and their aliases
+(one per line), or leave the watchlist empty for Thailand generally. Each analysis
+stores the watchlist used, model name and schema version. Existing records can be
+selected and reprocessed to add these fields.
+
+Findings distinguish negative sentiment, reported tensions, explicit boycott calls,
+reporting of boycotts, opposition to boycotts, no detected signal and uncertainty.
+Named projects/brands are distinguished from general discussion of Thailand.
+Every signal needs a verbatim supporting quote; missing/invalid evidence or an
+unestablished Thailand connection downgrades the result to **Needs review**.
+The original language, quote source, source link and subjective confidence are shown.
+Filters, sample counts and CSV export make findings reviewable. The existing risk
+field is displayed as **review priority**, not a judgment about people.
+
+These are model assessments, not confirmed events. Quote validation cannot prove
+that an interpretation is correct. Records are processed in batches of eight;
+unknown/duplicate response IDs are rejected, and successful batches survive a later
+failure. Long records are excerpted and visibly marked. No individual identities,
+nationalities or political affiliations are inferred. Counts refer to sampled records,
+not unique people or population sentiment. Live classification quality still needs
+evaluation with your configured Gemini key and representative, human-labeled data.
+
+## Reddit collection: r/cambodia
+
+1. Click **Add r/cambodia** in **Your links** to save and select the subreddit.
+2. Choose up to **500 posts per source** and **0–100 sampled comments per post**.
+3. Click **Collect posts**, inspect the results and save them to Firestore.
+4. Select saved records in **Sentiment Analysis**, set your watchlist and run analysis.
+
+The connector accepts r/cambodia `new`, `hot`, `top`, `search/?q=...` and full
+post links. It uses Reddit's authenticated read-only Data API rather than the browser
+scraper. Default collection is newest posts, with returned comments sorted by newest.
+Reddit pagination, API availability and the 180-second collection budget limit coverage;
+large jobs can finish partially. Rate-limit headers are respected and partial failures
+are displayed. Search results and bounded comment samples are not a complete archive;
+`more` comment stubs are not expanded. Collection is on demand, not a background monitor.
+
+Each Reddit post and comment has its own canonical permalink and record. Comments
+carry the original post as context; context-only calls cannot count as a comment's
+own boycott advocacy. Usernames are not stored. Removed content encountered during
+collection is saved as a tombstone, clearing that record's old text and analysis.
+Recollecting edited text resets its analysis to pending. Records not encountered again
+are not automatically refreshed or checked for deletion; this is not a retention service.
+
+Live access requires an approved Reddit app. Configure these server settings in
+`.env`, Streamlit Secrets or Vercel production Secrets:
+
+```env
+REDDIT_CLIENT_ID=...
+REDDIT_CLIENT_SECRET=...
+REDDIT_USER_AGENT=web:SenseMaker:1.0 (by /u/your_reddit_username)
+# Optional, for an approved user-authorized app with read scope:
+REDDIT_REFRESH_TOKEN=...
+```
+
+Without a refresh token the connector requests an application-only OAuth token.
+Missing credentials, denied access and throttling produce a connection/error notice;
+there is no unauthenticated scraping fallback. No Reddit credentials are included in
+this repository. See [Reddit's access policy](https://support.reddithelp.com/hc/en-us/articles/42728983564564-Responsible-Builder-Policy),
+[Data API documentation](https://www.reddit.com/dev/api/) and
+[OAuth application credentials](https://github.com/reddit-archive/reddit/wiki/OAuth2#application-only-oauth).
 
 ## Deploy to Vercel
 
@@ -184,7 +249,7 @@ Optional:
 
 ```env
 PLAYWRIGHT_STORAGE_STATE=path/to/storage_state.json
-GEMINI_MODEL=models/gemini-2.0-flash
+GEMINI_MODEL=models/gemini-3.6-flash
 ```
 
 Notes:
@@ -195,7 +260,7 @@ Notes:
   The dashboard also needs `FIREBASE_API_KEY`, `FIREBASE_AUTH_DOMAIN`,
   `FIREBASE_APP_ID` and `FAQ_EDITOR_EMAILS` for Google sign-in. Copy these values
   from OYOSHI; keep the service-account private key on the server.
-- `GEMINI_MODEL` defaults to `models/gemini-2.0-flash` if not set.
+- `GEMINI_MODEL` defaults to `models/gemini-3.6-flash` if not set.
 
 ## Run the Dashboard (Local)
 
@@ -275,7 +340,7 @@ This performs:
 - best-effort comment extraction (`comments`, `comment_count`)
 - `source_type` tagging for traceability (`container_post`, `permalink_fallback`, `page_fallback`, `emergency_fallback`)
 - browser launch fallback to local Chrome when managed Chromium is missing
-- guaranteed non-empty output via emergency fallback records
+- fallback and error records are shown as notices, excluded from saved posts and analysis
 - multi-URL scraping without a total-link cap, with at most 3 concurrent browsers
 
 Known limitations:
@@ -288,16 +353,18 @@ Known limitations:
 `modules/processor.py` features:
 - **Automatic retry with exponential backoff** for 429 rate-limit errors (up to 5 retries: 2s, 4s, 8s, 16s waits)
 - Simple index keys (`post_1`, `post_2`, ...) sent to Gemini instead of raw MD5 hashes — ensures reliable ID matching in responses
-- Positional fallback matching when Gemini returns the correct count but mangles keys
+- Exact ID matching; unknown and duplicate IDs are rejected rather than assigned to another record
 - Robust JSON extraction from Gemini responses (handles markdown fences, surrounding text)
 - Live status callback for UI progress updates during retries
-- Default model: `models/gemini-2.0-flash` (configurable via UI or `GEMINI_MODEL` env var)
+- Default model: `models/gemini-3.6-flash` (configurable via UI or `GEMINI_MODEL` env var)
 
 Analysis output per post:
 - `translation` — English translation (unchanged if already English)
 - `sentiment` — one of: Anxiety, Anger, Joy, Neutral
 - `risk_score` — integer 1-10 (10 = most urgent)
 - `topics` — array of topic strings
+- `analysis_version`, `model` — analysis provenance
+- `monitor` — Thailand relevance, signal type, target kind/names, evidence, confidence, review status and watch terms
 
 ## Firestore Schema
 
@@ -352,7 +419,7 @@ Collection: `raw_posts`
   "status": "pending|processed|error",
   "comments": ["comment one", "comment two"],
   "comment_count": 2,
-  "source_type": "container_post|permalink_fallback|page_fallback|emergency_fallback",
+  "source_type": "container_post|reddit_post|reddit_comment",
   "custom_title": "User-provided title",
   "saved_at": "ISO_TIMESTAMP",
   "target_url": "https://original-input-url.com/...",
@@ -430,5 +497,5 @@ If it still fails:
 ### Gemini `processed=0, error=N`
 
 This previously occurred because Gemini could not match MD5 hash IDs back to posts.
-Fixed by sending simple index keys (`post_1`, `post_2`) with positional fallback matching.
+The processor sends simple index keys (`post_1`, `post_2`) and accepts only matching, unique IDs. It never assigns results by position.
 If it recurs, try processing fewer records at a time.

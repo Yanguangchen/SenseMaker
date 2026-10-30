@@ -11,6 +11,7 @@ from typing import Any, Awaitable, Callable, Dict, List, Optional
 from urllib.parse import parse_qs, urljoin, urlparse
 
 from playwright.async_api import async_playwright
+from modules.reddit import is_reddit_url, scrape_reddit
 
 PostData = Dict[str, Any]
 PersistCallback = Callable[[PostData], Optional[Awaitable[None]]]
@@ -402,8 +403,20 @@ async def scrape_group(
     headless: Optional[bool] = None,
     scroll_min: int = 5,
     scroll_max: int = 10,
+    reddit_limit: int = 50,
+    reddit_comments: int = 20,
 ) -> List[PostData]:
-    """Scrape post containers from a target Facebook group page."""
+    """Route Reddit to its API; use browser collection for existing web sources."""
+    if is_reddit_url(target_url):
+        records = await scrape_reddit(target_url, reddit_limit, reddit_comments)
+        if persist_cb:
+            for record in records:
+                if record.get("source_type") == "batch_warning":
+                    continue
+                maybe = persist_cb(record)
+                if asyncio.iscoroutine(maybe):
+                    await maybe
+        return records
     if headless is None:
         headless = os.getenv("HEADLESS", "false").lower() == "true"
 
