@@ -48,8 +48,10 @@ def _generate_content(prompt: str, api_key: str, model_name: str, timeout: float
             result = json.load(response)
     except HTTPError as exc:
         raise api_error(exc, api_key) from None
-    except (URLError, TimeoutError):
-        raise GeminiError("The Gemini request timed out or could not connect. Retry a smaller selection.") from None
+    except URLError as exc:
+        raise GeminiError("Gemini connection failed: " + redact(str(exc.reason), api_key)) from None
+    except TimeoutError:
+        raise GeminiError(f"Gemini timed out after {timeout:.0f} seconds. Try a faster model or fewer/shorter records.") from None
     except ValueError:
         raise GeminiError("Google returned an invalid API response. Try again later.") from None
     if not isinstance(result, dict):

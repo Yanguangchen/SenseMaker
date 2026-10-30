@@ -508,7 +508,8 @@ It no longer assumes that every failure is caused by unmatched record IDs.
 4. For HTTP 404, refresh models; the chosen model may not support `generateContent`
    for your key/API version. For HTTP 429, check quota and billing before retrying.
 
-Automatic selection prefers stable Flash text models returned by Google's
+Automatic selection prefers stable Flash-Lite text models for lower-latency
+classification, then general Flash models, using the models returned by Google's
 [`models.list` API](https://ai.google.dev/api/models). It never silently selects a
 Pro model. The catalogue confirms API-method availability, not remaining quota or
 support for every generation option. An explicit model must appear in that catalogue.

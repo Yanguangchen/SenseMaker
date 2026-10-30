@@ -5,7 +5,7 @@ import json
 import unittest
 from pathlib import Path
 from unittest.mock import MagicMock, patch
-from urllib.error import HTTPError
+from urllib.error import HTTPError, URLError
 
 from streamlit.testing.v1 import AppTest
 
@@ -47,6 +47,21 @@ class ModelTests(unittest.TestCase):
         with patch("modules.gemini.list_text_models", return_value=["models/gemini-4-pro"]):
             with self.assertRaisesRegex(GeminiError, "choose a model explicitly"):
                 resolve_model("key", "auto")
+
+    def test_automatic_prefers_available_stable_flash_lite_for_classification(self):
+        with patch("modules.gemini.list_text_models", return_value=[
+            "models/gemini-3.8-flash", "models/gemini-3.1-flash-lite", "models/gemini-3.5-flash-lite",
+        ]):
+            self.assertEqual(resolve_model("key", "auto"), "models/gemini-3.5-flash-lite")
+
+    def test_connection_errors_and_timeouts_are_distinct_and_redacted(self):
+        with patch("modules.processor.urlopen", side_effect=URLError("certificate failed for private-key")):
+            with self.assertRaisesRegex(GeminiError, "connection failed: certificate failed") as caught:
+                _generate_content("hello", "private-key", "gemini-test")
+            self.assertNotIn("private-key", str(caught.exception))
+        with patch("modules.processor.urlopen", side_effect=TimeoutError()):
+            with self.assertRaisesRegex(GeminiError, "timed out after 30 seconds"):
+                _generate_content("hello", "key", "gemini-test", timeout=30)
 
     def test_http_errors_explain_cause_and_redact_the_key(self):
         for code, expected in ((400, "rejected"), (403, "Access was denied"), (404, "model is unavailable"), (429, "quota")):

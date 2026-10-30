@@ -122,6 +122,7 @@ def resolve_model(api_key: str, requested: str) -> str:
         version = re.search(r"gemini-(\d+)(?:\.(\d+))?", model)
         numbers = (int(version[1]), int(version[2] or 0)) if version else (0, 0)
         stable = not re.search(r"preview|experimental|(?:^|-)exp(?:-|$)", model)
-        return stable, numbers, "lite" not in model, model
+        # Classification batches should favor the lower-latency Lite family.
+        return stable, "lite" in model, numbers, model
 
     return max(flash, key=rank)
