@@ -136,7 +136,7 @@ def _process_selected_firestore_posts(
 
 def _render_gemini_settings() -> str:
     api_key = st.text_input("Gemini API key", value=os.getenv("GEMINI_KEY", ""),
-                            type="password", help="Used only for your Gemini requests.")
+                            type="password", help="Uses this key for Gemini analysis.")
     fingerprint = hashlib.sha256(api_key.strip().encode()).hexdigest()
     if st.session_state.get("gemini_catalog_key") != fingerprint:
         st.session_state["gemini_catalog_key"] = fingerprint
