@@ -68,7 +68,12 @@ class ProfileSessionTests(unittest.IsolatedAsyncioTestCase):
 
 
 class ConnectionCardTests(unittest.TestCase):
-    script = "from dashboard import _render_facebook_connection\n_render_facebook_connection()"
+    script = ("from dashboard import _render_facebook_connection, _get_facebook_session, _facebook_storage_path\n"
+              "from modules.navigation import dashboard_views\n"
+              "session = _get_facebook_session(_facebook_storage_path())\n"
+              "views = dashboard_views('editor@example.com', session)\n"
+              "with views[0]:\n"
+              "    _render_facebook_connection(session)\n")
 
     @patch.dict(os.environ, {"PLAYWRIGHT_STORAGE_STATE": "/tmp/sensemaker-test-state.json"})
     def test_signed_out_card_has_one_direct_login_button_without_an_expander(self):
@@ -79,14 +84,16 @@ class ConnectionCardTests(unittest.TestCase):
             self.assertFalse(app.button[0].disabled)
             self.assertEqual(len(app.expander), 0)
 
-    def test_connected_card_shows_the_user_and_hides_login(self):
+    def test_connected_account_moves_above_google_in_toolbar_and_hides_main_card(self):
         with patch("dashboard._get_facebook_session", return_value=FacebookSession("connected", "123456", "Alex <Tan>")), patch.dict(os.environ):
             app = AppTest.from_string(self.script).run()
             self.assertFalse(list(app.exception))
             self.assertEqual(len(app.button), 0)
-            content = " ".join(item.value for item in app.markdown)
+            self.assertFalse(any("fb-identity" in item.value for item in app.main.markdown))
+            content = " ".join(item.value for item in app.sidebar.markdown)
             self.assertIn("Alex &lt;Tan&gt;", content)
             self.assertIn("Connected", content)
+            self.assertLess(content.index("sm-rail-facebook"), content.index("Signed in as editor@example.com"))
 
     @patch.dict(os.environ, {"PLAYWRIGHT_STORAGE_STATE": "/tmp/sensemaker-test-state.json"})
     def test_successful_login_replaces_the_button_on_the_same_interaction(self):
@@ -96,7 +103,8 @@ class ConnectionCardTests(unittest.TestCase):
             app.button[0].click().run()
             self.assertFalse(list(app.exception))
             self.assertEqual(len(app.button), 0)
-            self.assertIn("Alex Tan", " ".join(item.value for item in app.markdown))
+            self.assertIn("Alex Tan", " ".join(item.value for item in app.sidebar.markdown))
+            self.assertFalse(any("fb-identity" in item.value for item in app.main.markdown))
             capture.assert_called_once_with(str(Path("/tmp/sensemaker-test-state.json").resolve()), timeout_seconds=240)
 
 

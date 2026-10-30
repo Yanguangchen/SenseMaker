@@ -5,7 +5,39 @@ Social listening prototype for monitoring migrant worker well-being content from
 The dashboard requires Google sign-in. Access is limited to verified accounts in
 `FAQ_EDITOR_EMAILS`, using the same Firebase project and approved-user list as OYOSHI.
 
-**Core pipeline:** Scrape social media posts -> Store in Firestore -> Analyse with Gemini AI -> Review sentiment, risk scores & translations in a visual dashboard.
+**Core pipeline:** Scrape social media posts -> Store in Firestore -> Analyse with Gemini or ChatGPT -> Review sentiment, risk scores & translations in a visual dashboard.
+
+## AI provider setup
+
+Configure credentials once on the server in `.env.local` or `.env`; dashboard users choose **Gemini**
+or **ChatGPT** in the **AI provider** dropdown without entering an API key.
+
+```env
+AI_PROVIDER=gemini
+GEMINI_KEY=your_gemini_api_key_here
+GEMINI_MODEL=auto
+OPENAI_API_KEY=your_openai_api_key_here
+OPENAI_MODEL=gpt-5.4-mini
+```
+
+Gemini is the default. Set `AI_PROVIDER=openai` to make ChatGPT the initial selection
+and the provider used by `main.py`. `GEMINI_API_KEY` is also accepted when `GEMINI_KEY`
+is unset. A provider without a credential cannot run analysis; the user can still
+switch to the other provider. `.env.local` takes precedence over `.env`; non-empty
+server environment variables take precedence over both files. Empty environment
+values are filled from these files on rerun. Restart the app when changing an
+already-loaded key or other setting.
+
+For hosted deployments, set the same variables in Vercel environment settings or
+top-level Streamlit Secrets. Keys stay on the server and are never populated into
+page widgets. Both providers use the same batching, evidence validation and retry
+logic; saved analyses include `provider` and `model`.
+
+ChatGPT uses the [OpenAI Responses API](https://developers.openai.com/api/docs/guides/text)
+with [JSON output](https://developers.openai.com/api/docs/guides/structured-outputs?api-mode=responses)
+and response storage disabled. `OPENAI_MODEL` defaults to
+[`gpt-5.4-mini`](https://developers.openai.com/api/docs/models/gpt-5.4-mini)
+and can be changed to a Responses-compatible text model with JSON mode support.
 
 ## Current Project Structure
 
@@ -25,7 +57,8 @@ SenseMaker/
     ├── __init__.py
     ├── database.py            # Firestore helpers (upsert, query, mark processed)
     ├── scraper.py             # Playwright web scraper
-    └── processor.py           # Gemini analysis with retry & backoff
+    ├── openai.py              # OpenAI Responses API transport
+    └── processor.py           # Shared Gemini/ChatGPT analysis with retry & backoff
 ```
 
 ---
@@ -55,7 +88,7 @@ within the hosted runtime; unprocessed records can be retried using the error fi
 Long records are excerpted and visibly marked. No individual identities,
 nationalities or political affiliations are inferred. Counts refer to sampled records,
 not unique people or population sentiment. Live classification quality still needs
-evaluation with your configured Gemini key and representative, human-labeled data.
+evaluation with your configured provider and representative, human-labeled data.
 
 ## Delete processed records
 
@@ -66,8 +99,8 @@ are kept. Source links stay available for future collection.
 
 ## Reddit collection: r/cambodia
 
-1. **r/cambodia** is included and selected by default in **Your links**. Deselect it when you only want to collect other sources.
-2. Open the **Reddit · r/cambodia** toolbar tab to check the connection and choose up to **500 posts per source** and **0–100 sampled comments per post**.
+1. Open **Scrape Data → Reddit** to collect directly from **r/cambodia**.
+2. Check the connection and choose up to **500 posts per source** and **0–100 sampled comments per post**.
 3. Click **Collect posts**, inspect the results and save them to Firestore.
 4. Select saved records in **Sentiment Analysis**, set your watchlist and run analysis.
 
@@ -118,7 +151,8 @@ Configure the top-level Firebase settings from `.streamlit/secrets.toml.example`
 as production Vercel environment variables, with `FIREBASE_CLIENT_EMAIL` and
 `FIREBASE_PRIVATE_KEY` instead of the `[firebase]` table. Store credentials as
 Secret variables. Add the production hostname to Firebase Authentication's
-authorized domains. `GEMINI_KEY` is optional because users can enter a key in the UI.
+authorized domains. Configure `GEMINI_KEY` and `OPENAI_API_KEY` on the server to
+enable both providers; users do not enter keys in the UI.
 
 ```sh
 vercel link --project sensemaker --scope yanguangchens-projects
@@ -127,13 +161,13 @@ vercel --prod
 
 Hosted collection runs headlessly. Interactive Facebook login is available only
 when running SenseMaker on your own computer. Vercel's function duration and
-scale-to-zero limits also apply to WebSocket sessions: reconnects may require
-signing in again, and long collections must fit within the hosting limits.
+scale-to-zero limits also apply to WebSocket sessions: reconnects restore Google
+login from the browser, and long collections must fit within the hosting limits.
 Saved links and collected posts persist in Firestore when a container restarts.
 
 ## Deploy to Streamlit Community Cloud
 
-This alternative deployment supports Firestore and Gemini processing. Collection
+This alternative deployment supports Firestore and Gemini/ChatGPT processing. Collection
 and interactive Facebook login run locally.
 
 ### 1) Push to GitHub
@@ -155,7 +189,11 @@ In the Streamlit Cloud dashboard for your app:
 2. Paste the following (replace placeholder values with your real credentials):
 
 ```toml
+AI_PROVIDER = "gemini"
 GEMINI_KEY = "your_gemini_api_key_here"
+GEMINI_MODEL = "auto"
+OPENAI_API_KEY = "your_openai_api_key_here"
+OPENAI_MODEL = "gpt-5.4-mini"
 FIREBASE_PROJECT_ID = "project-sentinel-9ab8e"
 FIREBASE_COLLECTION = "raw_posts"
 FIREBASE_API_KEY = "your_firebase_web_api_key"
@@ -192,13 +230,13 @@ scheme or port. Existing OYOSHI Google accounts can then sign in to SenseMaker.
 
 | Feature | Cloud | Local |
 |---|---|---|
-| Gemini processing (sentiment, risk, translation) | Yes | Yes |
+| Gemini/ChatGPT processing (sentiment, risk, translation) | Yes | Yes |
 | Firestore read/write | Yes | Yes |
 | View processed records | Yes | Yes |
 | Web scraping (Playwright) | No | Yes |
 | Facebook auth capture | No | Yes |
 
-The scraper tab will show an info message on cloud. Use local scraping to populate Firestore, then use the cloud deployment for Gemini analysis and viewing results.
+The scraper tab will show an info message on cloud. Use local scraping to populate Firestore, then use the cloud deployment for AI analysis and viewing results.
 
 ---
 
@@ -238,7 +276,8 @@ copy .env.example .env
 
 Then set `PLAYWRIGHT_STORAGE_STATE` in `.env` to the saved file path.
 You can also do this directly from the dashboard via **Log in to Facebook**.
-The connection card shows your Facebook name after login and hides the login button.
+After login, your Facebook name and connection status appear in the sidebar toolbar
+above your Google account; the main connection card is hidden.
 Saved sessions are checked automatically; expired sessions show the login button again.
 
 ## Required Environment Variables
@@ -250,6 +289,7 @@ FIREBASE_CREDENTIALS=path/to/firebase-service-account.json
 FIREBASE_PROJECT_ID=project-sentinel-9ab8e
 FIREBASE_COLLECTION=raw_posts
 GEMINI_KEY=your_gemini_api_key_here
+OPENAI_API_KEY=your_openai_api_key_here
 TARGET_GROUP_URL=https://www.facebook.com/groups/example
 HEADLESS=false
 ```
@@ -258,7 +298,9 @@ Optional:
 
 ```env
 PLAYWRIGHT_STORAGE_STATE=path/to/storage_state.json
+AI_PROVIDER=gemini
 GEMINI_MODEL=auto
+OPENAI_MODEL=gpt-5.4-mini
 ```
 
 Notes:
@@ -269,7 +311,8 @@ Notes:
   The dashboard also needs `FIREBASE_API_KEY`, `FIREBASE_AUTH_DOMAIN`,
   `FIREBASE_APP_ID` and `FAQ_EDITOR_EMAILS` for Google sign-in. Copy these values
   from OYOSHI; keep the service-account private key on the server.
-- `GEMINI_MODEL` defaults to `auto`: Google’s model catalogue is checked using the supplied API key before each run.
+- Configure credentials for each provider you want to enable; they are read only on the server.
+- `GEMINI_MODEL` defaults to `auto`: Google’s model catalogue is checked using the server API key before each run.
 
 ## Run the Dashboard (Local)
 
@@ -281,6 +324,8 @@ The dashboard has **two tabs**:
 
 ### Tab 1 — Scrap data
 
+- Source tabs: **Facebook**, **Reddit**, and **Online news** (coming soon).
+- Facebook and Reddit each keep their own source selections, collection settings and results.
 - Facebook auth session capture (opens Chrome for manual login)
 - Save a personal library of links, available on future visits and other devices
 - Select saved links, select all, remove links, or paste any number of new links
@@ -289,10 +334,10 @@ The dashboard has **two tabs**:
 - Results table + raw JSON output
 - "Save data to cloud" button with custom title — writes scraped data to Firestore with timestamps
 
-### Tab 2 — Gemini processing
+### Tab 2 — Sentiment Analysis
 
 - Load records from Firestore by status (`all`, `pending`, `processed`, `error`)
-- Select records and run Gemini analysis (translation, sentiment, risk score, topics)
+- Choose Gemini or ChatGPT, select records and run analysis (translation, sentiment, risk score, topics)
 - **Live progress panel** shows retry status when rate-limited (429 errors)
 - **Visual analysis cards** after processing:
   - Color-coded sentiment badges (Anxiety=amber, Anger=red, Joy=green, Neutral=blue)
@@ -317,11 +362,11 @@ Use this sequence for the most reliable results:
    - select saved Facebook links or add new URLs, one per line
    - `Headless Browser` as needed
    - `Scroll Iterations` between `10` and `30` for feed-heavy pages
-5) Optionally click **Save links** to keep new URLs, then click **Collect posts** and inspect results.
+5) New valid links are saved and selected automatically when you finish editing. Click **Collect posts** and inspect results. Use **Clear** to deselect all sources and clear pasted links.
 6) Enter a **Custom title** and click **Save data to cloud** to persist to Firestore.
-7) Switch to the **Gemini processing** tab:
+7) Switch to the **Sentiment Analysis** tab:
    - Click **Load records from Firestore** (status: `pending`)
-   - Select records and click **Run Gemini on selected records**
+   - Choose an AI provider, select records and click **Run Gemini on selected records** or **Run ChatGPT on selected records**
    - View sentiment cards, risk scores, and translations inline
 
 If extraction is still sparse, raise scroll iterations and verify the target page is visible to the authenticated account used in capture.
@@ -335,7 +380,7 @@ If extraction is still sparse, raise scroll iterations and verify the target pag
 This performs:
 1) Scrape from `TARGET_GROUP_URL`
 2) Upsert into Firestore
-3) Process pending items with Gemini
+3) Process pending items with the server's `AI_PROVIDER` (Gemini by default)
 
 ## Scraper Notes
 
@@ -397,10 +442,14 @@ Firestore indexes, Hosting, Functions, or any other app.
 Before rendering either dashboard tab, the server verifies the Firebase ID token
 (including expiry, project, revocation and disabled-account checks), requires a
 verified email, and checks `FAQ_EDITOR_EMAILS`. The check runs on every interaction.
-Missing configuration or an empty allowlist blocks access. The browser keeps the
-Firebase session in memory and refreshes its token while the sign-in component is
-mounted. Reloading may require another sign-in. Signing out or failing verification
-clears the Streamlit session, including loaded records.
+Missing configuration or an empty allowlist blocks access. Firebase persists the
+Google login in this browser and restores it after refreshes, revisits and server
+reconnects. The sign-in component renews tokens periodically and when a background
+tab returns. Expired tokens refresh without another Google login; a temporary
+verification outage blocks access and allows retry without discarding the login.
+Signing out, revoked/invalid credentials or denied access clears both the browser
+login and Streamlit session, including loaded records. Browser storage must be
+enabled; clearing site data or using a new private-browsing session requires login.
 
 The supplied Firestore rules contain **no user list**. `FAQ_EDITOR_EMAILS` is a
 separate server setting, not a Firestore permission. All listed users receive the
@@ -509,7 +558,7 @@ The dashboard now displays the actual Google HTTP error and redacted diagnostic,
 or a specific content-blocking, output-length, JSON/ID validation or time-budget error.
 It no longer assumes that every failure is caused by unmatched record IDs.
 
-1. Enter your Gemini API key and click **Refresh available models**.
+1. Have the app administrator configure `GEMINI_KEY` on the server, then click **Refresh available models**.
 2. Choose **Automatic** or an available text model and retry your selection.
 3. For HTTP 400/401/403, check the key, API restrictions and project permissions.
 4. For HTTP 404, refresh models; the chosen model may not support `generateContent`

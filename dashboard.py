@@ -10,13 +10,15 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
+from urllib.parse import urlsplit
 
 import pandas as pd
 import streamlit as st
-from dotenv import load_dotenv
 
 from modules.auth import require_access
-from modules.config import get_setting
+from modules.navigation import dashboard_views
+from modules.ai_errors import AIError, redact
+from modules.config import AI_PROVIDERS, get_ai_key, get_ai_model, get_ai_provider, get_setting, load_environment
 from modules.database import delete_processed_posts, init_db, mark_post_processed, upsert_post
 from modules.facebook_session import (
     FacebookSession,
@@ -24,9 +26,9 @@ from modules.facebook_session import (
     check_facebook_session,
     saved_facebook_user_id,
 )
-from modules.processor import DEFAULT_MODEL, analyze_posts_with_gemini
-from modules.gemini import AUTO_MODEL, GeminiError, list_text_models, normalize_model_name, redact
-from modules.reddit import CAMBODIA_URL, reddit_configured
+from modules.processor import analyze_posts
+from modules.gemini import AUTO_MODEL, GeminiError, list_text_models, normalize_model_name
+from modules.reddit import CAMBODIA_URL, is_reddit_url, reddit_configured
 from modules.signals import NON_CONTENT_TYPES, SIGNAL_LABELS, is_analyzable, is_flagged, watch_terms
 from modules.saved_links import library_owner_id, load_saved_links, parse_links, remove_saved_links, save_links
 
@@ -85,18 +87,19 @@ def _fetch_firestore_posts(status_filter: str, limit: int) -> List[Dict[str, Any
 
 def _process_selected_firestore_posts(
     selected_posts: List[Dict[str, Any]],
-    gemini_key: str,
+    provider: str = "gemini",
     status_callback: Any = None,
 ) -> Dict[str, Any]:
-    """Run Gemini on selected posts and persist results to Firestore.
+    """Run the selected provider on posts and persist results to Firestore.
 
     Returns dict with 'processed', 'error' counts and 'analyses' list.
     """
     db = init_db()
-    model_name = st.session_state.get("gemini_model_name", DEFAULT_MODEL)
-    analysis_by_id = analyze_posts_with_gemini(
+    model_name = (st.session_state.get("gemini_model_name", get_ai_model(provider))
+                  if provider == "gemini" else get_ai_model(provider))
+    analysis_by_id = analyze_posts(
         selected_posts,
-        api_key=gemini_key,
+        provider=provider,
         model_name=model_name,
         on_status=status_callback,
         targets=watch_terms(st.session_state.get("thailand_watch_terms", "")),
@@ -134,17 +137,17 @@ def _process_selected_firestore_posts(
             "errors": list(getattr(analysis_by_id, "errors", []))}
 
 
-def _render_gemini_settings() -> str:
-    api_key = st.text_input("Gemini API key", value=os.getenv("GEMINI_KEY", ""),
-                            type="password", help="Uses this key for Gemini analysis.")
+def _render_gemini_settings() -> None:
+    api_key = get_ai_key("gemini")
     fingerprint = hashlib.sha256(api_key.strip().encode()).hexdigest()
     if st.session_state.get("gemini_catalog_key") != fingerprint:
         st.session_state["gemini_catalog_key"] = fingerprint
         st.session_state.pop("gemini_available_models", None)
         st.session_state.pop("gemini_catalog_error", None)
-    if st.button("Refresh available models", key="refresh_gemini_models", use_container_width=True):
+    if st.button("Refresh available models", key="refresh_gemini_models", use_container_width=True,
+                 disabled=not api_key):
         try:
-            with st.spinner("Checking models available to this API key…"):
+            with st.spinner("Checking available Gemini models…"):
                 st.session_state["gemini_available_models"] = list_text_models(api_key.strip())
             st.session_state.pop("gemini_catalog_error", None)
         except GeminiError as exc:
@@ -155,7 +158,7 @@ def _render_gemini_settings() -> str:
     available = st.session_state.get("gemini_available_models")
     options = [AUTO_MODEL] + (available or [])
     try:
-        current = normalize_model_name(st.session_state.get("gemini_model_name", os.getenv("GEMINI_MODEL", DEFAULT_MODEL)))
+        current = normalize_model_name(st.session_state.get("gemini_model_name", get_ai_model("gemini")))
     except GeminiError:
         current = AUTO_MODEL
     if current not in options:
@@ -168,7 +171,20 @@ def _render_gemini_settings() -> str:
     st.selectbox("Gemini model", options, key="gemini_model_name",
                  format_func=lambda name: "Automatic · available Flash model" if name == AUTO_MODEL else name.removeprefix("models/"))
     st.caption("Automatic checks the available models before analysis. Model availability does not guarantee remaining quota.")
-    return api_key
+
+
+def _render_ai_settings() -> str:
+    if "ai_provider" not in st.session_state:
+        st.session_state["ai_provider"] = get_ai_provider()
+    provider = st.selectbox("AI provider", list(AI_PROVIDERS), key="ai_provider",
+                            format_func=AI_PROVIDERS.get)
+    if not get_ai_key(provider):
+        st.warning(f"{AI_PROVIDERS[provider]} is not configured yet. Choose another provider or contact the app administrator.")
+    if provider == "gemini":
+        _render_gemini_settings()
+    else:
+        st.caption(f"ChatGPT model: {get_ai_model(provider)}")
+    return provider
 
 
 def _run_scrape_sync(url: str, headless: bool, scroll_times: int) -> List[Dict[str, Any]]:
@@ -263,63 +279,78 @@ def _get_facebook_session(path: str) -> FacebookSession:
         return _check_facebook_session(path, info.st_mtime_ns, info.st_size)
 
 
-def _render_facebook_connection() -> FacebookSession:
-    path = str(Path(os.getenv("PLAYWRIGHT_STORAGE_STATE", "").strip() or AUTH_STORAGE_STATE_FILE).expanduser().resolve())
-    session = _get_facebook_session(path)
+def _facebook_storage_path() -> str:
+    return str(Path(os.getenv("PLAYWRIGHT_STORAGE_STATE", "").strip() or AUTH_STORAGE_STATE_FILE).expanduser().resolve())
+
+
+def _render_facebook_connection(session: Optional[FacebookSession] = None) -> FacebookSession:
+    path = _facebook_storage_path()
+    if session is None:
+        session = _get_facebook_session(path)
+    if session.status == "connected":
+        os.environ["PLAYWRIGHT_STORAGE_STATE"] = path
+        st.empty()  # Clear the previous login card on the successful-login rerun.
+        return session
     with st.container(border=True, key="facebook_connection"):
         identity, action = st.columns([3, 1], vertical_alignment="center")
-        if session.status == "connected":
-            os.environ["PLAYWRIGHT_STORAGE_STATE"] = path
-            name = session.name or f"Facebook account {session.user_id}"
-            initials = "".join(word[0] for word in name.split()[:2])
-            identity.markdown(
-                f'<div class="fb-identity"><div class="fb-avatar">{html.escape(initials)}</div>'
-                '<div><p class="fb-label">FACEBOOK</p>'
-                f'<p class="fb-name">{html.escape(name)}</p>'
-                '<p class="fb-detail">Ready to collect posts.</p></div></div>',
-                unsafe_allow_html=True,
-            )
-            action.markdown('<span class="fb-status">Connected</span>', unsafe_allow_html=True)
-        else:
-            identity.markdown(
-                '<div class="fb-identity"><div class="fb-avatar" aria-hidden="true">f</div>'
-                '<div><p class="fb-label">FACEBOOK</p><p class="fb-name">Connect your account</p>'
-                '<p class="fb-detail">Log in once to collect Facebook posts.</p></div></div>',
-                unsafe_allow_html=True,
-            )
-            if action.button(
-                "Log in to Facebook", key="capture_fb_session_btn", type="primary",
-                use_container_width=True, disabled=IS_CLOUD,
-            ):
-                with st.spinner("Finish logging in in the browser window…"):
-                    try:
-                        capture_facebook_session(path, timeout_seconds=AUTH_LOGIN_TIMEOUT_SECONDS)
-                        os.environ["PLAYWRIGHT_STORAGE_STATE"] = path
-                        _check_facebook_session.clear()
-                        st.rerun()
-                    except Exception:
-                        st.error("Facebook login did not finish. Please try again.")
-            if IS_CLOUD:
-                st.caption("Log in from SenseMaker on your computer to collect Facebook posts.")
-            elif session.status == "unavailable":
-                st.caption("We couldn’t confirm your saved session. Log in again to reconnect.")
+        identity.markdown(
+            '<div class="fb-identity"><div class="fb-avatar" aria-hidden="true">f</div>'
+            '<div><p class="fb-label">FACEBOOK</p><p class="fb-name">Connect your account</p>'
+            '<p class="fb-detail">Log in once to collect Facebook posts.</p></div></div>',
+            unsafe_allow_html=True,
+        )
+        if action.button(
+            "Log in to Facebook", key="capture_fb_session_btn", type="primary",
+            use_container_width=True, disabled=IS_CLOUD,
+        ):
+            with st.spinner("Finish logging in in the browser window…"):
+                try:
+                    capture_facebook_session(path, timeout_seconds=AUTH_LOGIN_TIMEOUT_SECONDS)
+                    os.environ["PLAYWRIGHT_STORAGE_STATE"] = path
+                    _check_facebook_session.clear()
+                    st.rerun()
+                except Exception:
+                    st.error("Facebook login did not finish. Please try again.")
+        if IS_CLOUD:
+            st.caption("Log in from SenseMaker on your computer to collect Facebook posts.")
+        elif session.status == "unavailable":
+            st.caption("We couldn’t confirm your saved session. Log in again to reconnect.")
     return session
 
 
-def _render_link_workspace(user_email: str) -> tuple[List[str], bool]:
+def _render_link_workspace(user_email: str, platform: str | None = None) -> tuple[List[str], bool]:
     owner = library_owner_id(user_email)
+    if platform:
+        owner = f"{owner}_{platform}"
+    default_links = [CAMBODIA_URL] if platform != "facebook" else []
+
+    def widget_key(name: str) -> str:
+        return f"{name}_{platform}" if platform else name
+
+    def matches_source(url: str) -> bool:
+        if platform == "reddit":
+            return is_reddit_url(url)
+        if platform == "facebook":
+            host = (urlsplit(url).hostname or "").lower()
+            return host in {"facebook.com", "fb.com"} or host.endswith(".facebook.com")
+        return True
+
+    def parse_sources(text: str) -> tuple[list[str], list[str]]:
+        urls, invalid = parse_links(text)
+        return [url for url in urls if matches_source(url)], invalid + [
+            url for url in urls if not matches_source(url)]
+
     library_key = f"saved_links_{owner}"
     selection_key = f"selected_links_{owner}"
-    pending_key = f"next_selected_links_{owner}"
     input_key = f"new_links_{owner}"
-    clear_key = f"clear_new_links_{owner}"
     message_key = f"links_message_{owner}"
+    save_error_key = f"links_save_error_{owner}"
     defaults_key = f"default_links_initialized_{owner}"
 
     def refresh() -> None:
         try:
             with st.spinner("Loading saved links…"):
-                urls = load_saved_links(init_db(), user_email)
+                urls = [url for url in load_saved_links(init_db(), user_email) if matches_source(url)]
             st.session_state[library_key] = {"urls": urls, "error": False}
         except Exception:
             previous = st.session_state.get(library_key, {})
@@ -328,23 +359,65 @@ def _render_link_workspace(user_email: str) -> tuple[List[str], bool]:
     if library_key not in st.session_state:
         refresh()
     library = st.session_state[library_key]
-    saved = list(dict.fromkeys([CAMBODIA_URL] + library["urls"]))
+    saved = list(dict.fromkeys(default_links + library["urls"]))
     saved_set = set(saved)
     if not st.session_state.get(defaults_key):
         st.session_state[selection_key] = list(dict.fromkeys(
-            st.session_state.get(selection_key, []) + [CAMBODIA_URL]))
+            st.session_state.get(selection_key, []) + default_links))
         st.session_state[defaults_key] = True
-    if pending_key in st.session_state:
-        st.session_state[selection_key] = st.session_state.pop(pending_key)
     # A refresh may include removals made on another device.
     if selection_key in st.session_state:
         st.session_state[selection_key] = [url for url in st.session_state[selection_key] if url in saved_set]
-    if st.session_state.pop(clear_key, False):
-        st.session_state[input_key] = ""
 
-    with st.container(border=True, key="link_workspace"):
+    def select_all() -> None:
+        st.session_state[selection_key] = saved.copy()
+
+    def clear_selection() -> None:
+        st.session_state[selection_key] = []
+        st.session_state[input_key] = ""
+        st.session_state.pop(save_error_key, None)
+
+    def remove_selected() -> None:
+        removable = [url for url in st.session_state.get(selection_key, []) if url != CAMBODIA_URL]
+        try:
+            remove_saved_links(init_db(), user_email, removable)
+            removed = set(removable)
+            st.session_state[library_key]["urls"] = [url for url in saved if url not in removed]
+            st.session_state[selection_key] = [
+                url for url in st.session_state.get(selection_key, []) if url not in removed]
+            st.session_state[message_key] = f"Removed {len(removable)} saved links."
+        except Exception:
+            st.session_state[save_error_key] = "Some links couldn’t be removed. Refresh your library and try again."
+
+    def save_pasted_links() -> None:
+        pasted, invalid = parse_sources(st.session_state.get(input_key, ""))
+        st.session_state.pop(save_error_key, None)
+        if not pasted or invalid:
+            return
+        new_links = [url for url in pasted if url not in saved_set]
+        try:
+            if new_links:
+                save_links(init_db(), user_email, new_links)
+            st.session_state[library_key]["urls"] = list(dict.fromkeys(saved + pasted))
+            st.session_state[selection_key] = list(dict.fromkeys(
+                st.session_state.get(selection_key, []) + pasted))
+            st.session_state[input_key] = ""
+            st.session_state[message_key] = (
+                f"Saved {len(new_links)} new links. Your links are selected and ready to collect."
+                if new_links else "These links are already saved. They’re selected and ready to collect."
+            )
+        except Exception:
+            st.session_state[save_error_key] = (
+                "Some links couldn’t be saved. Edit or re-enter the links to retry; saved links are kept."
+            )
+
+    with st.container(border=True, key=widget_key("link_workspace")):
         st.subheader("Your links")
-        st.caption("r/cambodia is included by default. Save other sources here and choose which to collect.")
+        st.caption(
+            "Add Facebook pages, groups or post links below; links are saved automatically."
+            if platform == "facebook" else
+            "r/cambodia is included by default. Add other sources below; links are saved automatically."
+        )
         if message_key in st.session_state:
             st.success(st.session_state.pop(message_key))
         if library["error"]:
@@ -355,59 +428,46 @@ def _render_link_workspace(user_email: str) -> tuple[List[str], bool]:
             placeholder="Search and choose saved links", disabled=not saved,
         )
         select_action, clear_action, refresh_action = st.columns(3)
-        if select_action.button("Select all", key="select_all_links", use_container_width=True, disabled=not saved):
-            st.session_state[pending_key] = saved.copy()
-            st.rerun()
-        if clear_action.button("Clear selection", key="clear_selected_links", use_container_width=True, disabled=not selected):
-            st.session_state[pending_key] = []
-            st.rerun()
-        if refresh_action.button("Refresh", key="refresh_saved_links", use_container_width=True):
-            refresh()
-            st.rerun()
+        select_action.button(
+            "Select all", key=widget_key("select_all_links"), use_container_width=True,
+            disabled=not saved, on_click=select_all,
+        )
+        clear_action.button(
+            "Clear", key=widget_key("clear_selected_links"), use_container_width=True,
+            disabled=not selected and not st.session_state.get(input_key, "").strip(),
+            help="Deselect all sources and clear pasted links. Saved links are kept.",
+            on_click=clear_selection,
+        )
+        refresh_action.button(
+            "Refresh", key=widget_key("refresh_saved_links"), use_container_width=True, on_click=refresh,
+        )
 
         removable = [url for url in selected if url != CAMBODIA_URL]
-        if removable and st.button(
-            f"Remove {len(removable)} saved link{'s' if len(removable) != 1 else ''}",
-            key="remove_selected_links", use_container_width=True,
-            help="Removes these links from your library. Collected posts are kept.",
-        ):
-            try:
-                remove_saved_links(init_db(), user_email, removable)
-                removed = set(removable)
-                st.session_state[library_key]["urls"] = [url for url in saved if url not in removed]
-                st.session_state[pending_key] = [url for url in selected if url not in removed]
-                st.session_state[message_key] = f"Removed {len(removable)} saved links."
-                st.rerun()
-            except Exception:
-                st.error("Some links couldn’t be removed. Refresh your library and try again.")
+        if removable:
+            st.button(
+                f"Remove {len(removable)} saved link{'s' if len(removable) != 1 else ''}",
+                key=widget_key("remove_selected_links"), use_container_width=True,
+                help="Removes these links from your library. Collected posts are kept.",
+                on_click=remove_selected,
+            )
 
         text = st.text_area(
             "Add links (one per line)", key=input_key, height=160,
-            placeholder="https://www.facebook.com/groups/your-community\nhttps://www.reddit.com/r/cambodia/",
-            help="Paste as many links as you need. You can collect them now or save them for later.",
+            placeholder=("https://www.facebook.com/groups/your-community" if platform == "facebook" else
+                         "https://www.reddit.com/r/cambodia/" if platform == "reddit" else
+                         "https://www.facebook.com/groups/your-community\nhttps://www.reddit.com/r/cambodia/"),
+            help="Paste as many links as you need. Valid links are saved and selected when you finish editing.",
+            on_change=save_pasted_links,
         )
-        pasted, invalid = parse_links(text)
+        if st.session_state.get(save_error_key):
+            st.error(st.session_state[save_error_key])
+        pasted, invalid = parse_sources(text)
         if invalid:
-            st.error("Correct the invalid links before continuing. Use one http or https web link per line.")
+            st.error(
+                f"Use valid {platform.title()} links in this tab, one per line." if platform else
+                "Correct the invalid links before continuing. Use one http or https web link per line."
+            )
             st.code("\n".join(invalid[:5]), language=None)
-        save_clicked = st.button("Save links", key="save_source_links", use_container_width=True)
-        if save_clicked and not pasted and not invalid:
-            st.info("Add at least one link to save.")
-        if save_clicked and pasted and not invalid:
-            new_links = [url for url in pasted if url not in saved_set]
-            try:
-                if new_links:
-                    save_links(init_db(), user_email, new_links)
-                st.session_state[library_key]["urls"] = list(dict.fromkeys(saved + pasted))
-                st.session_state[pending_key] = list(dict.fromkeys(selected + pasted))
-                st.session_state[clear_key] = True
-                st.session_state[message_key] = (
-                    f"Saved {len(new_links)} new links. Your links are selected and ready to collect."
-                    if new_links else "These links are already saved. They’re selected and ready to collect."
-                )
-                st.rerun()
-            except Exception:
-                st.error("Some links couldn’t be saved. Refresh your library and retry; saved links are kept.")
 
     targets = list(dict.fromkeys(selected + pasted))
     st.caption(f"{len(targets)} link{'s' if len(targets) != 1 else ''} ready to collect")
@@ -777,7 +837,7 @@ def _apply_ui_theme() -> None:
 
 def _render_reddit_settings() -> tuple[int, int]:
     st.subheader("Reddit · r/cambodia")
-    st.caption("r/cambodia is included by default. Choose whether to collect it in Your links.")
+    st.caption("Collect posts and comments directly from r/cambodia.")
     with st.container(border=True):
         if reddit_configured():
             st.caption("API credentials configured. Access is checked when collecting.")
@@ -793,98 +853,119 @@ def _render_reddit_settings() -> tuple[int, int]:
     return int(limit), int(comments)
 
 
+def _render_collection_workspace(
+    platform: str, user_email: str, facebook_session: FacebookSession,
+) -> None:
+    if platform == "facebook":
+        _render_facebook_connection(facebook_session)
+        reddit_limit, reddit_comments = 50, 20
+        target_urls, links_valid = _render_link_workspace(user_email, platform=platform)
+    else:
+        reddit_limit, reddit_comments = _render_reddit_settings()
+        target_urls, links_valid = [CAMBODIA_URL], True
+
+    if platform == "facebook":
+        if target_urls and facebook_session.status != "connected":
+            st.info("Connect your Facebook account above before collecting Facebook posts.")
+        tc1, tc2 = st.columns(2)
+        use_headless = tc1.checkbox("Headless Browser", value=True, disabled=IS_CLOUD, key="facebook_headless")
+        scroll_times = tc2.slider("Scroll Iterations", min_value=1, max_value=50, value=10, key="facebook_scroll_times")
+    else:
+        use_headless, scroll_times = True, 10
+
+    # Keep each source's results and save controls independent when switching tabs.
+    result_key = "last_scrape" if platform == "facebook" else "last_reddit_scrape"
+    title_key = "custom_title_value" if platform == "facebook" else "reddit_custom_title_value"
+    save_key = "save_last_results_btn" if platform == "facebook" else "save_reddit_results_btn"
+    if st.button("Collect posts", key=f"collect_{platform}_posts", type="primary", use_container_width=True):
+        if not links_valid:
+            st.error("Correct the invalid links above before collecting posts.")
+        elif not target_urls:
+            st.error("Please provide at least one URL.")
+        else:
+            st.session_state[f"{result_key}_urls"] = target_urls
+            st.session_state[f"{result_key}_error"] = ""
+            progress = st.progress(0, text=f"Starting collection for {len(target_urls)} links…")
+            with st.spinner("Running scraper..."):
+                try:
+                    results = _run_multi_scrape_sync(
+                        urls=target_urls,
+                        headless=use_headless,
+                        scroll_times=scroll_times,
+                        reddit_limit=int(reddit_limit), reddit_comments=int(reddit_comments),
+                        on_progress=lambda done, total, _url: progress.progress(
+                            done / total, text=f"Processed {done} of {total} links"
+                        ),
+                    )
+                    st.session_state[f"{result_key}_results"] = results
+                except Exception as exc:
+                    st.session_state[f"{result_key}_results"] = []
+                    error_text = str(exc).strip() or repr(exc)
+                    st.session_state[f"{result_key}_error"] = error_text
+                    st.error(f"Scrape failed: {error_text}")
+
+    scrape_results = st.session_state.get(f"{result_key}_results", None)
+    scrape_urls = st.session_state.get(f"{result_key}_urls", [])
+    scrape_error = st.session_state.get(f"{result_key}_error", "")
+    if scrape_results is not None:
+        if scrape_urls:
+            with st.expander(f"Sources in the last collection ({len(scrape_urls)})"):
+                st.code("\n".join(scrape_urls))
+        if scrape_error:
+            st.caption(f"Last error: {scrape_error}")
+        issues = [r for r in scrape_results if r.get("source_type") in NON_CONTENT_TYPES]
+        for issue in issues:
+            st.warning(f"{issue.get('target_url', issue.get('url', 'Source'))}: {issue.get('raw_text', 'Collection incomplete')}")
+        scrape_results = [r for r in scrape_results if r.get("source_type") not in NON_CONTENT_TYPES]
+        st.write(f"**Records collected:** {len(scrape_results)}")
+        if scrape_results:
+            custom_title = st.text_input(
+                "Custom title",
+                value=st.session_state.get(title_key, ""),
+                key=title_key,
+                help="This title will be saved on each object uploaded to Firestore.",
+            )
+            if st.button("Save data to cloud", key=save_key):
+                try:
+                    if not custom_title.strip():
+                        st.error("Please enter a custom title before saving.")
+                    else:
+                        write_summary = _write_results_to_firestore(scrape_results, custom_title=custom_title)
+                        st.success(
+                            "Saved to Firestore: "
+                            f"{write_summary['inserted']} posts "
+                            f"(skipped: {write_summary['skipped']})."
+                        )
+                except Exception as exc:
+                    error_text = str(exc).strip() or repr(exc)
+                    st.error(f"Firestore write failed: {error_text}")
+            st.dataframe(pd.DataFrame(scrape_results), use_container_width=True, hide_index=True)
+            with st.expander("Raw JSON Output"):
+                st.json(scrape_results)
+        else:
+            st.info("No source records were collected. Check any connection notices above.")
+
+
 def main() -> None:
-    load_dotenv()
+    load_environment()
     _bridge_secrets_to_env()
     st.set_page_config(page_title="SenseMaker", layout="wide")
     _apply_ui_theme()
     user_email = require_access()
-    st.title("SenseMaker")
-    scrape_tab, gemini_tab, reddit_tab = st.tabs(["Scrap data", "Sentiment Analysis", "Reddit · r/cambodia"])
-
-    with reddit_tab:
-        reddit_limit, reddit_comments = _render_reddit_settings()
+    facebook_session = _get_facebook_session(_facebook_storage_path())
+    scrape_tab, analysis_tab = dashboard_views(user_email, facebook_session)
 
     with scrape_tab:
-        facebook_session = _render_facebook_connection()
+        facebook_tab, reddit_tab, news_tab = st.tabs(["Facebook", "Reddit", "Online news"])
+        with facebook_tab:
+            _render_collection_workspace("facebook", user_email, facebook_session)
+        with reddit_tab:
+            _render_collection_workspace("reddit", user_email, facebook_session)
+        with news_tab:
+            st.subheader("Online news")
+            st.info("Online news collection is coming soon.")
 
-        target_urls, links_valid = _render_link_workspace(user_email)
-
-        if any("facebook.com" in u.lower() for u in target_urls) and facebook_session.status != "connected":
-            st.info("Connect your Facebook account above before collecting Facebook posts.")
-        tc1, tc2 = st.columns(2)
-        use_headless = tc1.checkbox("Headless Browser", value=True, disabled=IS_CLOUD)
-        scroll_times = tc2.slider("Scroll Iterations", min_value=1, max_value=50, value=10)
-
-        if st.button("Collect posts", type="primary", use_container_width=True):
-            if not links_valid:
-                st.error("Correct the invalid links above before collecting posts.")
-            elif not target_urls:
-                st.error("Please provide at least one URL.")
-            else:
-                st.session_state["last_scrape_urls"] = target_urls
-                st.session_state["last_scrape_error"] = ""
-                progress = st.progress(0, text=f"Starting collection for {len(target_urls)} links…")
-                with st.spinner("Running scraper..."):
-                    try:
-                        results = _run_multi_scrape_sync(
-                            urls=target_urls,
-                            headless=use_headless,
-                            scroll_times=scroll_times,
-                            reddit_limit=int(reddit_limit), reddit_comments=int(reddit_comments),
-                            on_progress=lambda done, total, _url: progress.progress(
-                                done / total, text=f"Processed {done} of {total} links"
-                            ),
-                        )
-                        st.session_state["last_scrape_results"] = results
-                    except Exception as exc:
-                        st.session_state["last_scrape_results"] = []
-                        error_text = str(exc).strip() or repr(exc)
-                        st.session_state["last_scrape_error"] = error_text
-                        st.error(f"Scrape failed: {error_text}")
-
-        scrape_results = st.session_state.get("last_scrape_results", None)
-        scrape_urls = st.session_state.get("last_scrape_urls", [])
-        scrape_error = st.session_state.get("last_scrape_error", "")
-        if scrape_results is not None:
-            if scrape_urls:
-                with st.expander(f"Sources in the last collection ({len(scrape_urls)})"):
-                    st.code("\n".join(scrape_urls))
-            if scrape_error:
-                st.caption(f"Last error: {scrape_error}")
-            issues = [r for r in scrape_results if r.get("source_type") in NON_CONTENT_TYPES]
-            for issue in issues:
-                st.warning(f"{issue.get('target_url', issue.get('url', 'Source'))}: {issue.get('raw_text', 'Collection incomplete')}")
-            scrape_results = [r for r in scrape_results if r.get("source_type") not in NON_CONTENT_TYPES]
-            st.write(f"**Records collected:** {len(scrape_results)}")
-            if scrape_results:
-                custom_title = st.text_input(
-                    "Custom title",
-                    value=st.session_state.get("custom_title_value", ""),
-                    key="custom_title_value",
-                    help="This title will be saved on each object uploaded to Firestore.",
-                )
-                if st.button("Save data to cloud", key="save_last_results_btn"):
-                    try:
-                        if not custom_title.strip():
-                            st.error("Please enter a custom title before saving.")
-                        else:
-                            write_summary = _write_results_to_firestore(scrape_results, custom_title=custom_title)
-                            st.success(
-                                "Saved to Firestore: "
-                                f"{write_summary['inserted']} posts "
-                                f"(skipped: {write_summary['skipped']})."
-                            )
-                    except Exception as exc:
-                        error_text = str(exc).strip() or repr(exc)
-                        st.error(f"Firestore write failed: {error_text}")
-                st.dataframe(pd.DataFrame(scrape_results), use_container_width=True, hide_index=True)
-                with st.expander("Raw JSON Output"):
-                    st.json(scrape_results)
-            else:
-                st.info("No source records were collected. Check any connection notices above.")
-
-    with gemini_tab:
+    with analysis_tab:
         st.subheader("Sentiment Analysis")
         st.caption("Detect Thailand-related criticism, tensions and boycott calls, with source evidence.")
         st.text_area("Thai projects, companies and brands to watch (one name or alias per line)",
@@ -895,7 +976,8 @@ def main() -> None:
         gc1, gc2 = st.columns([1, 1])
         status_filter = gc1.selectbox("Record status", options=["all", "pending", "processed", "error"], index=0)
         load_limit = gc2.slider("Load limit", min_value=1, max_value=200, value=50)
-        gemini_key_input = _render_gemini_settings()
+        provider = _render_ai_settings()
+        provider_label = AI_PROVIDERS[provider]
 
         # --- Load records ---
         if st.button("Load records from Firestore", key="load_firestore_records_btn"):
@@ -945,15 +1027,14 @@ def main() -> None:
                 default=id_options,
             )
 
-            if st.button("Run Gemini on selected records", key="run_gemini_selected_btn"):
+            if st.button(f"Run {provider_label} on selected records", key="run_analysis_selected_btn",
+                         disabled=not get_ai_key(provider)):
                 if not selected_ids:
                     st.error("Please select at least one record.")
-                elif not gemini_key_input.strip():
-                    st.error("Please provide a Gemini API key.")
                 else:
                     selected_posts = [r for r in firestore_rows if str(r.get("_id", "")) in set(selected_ids)]
                     status_container = st.status(
-                        f"Running Gemini on {len(selected_posts)} record(s)...",
+                        f"Running {provider_label} on {len(selected_posts)} record(s)...",
                         expanded=True,
                     )
                     try:
@@ -962,10 +1043,10 @@ def main() -> None:
 
                         summary = _process_selected_firestore_posts(
                             selected_posts,
-                            gemini_key=gemini_key_input,
+                            provider=provider,
                             status_callback=_update_status,
                         )
-                        st.session_state["gemini_last_results"] = summary
+                        st.session_state["analysis_last_results"] = summary
                         status_container.update(
                             label=(
                                 f"Done — {summary['processed']} processed, "
@@ -974,36 +1055,38 @@ def main() -> None:
                             state="error" if summary["error"] else "complete",
                         )
                     except Exception as exc:
-                        error_text = redact(str(exc).strip() or "Analysis failed. Please try again.", gemini_key_input.strip())
+                        error_text = (str(exc).strip() if isinstance(exc, (AIError, ValueError)) else
+                                      "Analysis failed. Please try again or contact the app administrator.")
+                        error_text = redact(error_text, get_ai_key(provider))
                         status_container.update(
                             label=f"Failed: {error_text}",
                             state="error",
                         )
-                        st.session_state["gemini_last_results"] = {
+                        st.session_state["analysis_last_results"] = {
                             "processed": 0, "error": len(selected_posts), "analyses": [], "errors": [error_text],
                         }
 
-        # --- Display Gemini results ---
-        gemini_results = st.session_state.get("gemini_last_results")
-        if gemini_results:
+        # --- Display analysis results ---
+        analysis_results = st.session_state.get("analysis_last_results")
+        if analysis_results:
             st.divider()
             st.subheader("Analysis results")
 
             res_c1, res_c2 = st.columns(2)
-            res_c1.metric("Processed", gemini_results.get("processed", 0))
-            res_c2.metric("Errors", gemini_results.get("error", 0))
+            res_c1.metric("Processed", analysis_results.get("processed", 0))
+            res_c2.metric("Errors", analysis_results.get("error", 0))
 
-            for message in dict.fromkeys(gemini_results.get("errors", [])):
+            for message in dict.fromkeys(analysis_results.get("errors", [])):
                 st.error(message)
-            analyses = gemini_results.get("analyses", [])
+            analyses = analysis_results.get("analyses", [])
             if analyses:
                 visible = _render_signal_overview(analyses, "latest_signals_filter")
                 _render_analysis_cards(visible)
                 with st.expander("Raw analysis JSON"):
                     st.json(analyses)
-            elif gemini_results.get("error", 0) > 0:
+            elif analysis_results.get("error", 0) > 0:
                 st.warning("No records were analyzed. Resolve the error above and retry."
-                           if gemini_results.get("errors") else
+                           if analysis_results.get("errors") else
                            "This result was created before detailed errors were available. Run analysis again to see the cause.")
 
         # --- View previously processed records ---

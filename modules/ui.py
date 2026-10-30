@@ -13,7 +13,7 @@ import streamlit.components.v1 as components
 
 THEME_DIR = Path(__file__).parent / "theme"
 
-# Gemini labels posts with one of these; anything else gets the neutral grey tone.
+# AI labels posts with one of these; anything else gets the neutral grey tone.
 SENTIMENT_TONES = {"Anger": "anger", "Anxiety": "anxiety", "Joy": "joy", "Neutral": "neutral"}
 
 _LOCK_ICON = (
@@ -49,7 +49,7 @@ def hero() -> None:
         '<span class="sm-eyebrow"><span class="sm-pulse" aria-hidden="true"></span>Project Sentinel</span>'
         '<div class="sm-hero__title" role="heading" aria-level="1">SenseMaker</div>'
         '<p class="sm-hero__lede">Collect posts from the sources you follow, then read their sentiment '
-        "and risk with Gemini.</p></div>",
+        "and risk with Gemini or ChatGPT.</p></div>",
         unsafe_allow_html=True,
     )
 
@@ -109,6 +109,6 @@ def _analysis_card(item: Dict[str, Any]) -> str:
 
 
 def analysis_cards(analyses: List[Dict[str, Any]]) -> None:
-    """Render Gemini results as a responsive grid of sentiment-tinted cards."""
+    """Render AI results as a responsive grid of sentiment-tinted cards."""
     cards = "".join(_analysis_card(item) for item in analyses)
     st.markdown(f'<div class="sm-grid">{cards}</div>', unsafe_allow_html=True)

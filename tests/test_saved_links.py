@@ -109,14 +109,14 @@ class LinkWorkspaceTests(unittest.TestCase):
         "st.json(targets)\n"
     )
 
-    def test_save_reopen_select_all_and_remove_without_repasting(self):
+    def test_auto_save_reopen_select_all_and_remove_without_repasting(self):
         db = MemoryDB()
         urls = [f"https://example.org/source/{i}" for i in range(40)]
         with patch("dashboard.init_db", return_value=db):
             app = AppTest.from_string(self.script).run()
             app.text_area[0].input("\n".join(urls + urls[:1])).run()
             self.assertEqual(json.loads(app.json[0].value), [CAMBODIA_URL] + urls)
-            app.button(key="save_source_links").click().run()
+            self.assertFalse(any(button.label == "Save links" for button in app.button))
             self.assertFalse(list(app.exception))
             self.assertEqual(app.text_area[0].value, "")
             self.assertEqual(len(app.multiselect[0].value), 41)
@@ -139,9 +139,48 @@ class LinkWorkspaceTests(unittest.TestCase):
         with patch("dashboard.init_db", return_value=db):
             app = AppTest.from_string(self.script).run()
             app.text_area[0].input("https://example.org/\nnot a link").run()
-            app.button(key="save_source_links").click().run()
             self.assertEqual(len(app.error), 1)
             self.assertEqual(db.records, {})
+
+    def test_pasting_then_collecting_saves_links_without_losing_the_collect_click(self):
+        db = MemoryDB()
+        script = self.script + (
+            "if st.button('Collect posts', key='collect_posts'):\n"
+            "    st.session_state['collected_targets'] = targets\n"
+        )
+        with patch("dashboard.init_db", return_value=db):
+            app = AppTest.from_string(script).run()
+            app.text_area[0].input("https://example.org/new")
+            app.button(key="collect_posts").click().run()
+            self.assertFalse(list(app.exception))
+            self.assertEqual(app.session_state["collected_targets"],
+                             [CAMBODIA_URL, "https://example.org/new"])
+            self.assertEqual(len(db.records), 1)
+
+    def test_clear_deselects_all_sources_and_clears_pasted_links_without_deleting_saved_links(self):
+        db = MemoryDB()
+        urls = ["https://example.org/first", "https://example.org/second"]
+        with patch("dashboard.init_db", return_value=db):
+            app = AppTest.from_string(self.script).run()
+            app.text_area[0].input("\n".join(urls)).run()
+            app.text_area[0].input("https://example.org/unsaved\nnot a link").run()
+            app.button(key="clear_selected_links").click().run()
+            self.assertFalse(list(app.exception))
+            self.assertEqual(app.multiselect[0].value, [])
+            self.assertEqual(app.text_area[0].value, "")
+            self.assertEqual(json.loads(app.json[0].value), [])
+            self.assertEqual(len(app.error), 0)
+            self.assertEqual(len(db.records), 2)
+            self.assertEqual(app.multiselect[0].options, [CAMBODIA_URL] + urls)
+
+            # Pasted links also make Clear available when nothing is selected.
+            app.text_area[0].input("https://example.org/unsaved\nnot a link").run()
+            self.assertFalse(app.button(key="clear_selected_links").disabled)
+            app.button(key="clear_selected_links").click().run()
+            app.button(key="refresh_saved_links").click().run()
+            self.assertEqual(json.loads(app.json[0].value), [])
+            self.assertEqual(app.text_area[0].value, "")
+            self.assertEqual(len(db.records), 2)
 
     def test_cambodia_is_selected_by_default_and_can_be_deselected(self):
         db = MemoryDB()
@@ -154,6 +193,66 @@ class LinkWorkspaceTests(unittest.TestCase):
             app.button(key="refresh_saved_links").click().run()
             self.assertEqual(json.loads(app.json[0].value), [])
             self.assertEqual(app.multiselect[0].options, [CAMBODIA_URL])
+
+
+class SourceWorkspaceTests(unittest.TestCase):
+    script = (
+        "import streamlit as st\n"
+        "from dashboard import _render_collection_workspace\n"
+        "from modules.facebook_session import FacebookSession\n"
+        "facebook, reddit = st.tabs(['Facebook', 'Reddit'])\n"
+        "with facebook:\n"
+        "    _render_collection_workspace('facebook', 'owner@example.com', FacebookSession('connected', '123', 'Editor'))\n"
+        "with reddit:\n"
+        "    _render_collection_workspace('reddit', 'owner@example.com', FacebookSession())\n"
+    )
+
+    def test_sources_collection_results_and_clear_stay_in_their_own_tabs(self):
+        db = MemoryDB()
+        facebook_url = "https://www.facebook.com/groups/community"
+        save_links(db, "owner@example.com", [facebook_url, CAMBODIA_URL])
+
+        def collect(**kwargs):
+            return [{"url": url, "raw_text": url, "source_type": "post"} for url in kwargs["urls"]]
+
+        with patch("dashboard.init_db", return_value=db), \
+             patch("dashboard.reddit_configured", return_value=True), \
+             patch("dashboard._run_multi_scrape_sync", side_effect=collect) as scrape:
+            app = AppTest.from_string(self.script).run()
+            self.assertFalse(list(app.exception))
+            self.assertEqual(app.multiselect[0].options, [facebook_url])
+            self.assertEqual(len(app.multiselect), 1)
+            self.assertFalse(list(app.tabs[1].multiselect))
+            self.assertFalse(list(app.tabs[1].text_area))
+            self.assertNotIn("Your links", [heading.value for heading in app.tabs[1].subheader])
+            app.button(key="select_all_links_facebook").click().run()
+            app.button(key="collect_facebook_posts").click().run()
+            self.assertEqual(scrape.call_args.kwargs["urls"], [facebook_url])
+            app.number_input(key="reddit_post_limit").set_value(100).run()
+            app.button(key="collect_reddit_posts").click().run()
+            self.assertEqual(scrape.call_args.kwargs["urls"], [CAMBODIA_URL])
+            self.assertEqual(scrape.call_args.kwargs["reddit_limit"], 100)
+            self.assertEqual(app.session_state["last_scrape_results"][0]["url"], facebook_url)
+            self.assertEqual(app.session_state["last_reddit_scrape_results"][0]["url"], CAMBODIA_URL)
+            self.assertTrue(any(button.key == "save_last_results_btn" for button in app.button))
+            self.assertTrue(any(button.key == "save_reddit_results_btn" for button in app.button))
+            app.button(key="clear_selected_links_facebook").click().run()
+            self.assertFalse(list(app.exception))
+            self.assertEqual(app.multiselect[0].value, [])
+            self.assertFalse(list(app.tabs[1].multiselect))
+            self.assertEqual(len(db.records), 2)
+
+    def test_other_platform_links_cannot_be_saved_or_collected_in_facebook(self):
+        db = MemoryDB()
+        with patch("dashboard.init_db", return_value=db), \
+             patch("dashboard._run_multi_scrape_sync") as scrape:
+            app = AppTest.from_string(self.script).run()
+            app.text_area[0].input(CAMBODIA_URL).run()
+            app.button(key="collect_facebook_posts").click().run()
+            self.assertFalse(list(app.exception))
+            self.assertTrue(any("Use valid Facebook links" in error.value for error in app.error))
+            self.assertEqual(db.records, {})
+            scrape.assert_not_called()
 
 
 class LargeScrapeTests(unittest.TestCase):

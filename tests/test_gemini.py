@@ -2,6 +2,7 @@
 
 import io
 import json
+import os
 import unittest
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -84,11 +85,12 @@ class ModelTests(unittest.TestCase):
 
     def test_model_validation_stops_before_generation_or_database_writes(self):
         import dashboard
-        with patch("dashboard.init_db"), patch("dashboard.st.session_state", {"gemini_model_name": "auto"}), \
+        with patch.dict(os.environ, {"GEMINI_KEY": "server-key"}), \
+             patch("dashboard.init_db"), patch("dashboard.st.session_state", {"gemini_model_name": "auto"}), \
              patch("modules.processor.resolve_model", side_effect=GeminiError("Gemini HTTP 403: Access denied.")), \
              patch("modules.processor._generate_content") as generate, patch("dashboard.mark_post_processed") as save:
             with self.assertRaisesRegex(GeminiError, "403"):
-                dashboard._process_selected_firestore_posts([{"_id": "a", "raw_text": "Hello"}], "key")
+                dashboard._process_selected_firestore_posts([{"_id": "a", "raw_text": "Hello"}], "gemini")
             generate.assert_not_called()
             save.assert_not_called()
 
@@ -105,41 +107,44 @@ class GeminiSettingsTests(unittest.TestCase):
     script = "from dashboard import _render_gemini_settings\n_render_gemini_settings()\n"
 
     def test_refresh_replaces_unavailable_legacy_model_and_key_change_clears_catalogue(self):
-        with patch("dashboard.list_text_models", return_value=["models/gemini-test-flash"]):
+        with patch.dict(os.environ, {"GEMINI_KEY": "first-server-key"}), \
+             patch("dashboard.list_text_models", return_value=["models/gemini-test-flash"]) as catalogue:
             app = AppTest.from_string(self.script)
             app.session_state["gemini_model_name"] = "models/gemini-retired"
             app.run()
-            app.text_input[0].input("first-key").run()
+            self.assertEqual(len(app.text_input), 0)
             app.button(key="refresh_gemini_models").click().run()
             self.assertFalse(list(app.exception))
             self.assertEqual(app.selectbox(key="gemini_model_name").value, "auto")
             self.assertIn("gemini-test-flash", app.selectbox(key="gemini_model_name").options)
-            app.text_input[0].input("different-key").run()
+            catalogue.assert_called_once_with("first-server-key")
+            os.environ["GEMINI_KEY"] = "rotated-server-key"
+            app.run()
             self.assertNotIn("gemini_available_models", app.session_state)
 
     def test_catalogue_failure_is_visible_after_rerun(self):
-        with patch("dashboard.list_text_models", side_effect=GeminiError("Gemini HTTP 403: Access denied.")):
+        with patch.dict(os.environ, {"GEMINI_KEY": "server-key"}), \
+             patch("dashboard.list_text_models", side_effect=GeminiError("Gemini HTTP 403: Access denied.")):
             app = AppTest.from_string(self.script).run()
-            app.text_input[0].input("key").run()
             app.button(key="refresh_gemini_models").click().run()
             app.run()
             self.assertTrue(any("HTTP 403" in error.value for error in app.error))
             self.assertFalse(list(app.exception))
 
     def test_dashboard_analysis_failure_persists_actual_error_without_replacing_saved_analysis(self):
-        with patch("modules.auth.require_access", return_value="editor@example.com"), \
+        with patch.dict(os.environ, {"GEMINI_KEY": "server-key", "AI_PROVIDER": "gemini"}), \
+             patch("modules.auth.require_access", return_value="editor@example.com"), \
              patch("modules.database.init_db"), patch("modules.database.mark_post_processed") as save, \
              patch("modules.processor.resolve_model", side_effect=GeminiError("Gemini HTTP 404: Model unavailable.")):
             app = AppTest.from_file(str(Path(__file__).resolve().parents[1] / "dashboard.py"))
             app.session_state["firestore_rows"] = [{"_id": "a", "raw_text": "A Thai project", "status": "processed"}]
             app.run()
-            key = next(e for e in app.text_input if e.label == "Gemini API key")
-            key.input("fake-key").run()
-            app.button(key="run_gemini_selected_btn").click().run()
+            self.assertFalse(any("API key" in e.label for e in app.text_input))
+            app.button(key="run_analysis_selected_btn").click().run()
             app.run()
             self.assertFalse(list(app.exception))
             self.assertTrue(any("HTTP 404" in e.value for e in app.error))
-            self.assertEqual(app.session_state["gemini_last_results"]["processed"], 0)
+            self.assertEqual(app.session_state["analysis_last_results"]["processed"], 0)
             self.assertFalse(any("could not match" in w.value for w in app.warning))
             save.assert_not_called()
 

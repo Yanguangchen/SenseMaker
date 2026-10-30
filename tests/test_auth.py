@@ -80,7 +80,9 @@ class SessionTests(unittest.TestCase):
         }
         with patch("streamlit.session_state", state):
             _clear_session("Sign in again.")
-        self.assertEqual(state, {"auth_generation": 3, "auth_message": "Sign in again."})
+        self.assertEqual(state, {
+            "auth_generation": 3, "auth_message": "Sign in again.", "auth_reset_browser": True,
+        })
 
 
 if __name__ == "__main__":

@@ -5,8 +5,7 @@ from __future__ import annotations
 import asyncio
 import os
 
-from dotenv import load_dotenv
-
+from modules.config import load_environment
 from modules.database import init_db, upsert_post
 from modules.processor import process_pending_posts
 from modules.scraper import scrape_group
@@ -22,7 +21,7 @@ def _persist_factory():
 
 
 async def run() -> None:
-    load_dotenv()
+    load_environment()
     target_url = os.getenv("TARGET_GROUP_URL")
     if not target_url:
         raise ValueError("TARGET_GROUP_URL is not set.")

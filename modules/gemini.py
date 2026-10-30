@@ -11,29 +11,20 @@ from urllib.request import Request, urlopen
 
 import certifi
 
+from modules.ai_errors import AIError, redact
+
 AUTO_MODEL = "auto"
 API_ROOT = "https://generativelanguage.googleapis.com/v1beta"
 
 
-class GeminiError(RuntimeError):
-    def __init__(self, message: str, status_code: int | None = None):
-        super().__init__(message)
-        self.status_code = status_code
-        self.retryable = status_code in {408, 429, 500, 502, 503, 504}
-
-
-def redact(text: str, api_key: str) -> str:
-    if api_key:
-        text = text.replace(api_key, "[redacted]")
-    text = re.sub(r"AIza[A-Za-z0-9_-]+", "[redacted]", text)
-    text = re.sub(r"(?i)(?:key|api_key|x-goog-api-key)\s*[=:]\s*[^\s&\"']+", "key=[redacted]", text)
-    return " ".join(text.split())[:800]
+class GeminiError(AIError):
+    pass
 
 
 def api_error(exc: HTTPError, api_key: str) -> GeminiError:
     hints = {
         400: "Google rejected the request. Check the API key and the model's supported features.",
-        401: "The API key was not accepted. Enter a valid Gemini API key.",
+        401: "The server's Gemini API key was not accepted. Contact the app administrator.",
         403: "Access was denied. Check this key's API restrictions and project permissions.",
         404: "The model is unavailable for this key or API method. Select Automatic or refresh available models.",
         429: "Gemini quota or rate limit reached. Check your project's quota and billing, then retry.",
@@ -72,7 +63,7 @@ def is_text_model(model: dict) -> bool:
 
 def list_text_models(api_key: str) -> list[str]:
     if not api_key.strip():
-        raise GeminiError("Enter a Gemini API key to check available models.")
+        raise GeminiError("Gemini is not configured. Contact the app administrator.")
     names, seen_tokens = set(), set()
     token = ""
     while True:

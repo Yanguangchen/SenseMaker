@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 import ssl
 import time
 from typing import Any, Dict, List, Optional
@@ -17,8 +16,10 @@ from firebase_admin.firestore import Client
 
 from modules.database import get_pending_posts, mark_post_processed
 from modules.signals import content_sources, is_analyzable, normalize_analysis, watch_terms
-from modules.config import get_setting
+from modules.ai_errors import AIError
+from modules.config import AI_PROVIDERS, get_ai_key, get_ai_model, get_ai_provider, get_setting
 from modules.gemini import AUTO_MODEL, GeminiError, api_error, normalize_model_name, redact, resolve_model
+from modules.openai import OpenAIError, generate_content as generate_openai_content
 
 Analysis = Dict[str, Any]
 log = logging.getLogger(__name__)
@@ -32,7 +33,7 @@ BATCH_SIZE = 8
 
 
 def _generate_content(prompt: str, api_key: str, model_name: str, timeout: float = 90) -> str:
-    """Request-local credentials avoid sharing one user's key across sessions."""
+    """Send server credentials only to Google's API in a request header."""
     model_name = normalize_model_name(model_name)
     if model_name == AUTO_MODEL:
         raise GeminiError("Resolve an available model before generating an analysis.")
@@ -116,7 +117,7 @@ def _extract_json_object(text: str) -> Dict[str, Any]:
     """Parse JSON from raw model text, tolerating fenced code blocks and pre/post text."""
     candidate = (text or "").strip()
     if not candidate:
-        raise ValueError("Gemini returned empty text.")
+        raise ValueError("The model returned empty text.")
 
     if candidate.startswith("```"):
         candidate = candidate.strip("`").strip()
@@ -133,19 +134,19 @@ def _extract_json_object(text: str) -> Dict[str, Any]:
     start = candidate.find("{")
     end = candidate.rfind("}")
     if start == -1 or end == -1 or end <= start:
-        raise ValueError("Gemini response does not contain a JSON object.")
+        raise ValueError("The model response does not contain a JSON object.")
 
     sliced = candidate[start : end + 1]
     parsed = json.loads(sliced)
     if not isinstance(parsed, dict):
-        raise ValueError("Gemini JSON payload is not an object.")
+        raise ValueError("The model JSON payload is not an object.")
     return parsed
 
 
 def _is_rate_limit_error(exc: Exception) -> bool:
     """Return True if the exception is a retryable 429 / ResourceExhausted error."""
     msg = str(exc).lower()
-    return (isinstance(exc, GeminiError) and exc.retryable) or "429" in msg or "resource exhausted" in msg or "resourceexhausted" in msg
+    return (isinstance(exc, AIError) and exc.retryable) or "429" in msg or "resource exhausted" in msg or "resourceexhausted" in msg
 
 
 class AnalysisResults(dict):
@@ -155,12 +156,13 @@ class AnalysisResults(dict):
         self.errors: list[str] = []
 
 
-def analyze_posts_with_gemini(
+def analyze_posts(
     posts: List[Dict[str, Any]],
     api_key: Optional[str] = None,
-    model_name: str = DEFAULT_MODEL,
+    model_name: Optional[str] = None,
     on_status: Optional[Any] = None,
     targets: Optional[List[str]] = None,
+    provider: Optional[str] = None,
 ) -> Dict[str, Analysis]:
     """Analyze posts and return analysis keyed by **real** Firestore document ID.
 
@@ -168,9 +170,12 @@ def analyze_posts_with_gemini(
         on_status: optional callable(str) invoked with progress messages
                    (e.g. a Streamlit status updater).
     """
-    gemini_key = (api_key or os.getenv("GEMINI_KEY") or "").strip()
-    if not gemini_key:
-        raise ValueError("GEMINI_KEY is not set.")
+    provider = get_ai_provider(provider)
+    provider_label = AI_PROVIDERS[provider]
+    provider_key = (api_key or get_ai_key(provider)).strip()
+    error_type = GeminiError if provider == "gemini" else OpenAIError
+    if not provider_key:
+        raise error_type(f"{provider_label} is not configured. Contact the app administrator.")
     if not posts:
         return {}
 
@@ -194,9 +199,12 @@ def analyze_posts_with_gemini(
     targets = list(dict.fromkeys(str(t).strip() for t in (targets or []) if str(t).strip()))[:100]
     if not selected:
         return {}
-    _status("Checking available Gemini models…")
-    target_model = resolve_model(gemini_key, model_name)
-    _status(f"Using {target_model}.")
+    target_model = model_name or get_ai_model(provider)
+    if provider == "gemini":
+        _status("Checking available Gemini models…")
+        target_model = resolve_model(provider_key, target_model)
+    generate = _generate_content if provider == "gemini" else generate_openai_content
+    _status(f"Using {provider_label} · {target_model}.")
     out = AnalysisResults()
     deadline = time.monotonic() + 180
     for offset in range(0, len(selected), BATCH_SIZE):
@@ -218,7 +226,7 @@ def analyze_posts_with_gemini(
                     remaining = deadline - time.monotonic()
                     if remaining < 1:
                         raise TimeoutError("Analysis time budget reached.")
-                    response = _generate_content(prompt, gemini_key, target_model, timeout=min(90, remaining))
+                    response = generate(prompt, provider_key, target_model, timeout=min(90, remaining))
                     break
                 except Exception as exc:
                     if _is_rate_limit_error(exc) and attempt < MAX_RETRIES:
@@ -251,6 +259,7 @@ def analyze_posts_with_gemini(
                 doc_id = index_map[key]
                 try:
                     out[doc_id] = normalize_analysis(item, by_id[doc_id], targets, target_model)
+                    out[doc_id]["provider"] = provider
                 except (ValueError, TypeError):
                     pass
             missing = len(batch) - sum(doc_id in out for doc_id in by_id)
@@ -261,23 +270,35 @@ def analyze_posts_with_gemini(
                 _status(message)
         except Exception as exc:
             # Preserve completed batches and report the actual failure without exposing keys.
-            if isinstance(exc, (GeminiError, ValueError, TimeoutError)):
-                message = redact(str(exc), gemini_key)
+            if isinstance(exc, (AIError, ValueError, TimeoutError)):
+                message = redact(str(exc), provider_key)
             else:
                 message = "The analysis request failed unexpectedly. Retry, or check the server connection."
             out.errors.append(message)
             _status(message)
-            if isinstance(exc, GeminiError) and exc.status_code in {400, 401, 403, 404}:
+            if isinstance(exc, AIError) and exc.status_code in {400, 401, 403, 404}:
                 break
     _status(f"Validated {len(out)} of {len(posts)} record(s).")
     if not out and out.errors:
-        raise GeminiError(" ".join(dict.fromkeys(out.errors)))
+        raise error_type(" ".join(dict.fromkeys(out.errors)))
     return out
+
+
+def analyze_posts_with_gemini(
+    posts: List[Dict[str, Any]],
+    api_key: Optional[str] = None,
+    model_name: str = DEFAULT_MODEL,
+    on_status: Optional[Any] = None,
+    targets: Optional[List[str]] = None,
+) -> Dict[str, Analysis]:
+    """Compatibility entry point for existing Gemini callers."""
+    return analyze_posts(posts, api_key=api_key, model_name=model_name, on_status=on_status,
+                         targets=targets, provider="gemini")
 
 
 def process_pending_posts(db: Client, limit: int = 25) -> int:
     """
-    Fetch pending posts, process with Gemini, and update Firestore.
+    Fetch pending posts, process with the configured provider, and update Firestore.
 
     Returns:
         int: Number of posts marked processed or error.
@@ -288,8 +309,8 @@ def process_pending_posts(db: Client, limit: int = 25) -> int:
 
     updated = 0
     try:
-        by_id = analyze_posts_with_gemini(
-            pending, model_name=get_setting("GEMINI_MODEL", DEFAULT_MODEL),
+        by_id = analyze_posts(
+            pending,
             targets=watch_terms(get_setting("THAILAND_WATCH_TERMS")),
         )
 

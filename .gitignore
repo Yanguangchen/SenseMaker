@@ -12,3 +12,4 @@ __pycache__/
 firebase-debug.log*
 .vercel
 .env*
+!.env.example

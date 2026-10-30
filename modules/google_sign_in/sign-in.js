@@ -13,7 +13,7 @@ let initializing = false;
 let firebaseAuth;
 let lastToken;
 
-async function initialize(config) {
+async function initialize(config, clearSession) {
   if (initializing) return;
   initializing = true;
   try {
@@ -21,32 +21,63 @@ async function initialize(config) {
       import("https://www.gstatic.com/firebasejs/13.1.0/firebase-app.js"),
       import("https://www.gstatic.com/firebasejs/13.1.0/firebase-auth.js"),
     ]);
-    firebaseAuth = sdk.getAuth(initializeApp(config));
-    // No Google session or refresh token is persisted in browser storage.
-    await sdk.setPersistence(firebaseAuth, sdk.inMemoryPersistence);
-    sdk.onIdTokenChanged(firebaseAuth, async (user) => {
+    // Let Firebase restore and refresh the session across page/container reloads.
+    // Choose storage at initialization so other tabs never see a migration
+    // between Firebase's default IndexedDB storage and localStorage.
+    firebaseAuth = sdk.initializeAuth(initializeApp(config), {
+      persistence: sdk.browserLocalPersistence,
+      popupRedirectResolver: sdk.browserPopupRedirectResolver,
+    });
+    if (clearSession) await sdk.signOut(firebaseAuth);
+    let restoring = true;
+    const refreshToken = async (forceRefresh = false) => {
+      const user = firebaseAuth.currentUser;
       if (!user) return;
+      const token = await user.getIdToken(forceRefresh);
+      // Ignore a refresh that completed after this account signed out.
+      if (firebaseAuth.currentUser !== user) return;
+      if (token !== lastToken) {
+        lastToken = token;
+        publish({ id_token: token });
+      }
+      message.textContent = "";
+    };
+    sdk.onIdTokenChanged(firebaseAuth, async (user) => {
+      const forceRefresh = restoring;
+      restoring = false;
+      button.textContent = user ? "Switch Google account" : "Sign in with Google";
+      if (!user) {
+        lastToken = undefined;
+        publish({ type: "sign_out" });
+        button.disabled = false;
+        resize();
+        return;
+      }
       try {
-        const token = await user.getIdToken();
-        if (token !== lastToken) {
-          lastToken = token;
-          publish({ id_token: token });
-        }
-        button.textContent = "Switch Google account";
+        await refreshToken(forceRefresh);
       } catch {
-        message.textContent = "Your session expired. Sign in again.";
+        message.textContent = "Session refresh is temporarily unavailable. Retrying automatically…";
+      } finally {
+        button.disabled = false;
         resize();
       }
     });
-    button.textContent = "Sign in with Google";
-    button.disabled = false;
+    const refresh = () => refreshToken().catch(() => {
+      message.textContent = "Session refresh is temporarily unavailable. Retrying automatically…";
+      resize();
+    });
+    // Refresh before hourly expiry and when a sleeping/background tab returns.
+    setInterval(refresh, 5 * 60 * 1000);
+    window.addEventListener("focus", refresh);
+    document.addEventListener("visibilitychange", () => {
+      if (document.visibilityState === "visible") refresh();
+    });
     button.onclick = async () => {
       button.disabled = true;
       message.textContent = "";
       try {
         if (firebaseAuth.currentUser) {
           await sdk.signOut(firebaseAuth);
-          publish({ type: "sign_out" });
           return;
         }
         const provider = new sdk.GoogleAuthProvider();
@@ -72,7 +103,9 @@ async function initialize(config) {
 
 window.addEventListener("message", (event) => {
   if (event.source !== parent || event.origin !== parentOrigin) return;
-  if (event.data?.type === "streamlit:render") initialize(event.data.args.config);
+  if (event.data?.type === "streamlit:render") {
+    initialize(event.data.args.config, event.data.args.clear_session);
+  }
 });
 send("streamlit:componentReady", { apiVersion: 1 });
 resize();

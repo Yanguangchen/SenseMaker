@@ -3,8 +3,15 @@
 from __future__ import annotations
 
 import hashlib
+import os
+import sys
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
+
+# Use macOS's configured DNS routes (including VPN/split DNS) before gRPC loads.
+# Its default c-ares resolver can select addresses this machine cannot reach.
+if sys.platform == "darwin":
+    os.environ.setdefault("GRPC_DNS_RESOLVER", "native")
 
 import firebase_admin
 from firebase_admin import credentials, firestore
