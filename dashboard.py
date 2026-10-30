@@ -481,7 +481,7 @@ _UI_THEME = """
 .stApp select,
 .stApp label,
 .stApp p,
-.stApp span,
+.stApp span:not([data-testid="stIconMaterial"]),
 .stApp div,
 .stApp h1,
 .stApp h2,
@@ -575,6 +575,7 @@ a[href]:hover { opacity: 0.78; }
 
 /* Comfortable tap targets and a persistent Facebook connection card. */
 .stButton > button, .stLinkButton > a { min-height: 48px; border-radius: 12px; font-weight: 600; }
+button[data-testid="stExpandSidebarButton"], [data-testid="stSidebarCollapseButton"] button { min-width: 48px; min-height: 48px; }
 [data-baseweb="tab"] { min-height: 48px; padding-inline: 20px; }
 .stTextInput input, .stTextArea textarea { font-size: 16px; }
 .st-key-facebook_connection { border-radius: 18px; }

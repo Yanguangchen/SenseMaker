@@ -32,6 +32,7 @@ SenseMaker/
 
 ## Deploy to Vercel
 
+The production app is [sensemaker-psi.vercel.app](https://sensemaker-psi.vercel.app).
 The Vercel project is `sensemaker` in `yanguangchens-projects`. It uses Vercel's
 [Container Runtime](https://vercel.com/docs/functions/runtimes/container) (beta)
 to run the existing Streamlit server on port 80. `Dockerfile.vercel` installs the
