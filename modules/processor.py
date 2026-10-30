@@ -31,7 +31,7 @@ DEFAULT_MODEL = "models/gemini-3.6-flash"
 BATCH_SIZE = 8
 
 
-def _generate_content(prompt: str, api_key: str, model_name: str) -> str:
+def _generate_content(prompt: str, api_key: str, model_name: str, timeout: float = 90) -> str:
     """Request-local credentials avoid sharing one user's key across sessions."""
     if not re.fullmatch(r"models/[A-Za-z0-9._-]+", model_name):
         raise ValueError("Use a model name such as models/gemini-3.6-flash.")
@@ -43,7 +43,7 @@ def _generate_content(prompt: str, api_key: str, model_name: str) -> str:
         headers={"Content-Type": "application/json", "x-goog-api-key": api_key},
     )
     try:
-        with urlopen(request, timeout=90, context=ssl.create_default_context(cafile=certifi.where())) as response:
+        with urlopen(request, timeout=timeout, context=ssl.create_default_context(cafile=certifi.where())) as response:
             result = json.load(response)
     except HTTPError as exc:
         raise RuntimeError(f"Gemini returned HTTP {exc.code}.") from None
@@ -173,7 +173,11 @@ def analyze_posts_with_gemini(
     targets = list(dict.fromkeys(str(t).strip() for t in (targets or []) if str(t).strip()))[:100]
     target_model = (model_name or "").strip() or DEFAULT_MODEL
     out: Dict[str, Analysis] = {}
+    deadline = time.monotonic() + 180
     for offset in range(0, len(selected), BATCH_SIZE):
+        if time.monotonic() >= deadline - 1:
+            _status("Analysis time budget reached. Completed results are kept; retry the remaining error records.")
+            break
         batch = selected[offset:offset + BATCH_SIZE]
         index_map = {f"post_{i}": p["_id"] for i, p in enumerate(batch, 1)}
         by_id = {p["_id"]: p for p in batch}
@@ -184,11 +188,16 @@ def analyze_posts_with_gemini(
                 try:
                     _status(f"Analyzing records {offset + 1}–{offset + len(batch)} of {len(selected)} "
                             f"(attempt {attempt}/{MAX_RETRIES})…")
-                    response = _generate_content(prompt, gemini_key, target_model)
+                    remaining = deadline - time.monotonic()
+                    if remaining < 1:
+                        raise TimeoutError("Analysis time budget reached.")
+                    response = _generate_content(prompt, gemini_key, target_model, timeout=min(90, remaining))
                     break
                 except Exception as exc:
                     if _is_rate_limit_error(exc) and attempt < MAX_RETRIES:
                         wait = INITIAL_BACKOFF_S * (2 ** (attempt - 1))
+                        if wait + 1 >= deadline - time.monotonic():
+                            raise TimeoutError("Analysis time budget reached.") from None
                         _status(f"Rate limited; retrying in {wait:.0f}s…")
                         time.sleep(wait)
                     else:

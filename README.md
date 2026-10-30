@@ -50,7 +50,9 @@ field is displayed as **review priority**, not a judgment about people.
 These are model assessments, not confirmed events. Quote validation cannot prove
 that an interpretation is correct. Records are processed in batches of eight;
 unknown/duplicate response IDs are rejected, and successful batches survive a later
-failure. Long records are excerpted and visibly marked. No individual identities,
+failure. Analysis has a 180-second request budget to leave time for saving results
+within the hosted runtime; unprocessed records can be retried using the error filter.
+Long records are excerpted and visibly marked. No individual identities,
 nationalities or political affiliations are inferred. Counts refer to sampled records,
 not unique people or population sentiment. Live classification quality still needs
 evaluation with your configured Gemini key and representative, human-labeled data.

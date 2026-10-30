@@ -111,6 +111,14 @@ class AnalysisBatchTests(unittest.TestCase):
         self.assertIn("real-16", result)
         self.assertEqual(generate.call_count, 3)
 
+    def test_hosted_time_budget_keeps_completed_batch_and_stops_further_requests(self):
+        reply = json.dumps({"results": [assessment(f"post_{i}") for i in range(1, 9)]})
+        with patch("modules.processor._generate_content", return_value=reply) as generate, \
+             patch("modules.processor.time.monotonic", side_effect=[0, 0, 0, 181]):
+            result = analyze_posts_with_gemini(self.posts(16), api_key="test")
+        self.assertEqual(len(result), 8)
+        self.assertEqual(generate.call_count, 1)
+
     def test_collection_failures_are_not_sent_to_the_model(self):
         post = self.posts(1)[0]
         post["source_type"] = "batch_error"
