@@ -6,12 +6,15 @@ import asyncio
 import base64
 import json
 import re
+import ssl
 import threading
 import time
 from datetime import datetime, timezone
 from urllib.error import HTTPError, URLError
 from urllib.parse import parse_qs, urlencode, urlparse
 from urllib.request import Request, urlopen
+
+import certifi
 
 from modules.config import get_setting
 
@@ -84,7 +87,8 @@ class RedditClient:
                 time.sleep(delay)
             _next_request = time.monotonic() + 1.1
             try:
-                with urlopen(request, timeout=min(20, self.deadline - time.monotonic())) as response:
+                with urlopen(request, timeout=min(20, self.deadline - time.monotonic()),
+                             context=ssl.create_default_context(cafile=certifi.where())) as response:
                     remaining = response.headers.get("x-ratelimit-remaining")
                     reset = response.headers.get("x-ratelimit-reset")
                     if remaining and reset:

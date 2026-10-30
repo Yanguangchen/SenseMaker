@@ -2,3 +2,4 @@ python-dotenv
 playwright
 firebase-admin
 streamlit
+certifi

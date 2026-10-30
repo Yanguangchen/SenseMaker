@@ -6,10 +6,13 @@ import json
 import logging
 import os
 import re
+import ssl
 import time
 from typing import Any, Dict, List, Optional
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
+
+import certifi
 
 from firebase_admin.firestore import Client
 
@@ -40,7 +43,7 @@ def _generate_content(prompt: str, api_key: str, model_name: str) -> str:
         headers={"Content-Type": "application/json", "x-goog-api-key": api_key},
     )
     try:
-        with urlopen(request, timeout=90) as response:
+        with urlopen(request, timeout=90, context=ssl.create_default_context(cafile=certifi.where())) as response:
             result = json.load(response)
     except HTTPError as exc:
         raise RuntimeError(f"Gemini returned HTTP {exc.code}.") from None

@@ -7,3 +7,4 @@ firebase-admin==6.9.0
 streamlit==1.50.0
 google-api-core==2.25.1
 grpcio-status==1.71.2
+certifi==2026.10.23
