@@ -33,7 +33,7 @@ try:
 except Exception:
     SCRAPER_AVAILABLE = False
 
-IS_CLOUD = os.path.exists("/mount/src")
+IS_CLOUD = os.path.exists("/mount/src") or os.getenv("SENSEMAKER_HOSTED") == "1"
 
 AUTH_STORAGE_STATE_FILE = "storage_state.json"
 AUTH_LOGIN_TIMEOUT_SECONDS = 240
@@ -628,7 +628,7 @@ def main() -> None:
         if any("facebook.com" in u.lower() for u in target_urls) and facebook_session.status != "connected":
             st.info("Connect your Facebook account above before collecting Facebook posts.")
         tc1, tc2 = st.columns(2)
-        use_headless = tc1.checkbox("Headless Browser", value=True)
+        use_headless = tc1.checkbox("Headless Browser", value=True, disabled=IS_CLOUD)
         scroll_times = tc2.slider("Scroll Iterations", min_value=1, max_value=50, value=10)
 
         if st.button("Collect posts", type="primary", use_container_width=True):

@@ -1,0 +1,15 @@
+.git
+.vercel
+.firebase
+.venv
+.venv-mac
+.env
+.env.*
+.streamlit/secrets.toml
+.streamlit/secrets.toml.*
+**/__pycache__
+**/*.pyc
+**/*storage_state*.json
+**/*firebase-adminsdk*.json
+firebase-debug.log*
+tests

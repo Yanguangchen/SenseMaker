@@ -1,5 +1,6 @@
 """Exercise the dashboard gate through Streamlit's actual script runner."""
 
+import os
 import unittest
 from contextlib import ExitStack
 from pathlib import Path
@@ -37,6 +38,15 @@ class DashboardAccessTests(unittest.TestCase):
             app = self.run_dashboard()
             self.assertEqual([tab.label for tab in app.tabs], ["Scrap data", "Sentiment Analysis"])
             verify.assert_called_once_with("signed-token", {"editor@example.com"})
+
+    @patch.dict(os.environ, {"SENSEMAKER_HOSTED": "1"})
+    def test_hosted_deployment_keeps_browsers_headless_and_disables_interactive_login(self):
+        self.component.return_value = lambda **kwargs: {"id_token": "signed-token", "event_id": "login"}
+        with patch("modules.auth.verify_access", return_value="editor@example.com"):
+            app = self.run_dashboard()
+            self.assertTrue(app.checkbox[0].value)
+            self.assertTrue(app.checkbox[0].disabled)
+            self.assertTrue(app.button(key="capture_fb_session_btn").disabled)
 
     def test_denied_identity_loses_loaded_records_and_sees_no_tabs(self):
         # A new component instance after denial must not replay the rejected token.

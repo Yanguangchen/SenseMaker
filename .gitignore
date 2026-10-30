@@ -10,3 +10,5 @@ __pycache__/
 *.pyd
 .firebase/
 firebase-debug.log*
+.vercel
+.env*

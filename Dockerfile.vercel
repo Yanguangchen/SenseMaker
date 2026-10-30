@@ -1,0 +1,21 @@
+FROM python:3.13-slim-bookworm
+
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PIP_NO_CACHE_DIR=1 \
+    SENSEMAKER_HOSTED=1 \
+    PLAYWRIGHT_BROWSERS_PATH=/opt/playwright
+
+WORKDIR /app
+COPY requirements.txt requirements-vercel.txt ./
+RUN python -m pip install -r requirements-vercel.txt \
+    && python -m playwright install --with-deps chromium \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy application code explicitly; local credentials and browser sessions stay out.
+COPY dashboard.py ./
+COPY modules ./modules
+COPY .streamlit/config.toml ./.streamlit/config.toml
+
+EXPOSE 80
+CMD ["python", "-m", "streamlit", "run", "dashboard.py", "--server.address=0.0.0.0", "--server.port=80", "--server.headless=true", "--server.fileWatcherType=none", "--browser.gatherUsageStats=false"]

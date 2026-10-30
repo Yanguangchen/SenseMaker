@@ -30,9 +30,36 @@ SenseMaker/
 
 ---
 
+## Deploy to Vercel
+
+The Vercel project is `sensemaker` in `yanguangchens-projects`. It uses Vercel's
+[Container Runtime](https://vercel.com/docs/functions/runtimes/container) (beta)
+to run the existing Streamlit server on port 80. `Dockerfile.vercel` installs the
+tested Python versions from `requirements-vercel.txt` and Chromium for headless
+web collection. Local credentials, virtual environments and Facebook sessions
+are excluded from the upload and container image.
+
+Configure the top-level Firebase settings from `.streamlit/secrets.toml.example`
+as production Vercel environment variables, with `FIREBASE_CLIENT_EMAIL` and
+`FIREBASE_PRIVATE_KEY` instead of the `[firebase]` table. Store credentials as
+Secret variables. Add the production hostname to Firebase Authentication's
+authorized domains. `GEMINI_KEY` is optional because users can enter a key in the UI.
+
+```sh
+vercel link --project sensemaker --scope yanguangchens-projects
+vercel --prod
+```
+
+Hosted collection runs headlessly. Interactive Facebook login is available only
+when running SenseMaker on your own computer. Vercel's function duration and
+scale-to-zero limits also apply to WebSocket sessions: reconnects may require
+signing in again, and long collections must fit within the hosting limits.
+Saved links and collected posts persist in Firestore when a container restarts.
+
 ## Deploy to Streamlit Community Cloud
 
-The fastest way to get a live URL. Scraping is local-only; the cloud deployment supports Firestore + Gemini processing.
+This alternative deployment supports Firestore and Gemini processing. Collection
+and interactive Facebook login run locally.
 
 ### 1) Push to GitHub
 
