@@ -156,3 +156,36 @@ def mark_post_processed(
 
     db.collection(_get_collection_name()).document(doc_id).set(update_payload, merge=True)
 
+
+
+def delete_processed_posts(db: firestore.Client, doc_ids: List[str]) -> Dict[str, List[str]]:
+    """Atomically delete selected processed posts after rechecking their current status."""
+    if any(not isinstance(doc_id, str) or not doc_id or "/" in doc_id
+           or doc_id in {".", ".."} or len(doc_id.encode("utf-8")) > 1500 for doc_id in doc_ids):
+        raise ValueError("Select valid record IDs.")
+    unique_ids = list(dict.fromkeys(doc_ids))
+    if len(unique_ids) > 200:
+        raise ValueError("Delete at most 200 records at a time.")
+    if not unique_ids:
+        return {"deleted": [], "skipped": [], "missing": []}
+    collection = db.collection(_get_collection_name())
+    refs = {doc_id: collection.document(doc_id) for doc_id in unique_ids}
+
+    @firestore.transactional
+    def remove(transaction: Any) -> Dict[str, List[str]]:
+        # Complete all reads before any writes; a concurrent edit retries the transaction.
+        snapshots = {doc.id: doc for doc in db.get_all(
+            list(refs.values()), field_paths=["status"], transaction=transaction, timeout=30)}
+        result: Dict[str, List[str]] = {"deleted": [], "skipped": [], "missing": []}
+        for doc_id, ref in refs.items():
+            snapshot = snapshots[doc_id]
+            if not snapshot.exists:
+                result["missing"].append(doc_id)
+            elif (snapshot.to_dict() or {}).get("status") != "processed":
+                result["skipped"].append(doc_id)
+            else:
+                transaction.delete(ref)
+                result["deleted"].append(doc_id)
+        return result
+
+    return remove(db.transaction(max_attempts=3))

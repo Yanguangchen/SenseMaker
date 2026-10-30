@@ -17,7 +17,7 @@ from dotenv import load_dotenv
 
 from modules.auth import require_access
 from modules.config import get_setting
-from modules.database import init_db, mark_post_processed, upsert_post
+from modules.database import delete_processed_posts, init_db, mark_post_processed, upsert_post
 from modules.facebook_session import (
     FacebookSession,
     capture_facebook_session,
@@ -26,7 +26,7 @@ from modules.facebook_session import (
 )
 from modules.processor import DEFAULT_MODEL, analyze_posts_with_gemini
 from modules.gemini import AUTO_MODEL, GeminiError, list_text_models, normalize_model_name, redact
-from modules.reddit import CAMBODIA_URL, is_reddit_url, reddit_configured
+from modules.reddit import CAMBODIA_URL, reddit_configured
 from modules.signals import NON_CONTENT_TYPES, SIGNAL_LABELS, is_analyzable, is_flagged, watch_terms
 from modules.saved_links import library_owner_id, load_saved_links, parse_links, remove_saved_links, save_links
 
@@ -78,7 +78,7 @@ def _fetch_firestore_posts(status_filter: str, limit: int) -> List[Dict[str, Any
     rows: List[Dict[str, Any]] = []
     for doc in docs:
         item = doc.to_dict() or {}
-        item["_id"] = item.get("_id") or doc.id
+        item["_id"] = doc.id
         rows.append(item)
     return rows
 
@@ -503,6 +503,76 @@ def _render_signal_overview(analyses: List[Dict[str, Any]], key: str) -> List[Di
     return visible
 
 
+def _render_processed_deletion(rows: List[Dict[str, Any]]) -> None:
+    selection_key = "processed_delete_selection"
+    pending_key = "processed_delete_pending"
+    if st.session_state.pop("processed_delete_reset", False):
+        st.session_state[selection_key] = []
+    notice = st.session_state.pop("processed_delete_notice", None)
+    if notice:
+        st.success(f"Deleted {len(notice['deleted'])} processed record(s).")
+        if notice["skipped"]:
+            st.info(f"Kept {len(notice['skipped'])} record(s) that are no longer processed. Reload to see their current status.")
+        if notice["missing"]:
+            st.info(f"{len(notice['missing'])} record(s) had already been removed.")
+    records = {str(row["_id"]): row for row in rows
+               if row.get("_id") and row.get("status") == "processed"}
+    if not records:
+        st.session_state.pop(pending_key, None)
+        return
+    if selection_key in st.session_state:
+        st.session_state[selection_key] = [doc_id for doc_id in st.session_state[selection_key]
+                                           if doc_id in records]
+
+    def label(doc_id: str) -> str:
+        row = records[doc_id]
+        title = str(row.get("custom_title") or row.get("raw_text") or row.get("url") or "Record")
+        return f"{' '.join(title.split())[:90]} · {doc_id[:12]}"
+
+    with st.expander("Delete processed records"):
+        selected = st.multiselect("Select processed records to delete", options=list(records),
+                                  format_func=label, key=selection_key)
+        if st.session_state.get(pending_key) != selected:
+            st.session_state.pop(pending_key, None)
+        if st.button("Delete selected records", key="request_processed_delete", disabled=not selected):
+            st.session_state[pending_key] = selected.copy()
+        pending = st.session_state.get(pending_key)
+        if pending:
+            st.warning(f"Permanently delete {len(pending)} processed record(s) and their saved analyses "
+                       "from the shared library? This affects all users and cannot be undone.")
+            confirm, cancel = st.columns(2)
+            if confirm.button(f"Permanently delete {len(pending)} record(s)", key="confirm_processed_delete",
+                              type="primary", use_container_width=True):
+                try:
+                    with st.spinner("Deleting processed records…"):
+                        result = delete_processed_posts(init_db(), pending)
+                except Exception:
+                    st.error("Deletion could not be confirmed. Reload processed records to check their status before retrying.")
+                else:
+                    # Drop stale copies, including records another session already removed or changed.
+                    stale = set(result["deleted"] + result["missing"] + result["skipped"])
+                    for key in ("processed_rows", "firestore_rows"):
+                        if key in st.session_state:
+                            st.session_state[key] = [row for row in st.session_state[key]
+                                                     if str(row.get("_id", "")) not in stale]
+                    if "firestore_rows" in st.session_state:
+                        st.session_state["firestore_last_load_count"] = len(st.session_state["firestore_rows"])
+                    for key in ("analysis_last_results", "gemini_last_results"):
+                        if key in st.session_state:
+                            summary = dict(st.session_state[key])
+                            summary["analyses"] = [row for row in summary.get("analyses", [])
+                                                   if str(row.get("_id", "")) not in stale]
+                            summary["processed"] = len(summary["analyses"])
+                            st.session_state[key] = summary
+                    st.session_state.pop(pending_key, None)
+                    st.session_state["processed_delete_reset"] = True
+                    st.session_state["processed_delete_notice"] = result
+                    st.rerun()
+            if cancel.button("Cancel", key="cancel_processed_delete", use_container_width=True):
+                st.session_state.pop(pending_key, None)
+                st.rerun()
+
+
 def _render_processed_records(rows: List[Dict[str, Any]]) -> None:
     """Show previously processed Firestore records with their analysis."""
     has_analysis = [r for r in rows if r.get("analysis")]
@@ -705,6 +775,24 @@ def _apply_ui_theme() -> None:
     st.markdown(_UI_THEME, unsafe_allow_html=True)
 
 
+def _render_reddit_settings() -> tuple[int, int]:
+    st.subheader("Reddit · r/cambodia")
+    st.caption("r/cambodia is included by default. Choose whether to collect it in Your links.")
+    with st.container(border=True):
+        if reddit_configured():
+            st.caption("API credentials configured. Access is checked when collecting.")
+        else:
+            st.info("Reddit is not connected yet. An administrator needs to configure approved Reddit API access.")
+        rc1, rc2 = st.columns(2)
+        limit = rc1.number_input("Reddit posts per source", min_value=1, max_value=500,
+                                 value=50, step=25, key="reddit_post_limit")
+        comments = rc2.number_input("Comments per post", min_value=0, max_value=100,
+                                    value=20, step=10, key="reddit_comment_limit")
+        st.caption("Collects newest posts by default and samples the newest returned comments. "
+                   "This is not a complete subreddit archive. Large runs may return partial results.")
+    return int(limit), int(comments)
+
+
 def main() -> None:
     load_dotenv()
     _bridge_secrets_to_env()
@@ -712,7 +800,10 @@ def main() -> None:
     _apply_ui_theme()
     user_email = require_access()
     st.title("SenseMaker")
-    scrape_tab, gemini_tab = st.tabs(["Scrap data", "Sentiment Analysis"])
+    scrape_tab, gemini_tab, reddit_tab = st.tabs(["Scrap data", "Sentiment Analysis", "Reddit · r/cambodia"])
+
+    with reddit_tab:
+        reddit_limit, reddit_comments = _render_reddit_settings()
 
     with scrape_tab:
         facebook_session = _render_facebook_connection()
@@ -721,19 +812,6 @@ def main() -> None:
 
         if any("facebook.com" in u.lower() for u in target_urls) and facebook_session.status != "connected":
             st.info("Connect your Facebook account above before collecting Facebook posts.")
-        reddit_limit, reddit_comments = 50, 20
-        if any(is_reddit_url(url) for url in target_urls):
-            with st.container(border=True):
-                st.subheader("Reddit · r/cambodia")
-                if reddit_configured():
-                    st.caption("API credentials configured. Access is checked when collecting.")
-                else:
-                    st.info("Reddit is not connected yet. An administrator needs to configure approved Reddit API access.")
-                rc1, rc2 = st.columns(2)
-                reddit_limit = rc1.number_input("Reddit posts per source", min_value=1, max_value=500, value=50, step=25)
-                reddit_comments = rc2.number_input("Comments per post", min_value=0, max_value=100, value=20, step=10)
-                st.caption("Collects newest posts by default and samples the newest returned comments. "
-                           "This is not a complete subreddit archive. Large runs may return partial results.")
         tc1, tc2 = st.columns(2)
         use_headless = tc1.checkbox("Headless Browser", value=True, disabled=IS_CLOUD)
         scroll_times = tc2.slider("Scroll Iterations", min_value=1, max_value=50, value=10)
@@ -941,6 +1019,7 @@ def main() -> None:
                 st.session_state["processed_rows"] = []
 
         processed_rows = st.session_state.get("processed_rows", [])
+        _render_processed_deletion(processed_rows)
         if processed_rows:
             _render_processed_records(processed_rows)
 

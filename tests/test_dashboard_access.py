@@ -32,11 +32,11 @@ class DashboardAccessTests(unittest.TestCase):
         self.assertEqual(len(app.tabs), 0)
         self.database.assert_not_called()
 
-    def test_approved_identity_can_open_both_tabs(self):
+    def test_approved_identity_can_open_all_tabs(self):
         self.component.return_value = lambda **kwargs: {"id_token": "signed-token", "event_id": "login"}
         with patch("modules.auth.verify_access", return_value="editor@example.com") as verify:
             app = self.run_dashboard()
-            self.assertEqual([tab.label for tab in app.tabs], ["Scrap data", "Sentiment Analysis"])
+            self.assertEqual([tab.label for tab in app.tabs], ["Scrap data", "Sentiment Analysis", "Reddit · r/cambodia"])
             verify.assert_called_once_with("signed-token", {"editor@example.com"})
 
     @patch.dict(os.environ, {"SENSEMAKER_HOSTED": "1"})

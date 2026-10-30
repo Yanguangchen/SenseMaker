@@ -57,10 +57,17 @@ nationalities or political affiliations are inferred. Counts refer to sampled re
 not unique people or population sentiment. Live classification quality still needs
 evaluation with your configured Gemini key and representative, human-labeled data.
 
+## Delete processed records
+
+In **Sentiment Analysis**, load processed records, open **Delete processed records**,
+select records, and confirm their permanent deletion. This removes the selected records
+and analyses from the shared library for all users. Records that are no longer processed
+are kept. Source links stay available for future collection.
+
 ## Reddit collection: r/cambodia
 
 1. **r/cambodia** is included and selected by default in **Your links**. Deselect it when you only want to collect other sources.
-2. Choose up to **500 posts per source** and **0–100 sampled comments per post**.
+2. Open the **Reddit · r/cambodia** toolbar tab to check the connection and choose up to **500 posts per source** and **0–100 sampled comments per post**.
 3. Click **Collect posts**, inspect the results and save them to Firestore.
 4. Select saved records in **Sentiment Analysis**, set your watchlist and run analysis.
 
