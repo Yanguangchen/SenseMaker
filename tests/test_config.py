@@ -47,6 +47,7 @@ class EnvironmentTests(unittest.TestCase):
             "FIREBASE_API_KEY": "your_firebase_web_api_key",
             "FIREBASE_APP_ID": "your_firebase_web_app_id",
             "FIREBASE_CREDENTIALS": "path/to/firebase-service-account.json",
+            "FAQ_EDITOR_EMAILS": "editor1@example.com,editor2@example.com",
         }
         # Include values left in the process by an earlier dashboard run.
         with tempfile.TemporaryDirectory() as folder, patch.dict(os.environ, placeholders, clear=True):
@@ -54,19 +55,26 @@ class EnvironmentTests(unittest.TestCase):
             (directory / ".env.local").write_text("\n".join(f"{key}={value}" for key, value in placeholders.items()))
             (directory / ".env").write_text(
                 "FIREBASE_API_KEY=configured-key\nFIREBASE_APP_ID=configured-app\n"
+                "FAQ_EDITOR_EMAILS=owner@example.com,colleague@example.com\n"
             )
             load_environment(directory)
             self.assertEqual(get_setting("FIREBASE_API_KEY"), "configured-key")
             self.assertEqual(get_setting("FIREBASE_APP_ID"), "configured-app")
+            from modules.auth import allowed_emails
+            self.assertEqual(allowed_emails(), {"owner@example.com", "colleague@example.com"})
             with patch("streamlit.secrets", {}):
                 self.assertEqual(get_setting("FIREBASE_CREDENTIALS"), "")
 
     def test_template_only_firebase_configuration_is_not_reported_as_ready(self):
         with tempfile.TemporaryDirectory() as folder, patch.dict(os.environ, {}, clear=True):
             directory = Path(folder)
-            (directory / ".env.local").write_text("FIREBASE_API_KEY=your_firebase_web_api_key\n")
+            (directory / ".env.local").write_text(
+                "FIREBASE_API_KEY=your_firebase_web_api_key\n"
+                "FAQ_EDITOR_EMAILS=editor1@example.com,editor2@example.com\n"
+            )
             load_environment(directory)
             self.assertNotIn("FIREBASE_API_KEY", os.environ)
+            self.assertNotIn("FAQ_EDITOR_EMAILS", os.environ)
             with patch("streamlit.secrets", {"FIREBASE_API_KEY": "your_firebase_web_api_key"}):
                 self.assertEqual(get_setting("FIREBASE_API_KEY"), "")
 

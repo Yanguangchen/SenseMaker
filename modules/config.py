@@ -16,6 +16,7 @@ _SETTING_PLACEHOLDERS = {
     "FIREBASE_API_KEY": "your_firebase_web_api_key",
     "FIREBASE_APP_ID": "your_firebase_web_app_id",
     "FIREBASE_CREDENTIALS": "path/to/firebase-service-account.json",
+    "FAQ_EDITOR_EMAILS": "editor1@example.com,editor2@example.com",
 }
 
 
