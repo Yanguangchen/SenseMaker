@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import re
+import hashlib
+import json
 from pathlib import Path
 from typing import Any
 
@@ -10,6 +12,19 @@ from firebase_admin import auth
 
 from modules.config import get_setting
 from modules.database import init_firebase
+
+_SIGN_IN_INTRO = """
+<div class="sm-login-brand"><span class="sm-login-mark" aria-hidden="true">S</span><span>SenseMaker</span></div>
+<p class="sm-login-kicker">YOUR RESEARCH WORKSPACE</p>
+<h1>Sign in to SenseMaker</h1>
+<p class="sm-login-description">Bring conversations together.<br>Understand sentiment and follow emerging signals.</p>
+"""
+
+
+def _show_sign_in_screen() -> None:
+    import streamlit as st
+
+    st.html(Path(__file__).parent / "theme" / "sign_in.css")
 
 
 def allowed_emails() -> set[str]:
@@ -66,20 +81,28 @@ def require_access() -> str:
 
     config = web_config()
     emails = allowed_emails()
-    if not all(config.values()) or not emails:
-        st.error("Sign-in is not configured. Ask the app administrator to finish setup.")
-        st.stop()
-
     sign_in = components.declare_component(
         "sensemaker_google_sign_in", path=str(Path(__file__).parent / "google_sign_in")
     )
-    with st.sidebar:
+    # Firebase keeps its initial API key for the lifetime of the iframe. Remount
+    # when public settings change, including replacing a setup placeholder.
+    config_id = hashlib.sha256(json.dumps(config, sort_keys=True).encode()).hexdigest()[:12]
+    # Keep the same component mounted across login and app reruns so token refresh
+    # and cross-tab sign-out continue to work without reopening Google.
+    gateway = st.container(key="auth_gateway")
+    with gateway:
+        st.html(_SIGN_IN_INTRO)
+        if not all(config.values()) or not emails:
+            _show_sign_in_screen()
+            st.error("Sign-in is not configured. Ask the app administrator to finish setup.")
+            st.stop()
         event: Any = sign_in(
             config=config,
             clear_session=st.session_state.get("auth_reset_browser", False),
-            key=f"google_sign_in_{st.session_state.get('auth_generation', 0)}",
+            key=f"google_sign_in_{st.session_state.get('auth_generation', 0)}_{config_id}",
             default=None,
         )
+        st.caption("Use your approved Google account to continue.")
     if isinstance(event, dict) and event.get("event_id") != st.session_state.get("auth_event"):
         if event.get("type") == "sign_out":
             if st.session_state.get("auth_token") or st.session_state.get("auth_email"):
@@ -95,9 +118,10 @@ def require_access() -> str:
 
     token = st.session_state.get("auth_token")
     if not token:
-        st.write("Sign in with your approved Google account to continue.")
-        if st.session_state.get("auth_message"):
-            st.error(st.session_state["auth_message"])
+        _show_sign_in_screen()
+        with gateway:
+            if st.session_state.get("auth_message"):
+                st.error(st.session_state["auth_message"])
         st.stop()
 
     try:
@@ -117,9 +141,11 @@ def require_access() -> str:
         st.rerun()
     except Exception:
         # Fail closed during verifier outages without destroying a valid login.
-        st.error("Sign-in verification is temporarily unavailable. Please retry.")
-        if st.button("Retry sign-in verification"):
-            st.rerun()
+        _show_sign_in_screen()
+        with gateway:
+            st.error("Sign-in verification is temporarily unavailable. Please retry.")
+            if st.button("Retry sign-in verification"):
+                st.rerun()
         st.stop()
 
     previous_email = st.session_state.get("auth_email")
@@ -135,6 +161,7 @@ def require_access() -> str:
         )
         st.rerun()
     st.session_state["auth_email"] = email
+    st.html("<style>.st-key-auth_gateway { display: none !important; }</style>")
     st.sidebar.caption(f"Signed in as {email}")
     if st.sidebar.button("Sign out", key="sensemaker_sign_out"):
         _clear_session()

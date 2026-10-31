@@ -1,0 +1,26 @@
+/* The signed-out screen fills the workspace; navigation appears after verification. */
+[data-testid="stSidebar"], [data-testid="stSidebarCollapsedControl"],
+[data-testid="stExpandSidebarButton"] { display: none !important; }
+[data-testid="stMain"] { margin-left: 0 !important; width: 100% !important; }
+[data-testid="stMainBlockContainer"] { padding: clamp(32px, 10vh, 110px) 20px 40px !important; }
+.st-key-auth_gateway {
+  max-width: 480px;
+  margin-inline: auto;
+  padding: clamp(24px, 5vw, 44px) !important;
+  border: 1px solid rgb(190 184 255 / .2) !important;
+  border-radius: 28px !important;
+  background: linear-gradient(155deg, rgb(32 35 70 / .9), rgb(15 19 43 / .94)) !important;
+  box-shadow: 0 28px 100px rgb(0 0 0 / .3), inset 0 1px rgb(255 255 255 / .06) !important;
+}
+.sm-login-brand { display: flex; align-items: center; gap: 12px; margin: 0 0 42px; color: #eceeff; font-size: 19px; font-weight: 650; }
+.sm-login-mark { display: grid; place-items: center; width: 42px; height: 42px; border-radius: 13px;
+  font-size: 24px; color: white; background: linear-gradient(145deg, #987bff, #4e65dc); box-shadow: 0 8px 28px rgb(116 92 245 / .28); }
+.st-key-auth_gateway .sm-login-kicker { color: #b7aaff; font-size: 11px; font-weight: 650; letter-spacing: .14em; margin: 0 0 12px; }
+.st-key-auth_gateway h1 { color: #f6f5ff; font-size: clamp(29px, 6vw, 36px); line-height: 1.15; letter-spacing: -.035em;
+  margin: 0 0 16px; padding: 0; background: none; -webkit-text-fill-color: initial; }
+.st-key-auth_gateway .sm-login-description { color: #b5b9d1; font-size: 16px; line-height: 1.65; margin: 0 0 20px; }
+.st-key-auth_gateway [data-testid="stCaptionContainer"] { color: #9ca4c7; text-align: center; font-size: 12px; }
+@media (max-width: 480px) {
+  [data-testid="stMainBlockContainer"] { padding-inline: 16px !important; padding-top: 44px !important; }
+  .sm-login-brand { margin-bottom: 32px; }
+}

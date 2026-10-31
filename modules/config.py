@@ -11,28 +11,40 @@ from dotenv import dotenv_values
 AI_PROVIDERS = {"gemini": "Gemini", "openai": "ChatGPT"}
 DEFAULT_OPENAI_MODEL = "gpt-5.4-mini"
 
+# Values copied from our setup template are not configured credentials.
+_SETTING_PLACEHOLDERS = {
+    "FIREBASE_API_KEY": "your_firebase_web_api_key",
+    "FIREBASE_APP_ID": "your_firebase_web_app_id",
+    "FIREBASE_CREDENTIALS": "path/to/firebase-service-account.json",
+}
+
+
+def _setting_value(key: str, value: Any) -> str:
+    value = str(value or "").strip()
+    return "" if value == _SETTING_PLACEHOLDERS.get(key) else value
+
 
 def load_environment(directory: Path | None = None) -> None:
     """Load local overrides before defaults, preserving configured server values.
 
-    Empty values already loaded into a running Streamlit process may be filled
-    from disk. Existing non-empty environment variables keep precedence.
+    Empty or template values already loaded into a running Streamlit process may
+    be filled from disk. Existing configured environment variables keep precedence.
     """
     directory = directory or Path(__file__).resolve().parents[1]
     for filename in (".env.local", ".env"):
         for key, value in dotenv_values(directory / filename).items():
-            if value is not None and value.strip() and not os.getenv(key, "").strip():
+            if _setting_value(key, value) and not _setting_value(key, os.getenv(key)):
                 os.environ[key] = value
 
 
 def get_setting(key: str, default: str = "") -> str:
-    value = os.getenv(key, "").strip()
+    value = _setting_value(key, os.getenv(key))
     if value:
         return value
     try:
         import streamlit as st
 
-        return str(st.secrets[key]).strip()
+        return _setting_value(key, st.secrets[key]) or default
     except (KeyError, FileNotFoundError):
         return default
 

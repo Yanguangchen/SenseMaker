@@ -10,7 +10,7 @@ const settle = async () => {
   for (let i = 0; i < 4; i++) await new Promise(setImmediate);
 };
 
-async function mount(storage = {}, clearSession = false) {
+async function mount(storage = {}, clearSession = false, renderOrigin = "https://app.example") {
   const button = { disabled: true, textContent: "" };
   const message = { textContent: "" };
   const events = [];
@@ -41,6 +41,8 @@ async function mount(storage = {}, clearSession = false) {
     GoogleAuthProvider: class { setCustomParameters() {} },
     signInWithPopup: async () => {
       popupCount++;
+      if (storage.popupError) throw storage.popupError;
+      if (storage.popupWait) await storage.popupWait;
       auth.currentUser = storage.nextUser;
       if (persistence === "local") storage.user = auth.currentUser;
       await observer(auth.currentUser);
@@ -80,7 +82,7 @@ async function mount(storage = {}, clearSession = false) {
   const render = (origin = "https://app.example") => listeners.message({
     source: parent, origin, data: { type: "streamlit:render", args: { config: {}, clear_session: clearSession } },
   });
-  render();
+  render(renderOrigin);
   await settle();
   return { auth, sdk, button, message, events, listeners, timers, render,
     popupCount: () => popupCount, persistence: () => persistence,
@@ -96,6 +98,7 @@ test("one Google login survives multiple component/page reloads without a popup"
   const storage = { nextUser: account };
   const first = await mount(storage);
   assert.equal(first.button.disabled, false);
+  assert.equal(first.popupCount(), 0); // Opening the page never starts Google sign-in.
   await first.button.onclick();
   assert.equal(first.popupCount(), 1);
   assert.equal(first.persistence(), "local");
@@ -116,7 +119,7 @@ test("server sign-out/denial erases persistent login before publishing a token",
   assert.equal(reset.events[0].type, "sign_out");
   const refreshed = await mount(storage);
   assert.equal(refreshed.events.at(-1).type, "sign_out");
-  assert.equal(refreshed.button.textContent, "Sign in with Google");
+  assert.equal(refreshed.button.textContent, "Continue with Google");
 });
 
 test("account switch and cross-tab sign-out tell the server to drop its session", async () => {
@@ -125,7 +128,7 @@ test("account switch and cross-tab sign-out tell the server to drop its session"
   await component.button.onclick();
   assert.equal(storage.user, undefined);
   assert.equal(component.events.at(-1).type, "sign_out");
-  assert.equal(component.button.textContent, "Sign in with Google");
+  assert.equal(component.button.textContent, "Continue with Google");
   const other = await mount({ user: user() });
   other.auth.currentUser = null;
   await other.notify();
@@ -175,4 +178,45 @@ test("Streamlit rerenders do not initialize Firebase or add refresh timers twice
   await settle();
   assert.equal(component.timers.length, 1);
   assert.equal(component.events.length, 1);
+});
+
+test("invalid Firebase keys and cancelled popups get actionable errors without exposing raw details", async () => {
+  for (const [code, expected] of [
+    ["auth/api-key-not-valid.-please-pass-a-valid-api-key.", /Firebase web API key/],
+    ["auth/invalid-api-key", /Firebase web API key/],
+    ["auth/popup-closed-by-user", /window was closed/],
+    ["auth/popup-blocked", /Allow pop-ups/],
+    ["auth/network-request-failed", /Check your connection/],
+    ["auth/unsafe?key=secret-value", /auth\/unknown-error/],
+  ]) {
+    const component = await mount({ popupError: { code, message: "secret-value" } });
+    await component.button.onclick();
+    assert.match(component.message.textContent, expected);
+    assert.equal(component.message.textContent.includes("secret-value"), false);
+    assert.equal(component.button.disabled, false);
+    assert.equal(component.button.textContent, "Continue with Google");
+    assert.equal(component.events.some(event => event.id_token), false);
+  }
+});
+
+test("double clicks cannot open competing Google popups", async () => {
+  let finish;
+  const storage = { nextUser: user(), popupWait: new Promise(resolve => { finish = resolve; }) };
+  const component = await mount(storage);
+  const firstClick = component.button.onclick();
+  await component.button.onclick();
+  assert.equal(component.popupCount(), 1);
+  assert.equal(component.button.disabled, true);
+  finish();
+  await firstClick;
+  assert.equal(component.button.disabled, false);
+  assert.equal(component.events.at(-1).id_token, "fresh-token");
+});
+
+test("a foreign embedding page cannot initialize authentication", async () => {
+  const component = await mount({ user: user() }, false, "https://untrusted.example");
+  assert.equal(component.events.length, 0);
+  assert.equal(component.timers.length, 0);
+  assert.equal(component.popupCount(), 0);
+  assert.equal(component.button.disabled, true);
 });

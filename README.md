@@ -439,6 +439,11 @@ firebase deploy --only firestore:rules --project project-sentinel-9ab8e
 `firebase.json` contains only this rules target; this command does not deploy
 Firestore indexes, Hosting, Functions, or any other app.
 
+Signed-out users see a dedicated sign-in screen. **Continue with Google** starts
+the account chooser only when clicked; opening the page never opens a popup.
+The browser component remounts when Firebase web settings change so a corrected
+API key is used immediately instead of retaining the old Firebase instance.
+
 Before rendering either dashboard tab, the server verifies the Firebase ID token
 (including expiry, project, revocation and disabled-account checks), requires a
 verified email, and checks `FAQ_EDITOR_EMAILS`. The check runs on every interaction.
@@ -523,6 +528,11 @@ Install Playwright binaries in the same environment:
 
 - Set the four Firebase web settings and `FAQ_EDITOR_EMAILS` described above in
   `.env` locally or top-level Streamlit Secrets in the cloud.
+- Template values such as `your_firebase_web_api_key` are ignored, including
+  those left in the running process or copied into `.env.local`.
+- An invalid-key message refers to the **Firebase web API key**, not an AI API key.
+  Correct the Firebase configuration and rerun the app; its sign-in component
+  automatically reloads the new settings.
 - Enable Google sign-in and authorize the app hostname in Firebase Authentication.
 - Use a verified Google account in the same complete allowlist as OYOSHI.
 - Allow the Google sign-in popup and access to `www.gstatic.com`.

@@ -1,7 +1,9 @@
 // Firebase Authentication only. All database access stays on the Python server.
 const button = document.getElementById("sign-in");
 const message = document.getElementById("message");
-const parentOrigin = new URL(document.referrer || location.href).origin;
+// This component is served by the app itself. Never send Firebase tokens to a
+// different origin that happens to embed its URL.
+const parentOrigin = new URL(location.href).origin;
 const send = (type, extra = {}) => parent.postMessage(
   { isStreamlitMessage: true, type, ...extra }, parentOrigin,
 );
@@ -12,6 +14,7 @@ const publish = (value) => send("streamlit:setComponentValue", {
 let initializing = false;
 let firebaseAuth;
 let lastToken;
+let popupPending = false;
 
 async function initialize(config, clearSession) {
   if (initializing) return;
@@ -45,11 +48,11 @@ async function initialize(config, clearSession) {
     sdk.onIdTokenChanged(firebaseAuth, async (user) => {
       const forceRefresh = restoring;
       restoring = false;
-      button.textContent = user ? "Switch Google account" : "Sign in with Google";
+      button.textContent = user ? "Switch Google account" : "Continue with Google";
       if (!user) {
         lastToken = undefined;
         publish({ type: "sign_out" });
-        button.disabled = false;
+        button.disabled = popupPending;
         resize();
         return;
       }
@@ -58,7 +61,7 @@ async function initialize(config, clearSession) {
       } catch {
         message.textContent = "Session refresh is temporarily unavailable. Retrying automatically…";
       } finally {
-        button.disabled = false;
+        button.disabled = popupPending;
         resize();
       }
     });
@@ -73,7 +76,10 @@ async function initialize(config, clearSession) {
       if (document.visibilityState === "visible") refresh();
     });
     button.onclick = async () => {
+      if (popupPending) return;
+      popupPending = true;
       button.disabled = true;
+      button.textContent = "Opening Google…";
       message.textContent = "";
       try {
         if (firebaseAuth.currentUser) {
@@ -88,10 +94,20 @@ async function initialize(config, clearSession) {
           "auth/unauthorized-domain": "This app's domain must be authorized in Firebase Authentication.",
           "auth/popup-blocked": "Allow pop-ups for this app and try again.",
           "auth/operation-not-allowed": "Google sign-in must be enabled in Firebase Authentication.",
+          "auth/invalid-api-key": "Google sign-in is not configured correctly. Ask the app administrator to check the Firebase web API key.",
+          "auth/api-key-not-valid.-please-pass-a-valid-api-key.": "Google sign-in is not configured correctly. Ask the app administrator to check the Firebase web API key.",
+          "auth/popup-closed-by-user": "The Google sign-in window was closed. Select Continue with Google to try again.",
+          "auth/cancelled-popup-request": "Another sign-in window is already open. Finish signing in there, or try again.",
+          "auth/network-request-failed": "Google could not be reached. Check your connection and try again.",
+          "auth/web-storage-unsupported": "Your browser could not save the sign-in session. Allow site storage for SenseMaker and try again.",
+          "auth/operation-not-supported-in-this-environment": "Google sign-in is unavailable in this browser. Open SenseMaker in a regular browser window and try again.",
         };
-        message.textContent = hints[error.code] || "Google sign-in did not complete. Try again.";
+        const code = /^auth\/[a-z.-]{1,100}$/.test(error?.code || "") ? error.code : "auth/unknown-error";
+        message.textContent = hints[code] || `Google sign-in could not complete. Try again. Error: ${code}`;
       } finally {
+        popupPending = false;
         button.disabled = false;
+        button.textContent = firebaseAuth.currentUser ? "Switch Google account" : "Continue with Google";
         resize();
       }
     };
@@ -107,5 +123,6 @@ window.addEventListener("message", (event) => {
     initialize(event.data.args.config, event.data.args.clear_session);
   }
 });
+window.addEventListener("resize", resize);
 send("streamlit:componentReady", { apiVersion: 1 });
 resize();

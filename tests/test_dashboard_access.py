@@ -79,7 +79,7 @@ class DashboardAccessTests(unittest.TestCase):
             calls.append(kwargs)
             if kwargs["clear_session"]:
                 return {"type": "sign_out", "event_id": "cleared"}
-            if kwargs["key"] == "google_sign_in_0":
+            if kwargs["key"].startswith("google_sign_in_0_"):
                 return {"id_token": "signed-token", "event_id": "login"}
             return None
 
@@ -96,6 +96,24 @@ class DashboardAccessTests(unittest.TestCase):
             self.assertFalse(list(app.exception))
             self.assertEqual(len(app.tabs), 0)
         self.assertTrue(any(call["clear_session"] for call in calls))
+
+    def test_changed_firebase_settings_remount_the_component_without_granting_access(self):
+        calls = []
+        self.component.return_value = lambda **kwargs: calls.append(kwargs)
+        with patch("modules.auth.web_config", return_value={
+            "apiKey": "first-key", "authDomain": "example.firebaseapp.com",
+            "projectId": "example", "appId": "public",
+        }):
+            app = self.run_dashboard()
+        with patch("modules.auth.web_config", return_value={
+            "apiKey": "corrected-key", "authDomain": "example.firebaseapp.com",
+            "projectId": "example", "appId": "public",
+        }):
+            app.run(timeout=30)
+        self.assertFalse(list(app.exception))
+        self.assertNotEqual(calls[0]["key"], calls[1]["key"])
+        self.assertEqual(len(app.tabs), 0)
+        self.database.assert_not_called()
 
     def test_expired_token_requests_refresh_without_signing_out_or_losing_work(self):
         events = iter([{"id_token": "expired", "event_id": "old"}, None,

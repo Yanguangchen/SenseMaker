@@ -6,7 +6,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from modules.config import get_ai_key, load_environment
+from modules.config import get_ai_key, get_setting, load_environment
 
 
 class EnvironmentTests(unittest.TestCase):
@@ -41,6 +41,43 @@ class EnvironmentTests(unittest.TestCase):
             load_environment(directory)
             self.assertNotIn("GEMINI_KEY", os.environ)
             self.assertNotIn("OPENAI_API_KEY", os.environ)
+
+    def test_firebase_template_overrides_do_not_hide_real_base_configuration(self):
+        placeholders = {
+            "FIREBASE_API_KEY": "your_firebase_web_api_key",
+            "FIREBASE_APP_ID": "your_firebase_web_app_id",
+            "FIREBASE_CREDENTIALS": "path/to/firebase-service-account.json",
+        }
+        # Include values left in the process by an earlier dashboard run.
+        with tempfile.TemporaryDirectory() as folder, patch.dict(os.environ, placeholders, clear=True):
+            directory = Path(folder)
+            (directory / ".env.local").write_text("\n".join(f"{key}={value}" for key, value in placeholders.items()))
+            (directory / ".env").write_text(
+                "FIREBASE_API_KEY=configured-key\nFIREBASE_APP_ID=configured-app\n"
+            )
+            load_environment(directory)
+            self.assertEqual(get_setting("FIREBASE_API_KEY"), "configured-key")
+            self.assertEqual(get_setting("FIREBASE_APP_ID"), "configured-app")
+            with patch("streamlit.secrets", {}):
+                self.assertEqual(get_setting("FIREBASE_CREDENTIALS"), "")
+
+    def test_template_only_firebase_configuration_is_not_reported_as_ready(self):
+        with tempfile.TemporaryDirectory() as folder, patch.dict(os.environ, {}, clear=True):
+            directory = Path(folder)
+            (directory / ".env.local").write_text("FIREBASE_API_KEY=your_firebase_web_api_key\n")
+            load_environment(directory)
+            self.assertNotIn("FIREBASE_API_KEY", os.environ)
+            with patch("streamlit.secrets", {"FIREBASE_API_KEY": "your_firebase_web_api_key"}):
+                self.assertEqual(get_setting("FIREBASE_API_KEY"), "")
+
+    def test_real_firebase_deployment_value_is_preserved(self):
+        with tempfile.TemporaryDirectory() as folder, patch.dict(os.environ, {
+            "FIREBASE_API_KEY": "deployment-key",
+        }, clear=True):
+            directory = Path(folder)
+            (directory / ".env.local").write_text("FIREBASE_API_KEY=local-key\n")
+            load_environment(directory)
+            self.assertEqual(get_setting("FIREBASE_API_KEY"), "deployment-key")
 
 
 if __name__ == "__main__":
