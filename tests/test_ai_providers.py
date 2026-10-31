@@ -127,7 +127,7 @@ class ProviderTests(unittest.TestCase):
         import dashboard
         with patch.dict(os.environ, {"GEMINI_KEY": "server-gemini", "OPENAI_API_KEY": ""}), \
              patch("streamlit.secrets", {}), patch("dashboard.init_db"), \
-             patch("dashboard.st.session_state", {}), patch("dashboard.mark_post_processed") as save, \
+             patch("dashboard.st.session_state", {}), patch("dashboard.persist_analysis_run") as save, \
              patch("modules.processor.generate_openai_content") as generate:
             with self.assertRaisesRegex(OpenAIError, "ChatGPT is not configured"):
                 dashboard._process_selected_firestore_posts([{"_id": "a", "raw_text": "Hello"}], provider="openai")
@@ -138,10 +138,11 @@ class ProviderTests(unittest.TestCase):
         with patch.dict(os.environ, {"AI_PROVIDER": "openai", "OPENAI_API_KEY": "pipeline-key"}), \
              patch("modules.processor.get_pending_posts", return_value=[{"_id": "a", "raw_text": "Hello"}]), \
              patch("modules.processor.generate_openai_content", return_value=result_text()) as generate, \
-             patch("modules.processor.mark_post_processed") as save:
+             patch("modules.processor.persist_analysis_run") as save:
             self.assertEqual(process_pending_posts(MagicMock()), 1)
             self.assertEqual(generate.call_args.args[1], "pipeline-key")
-            self.assertEqual(save.call_args.kwargs["analysis"]["provider"], "openai")
+            self.assertEqual(save.call_args.args[2]["a"]["provider"], "openai")
+            self.assertEqual(save.call_args.kwargs["provider"], "openai")
 
 
 class ProviderUITests(unittest.TestCase):
@@ -164,7 +165,7 @@ class ProviderUITests(unittest.TestCase):
         with patch.dict(os.environ, {"AI_PROVIDER": "gemini", "GEMINI_KEY": "private-gemini", "OPENAI_API_KEY": "private-openai"}), \
              patch("modules.config.load_environment"), \
              patch("streamlit.secrets", {}), patch("modules.auth.require_access", return_value="editor@example.com"), \
-             patch("modules.database.init_db"), patch("modules.database.mark_post_processed") as save, \
+             patch("modules.database.init_db"), patch("modules.sentiment_history.persist_analysis_run", return_value=None) as save, \
              patch("modules.openai.urlopen", return_value=response(completed(result_text()))) as request, \
              patch("modules.processor._generate_content") as gemini:
             app = AppTest.from_file(str(Path(__file__).resolve().parents[1] / "dashboard.py"), default_timeout=30)
@@ -175,7 +176,7 @@ class ProviderUITests(unittest.TestCase):
             app.button(key="run_analysis_selected_btn").click().run()
             self.assertFalse(list(app.exception))
             self.assertEqual(app.session_state["analysis_last_results"]["processed"], 1)
-            self.assertEqual(save.call_args.kwargs["analysis"]["provider"], "openai")
+            self.assertEqual(save.call_args.args[2]["a"]["provider"], "openai")
             self.assertEqual(request.call_args.args[0].get_header("Authorization"), "Bearer private-openai")
             gemini.assert_not_called()
             os.environ["OPENAI_API_KEY"] = ""

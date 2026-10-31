@@ -88,7 +88,7 @@ class ModelTests(unittest.TestCase):
         with patch.dict(os.environ, {"GEMINI_KEY": "server-key"}), \
              patch("dashboard.init_db"), patch("dashboard.st.session_state", {"gemini_model_name": "auto"}), \
              patch("modules.processor.resolve_model", side_effect=GeminiError("Gemini HTTP 403: Access denied.")), \
-             patch("modules.processor._generate_content") as generate, patch("dashboard.mark_post_processed") as save:
+             patch("modules.processor._generate_content") as generate, patch("dashboard.persist_analysis_run") as save:
             with self.assertRaisesRegex(GeminiError, "403"):
                 dashboard._process_selected_firestore_posts([{"_id": "a", "raw_text": "Hello"}], "gemini")
             generate.assert_not_called()
@@ -134,7 +134,7 @@ class GeminiSettingsTests(unittest.TestCase):
     def test_dashboard_analysis_failure_persists_actual_error_without_replacing_saved_analysis(self):
         with patch.dict(os.environ, {"GEMINI_KEY": "server-key", "AI_PROVIDER": "gemini"}), \
              patch("modules.auth.require_access", return_value="editor@example.com"), \
-             patch("modules.database.init_db"), patch("modules.database.mark_post_processed") as save, \
+             patch("modules.database.init_db"), patch("modules.sentiment_history.persist_analysis_run") as save, \
              patch("modules.processor.resolve_model", side_effect=GeminiError("Gemini HTTP 404: Model unavailable.")):
             app = AppTest.from_file(str(Path(__file__).resolve().parents[1] / "dashboard.py"))
             app.session_state["firestore_rows"] = [{"_id": "a", "raw_text": "A Thai project", "status": "processed"}]

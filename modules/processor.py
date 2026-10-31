@@ -15,6 +15,7 @@ import certifi
 from firebase_admin.firestore import Client
 
 from modules.database import get_pending_posts, mark_post_processed
+from modules.sentiment_history import persist_analysis_run
 from modules.signals import content_sources, is_analyzable, normalize_analysis, watch_terms
 from modules.ai_errors import AIError
 from modules.config import AI_PROVIDERS, get_ai_key, get_ai_model, get_ai_provider, get_setting
@@ -307,25 +308,19 @@ def process_pending_posts(db: Client, limit: int = 25) -> int:
     if not pending:
         return 0
 
-    updated = 0
+    targets = watch_terms(get_setting("THAILAND_WATCH_TERMS"))
     try:
         by_id = analyze_posts(
             pending,
-            targets=watch_terms(get_setting("THAILAND_WATCH_TERMS")),
+            targets=targets,
         )
-
-        for post in pending:
-            doc_id = post["_id"]
-            analysis: Analysis = by_id.get(doc_id, {})
-            if analysis:
-                mark_post_processed(db, doc_id=doc_id, analysis=analysis, status="processed")
-            else:
-                mark_post_processed(db, doc_id=doc_id, analysis=None, status="error")
-            updated += 1
     except Exception:
         for post in pending:
             mark_post_processed(db, doc_id=post["_id"], analysis=None, status="error")
-            updated += 1
+        return len(pending)
 
-    return updated
+    # Keep persistence failures separate from model errors: do not overwrite
+    # successful analyses if a Firestore commit fails or its response is lost.
+    persist_analysis_run(db, pending, by_id, provider=get_ai_provider(), targets=targets)
+    return len(pending)
 

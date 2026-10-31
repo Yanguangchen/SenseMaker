@@ -1,4 +1,4 @@
-// Enhance the existing tab containers, without rerunning or discarding either form.
+// Enhance the existing tab containers, without rerunning or discarding forms.
 (() => {
   window.smSidebarCleanup?.();
   const root = document.documentElement;

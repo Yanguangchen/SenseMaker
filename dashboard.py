@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import html
 import hashlib
+import logging
 import os
 import sys
 from datetime import datetime, timezone
@@ -19,18 +20,21 @@ from modules.auth import require_access
 from modules.navigation import dashboard_views
 from modules.ai_errors import AIError, redact
 from modules.config import AI_PROVIDERS, get_ai_key, get_ai_model, get_ai_provider, get_setting, load_environment
-from modules.database import delete_processed_posts, init_db, mark_post_processed, upsert_post
+from modules.database import delete_processed_posts, init_db, upsert_post
 from modules.facebook_session import (
+    FacebookLoginError,
     FacebookSession,
     capture_facebook_session,
     check_facebook_session,
-    saved_facebook_user_id,
+    facebook_storage_path,
+    saved_facebook_session,
 )
 from modules.processor import analyze_posts
 from modules.gemini import AUTO_MODEL, GeminiError, list_text_models, normalize_model_name
 from modules.reddit import CAMBODIA_URL, is_reddit_url, reddit_configured
 from modules.signals import NON_CONTENT_TYPES, SIGNAL_LABELS, is_analyzable, is_flagged, watch_terms
 from modules.saved_links import library_owner_id, load_saved_links, parse_links, remove_saved_links, save_links
+from modules.sentiment_history import chart_spec, load_history, persist_analysis_run
 
 try:
     from modules.scraper import scrape_group
@@ -40,7 +44,6 @@ except Exception:
 
 IS_CLOUD = os.path.exists("/mount/src") or os.getenv("SENSEMAKER_HOSTED") == "1"
 
-AUTH_STORAGE_STATE_FILE = "storage_state.json"
 AUTH_LOGIN_TIMEOUT_SECONDS = 240
 
 
@@ -97,13 +100,16 @@ def _process_selected_firestore_posts(
     db = init_db()
     model_name = (st.session_state.get("gemini_model_name", get_ai_model(provider))
                   if provider == "gemini" else get_ai_model(provider))
+    targets = watch_terms(st.session_state.get("thailand_watch_terms", ""))
     analysis_by_id = analyze_posts(
         selected_posts,
         provider=provider,
         model_name=model_name,
         on_status=status_callback,
-        targets=watch_terms(st.session_state.get("thailand_watch_terms", "")),
+        targets=targets,
     )
+    snapshot = persist_analysis_run(db, selected_posts, analysis_by_id, provider=provider, targets=targets)
+    _load_sentiment_history.clear()
     processed = 0
     errored = 0
     analyses: List[Dict[str, Any]] = []
@@ -114,7 +120,6 @@ def _process_selected_firestore_posts(
             continue
         analysis = analysis_by_id.get(doc_id)
         if analysis:
-            mark_post_processed(db, doc_id=doc_id, analysis=analysis, status="processed")
             processed += 1
             analyses.append({
                 **analysis,
@@ -131,10 +136,54 @@ def _process_selected_firestore_posts(
                 "topics": ", ".join(analysis.get("topics", [])) if isinstance(analysis.get("topics"), list) else str(analysis.get("topics", "")),
             })
         else:
-            mark_post_processed(db, doc_id=doc_id, analysis=None, status="error")
             errored += 1
     return {"processed": processed, "error": errored, "analyses": analyses,
-            "errors": list(getattr(analysis_by_id, "errors", []))}
+            "errors": list(getattr(analysis_by_id, "errors", [])), "history_run": snapshot}
+
+
+@st.cache_data(ttl=60, show_spinner=False)
+def _load_sentiment_history() -> list[dict[str, Any]]:
+    return load_history(init_db())
+
+
+def _render_sentiment_history() -> None:
+    with st.container(border=True, key="sentiment_history"):
+        st.subheader("Sentiment over time")
+        st.caption("One point per analysis · Higher is more positive · Dashed line is the average across runs")
+        if st.button("Refresh timeline", key="refresh_sentiment_history"):
+            _load_sentiment_history.clear()
+        try:
+            rows = _load_sentiment_history()
+        except Exception:
+            st.warning("Sentiment history could not be loaded. Refresh the timeline to try again.")
+            return
+        if not rows:
+            st.info("Complete an analysis to start your timeline. Each result will be saved here automatically.")
+            return
+        average = sum(row["score"] for row in rows) / len(rows)
+        latest = rows[-1]["score"]
+        delta = f"{latest - rows[-2]['score']:+.1f} vs previous run" if len(rows) > 1 else None
+        first, second, third = st.columns(3)
+        first.metric("Latest sentiment", f"{latest:+.1f}", delta)
+        second.metric("Average sentiment", f"{average:+.1f}")
+        third.metric("Analysis runs", len(rows))
+        st.vega_lite_chart(spec=chart_spec(rows), use_container_width=True)
+        st.caption("−100 = all negative · 0 = balanced or neutral · +100 = all positive. "
+                   "Joy counts as positive; Anger and Anxiety as negative. "
+                   "Scores use successful records only, and each run has equal weight in the average.")
+        if len(rows) == 1:
+            st.caption("Your first point is saved. Run another analysis to see the direction of change.")
+        with st.expander("Analysis history"):
+            st.dataframe(pd.DataFrame([{
+                "Completed (UTC)": row["completed_at"],
+                "Sentiment": round(row["score"], 1),
+                "Analyzed": row["processed_count"],
+                "Failed": row["error_count"],
+                "Joy": row["counts"]["Joy"], "Neutral": row["counts"]["Neutral"],
+                "Anger": row["counts"]["Anger"], "Anxiety": row["counts"]["Anxiety"],
+                "Provider": AI_PROVIDERS.get(row["provider"], row["provider"]),
+                "Watch terms": ", ".join(row.get("targets", [])),
+            } for row in reversed(rows)]), use_container_width=True, hide_index=True)
 
 
 def _render_gemini_settings() -> None:
@@ -267,10 +316,11 @@ def _check_facebook_session(path: str, modified: int, size: int) -> FacebookSess
 
 
 def _get_facebook_session(path: str) -> FacebookSession:
-    if not saved_facebook_user_id(path):
-        return FacebookSession()
+    saved = saved_facebook_session(path)
+    if saved.status in {"connected", "disconnected"}:
+        return saved
     if IS_CLOUD:
-        return FacebookSession(status="unavailable")
+        return saved
     try:
         info = Path(path).stat()
     except OSError:
@@ -280,15 +330,23 @@ def _get_facebook_session(path: str) -> FacebookSession:
 
 
 def _facebook_storage_path() -> str:
-    return str(Path(os.getenv("PLAYWRIGHT_STORAGE_STATE", "").strip() or AUTH_STORAGE_STATE_FILE).expanduser().resolve())
+    return facebook_storage_path()
 
 
 def _render_facebook_connection(session: Optional[FacebookSession] = None) -> FacebookSession:
     path = _facebook_storage_path()
     if session is None:
         session = _get_facebook_session(path)
-    if session.status == "connected":
+    if session.status in {"connected", "saved"}:
         os.environ["PLAYWRIGHT_STORAGE_STATE"] = path
+        if session.status == "saved":
+            with st.container(border=True, key="facebook_connection"):
+                st.info("Your Facebook login is saved on this device and will be reused when collecting posts.")
+                st.caption("The connection could not be confirmed right now. Your saved session has been kept.")
+                if st.button("Check Facebook connection", key="check_fb_session_btn", disabled=IS_CLOUD):
+                    _check_facebook_session.clear()
+                    st.rerun()
+            return session
         st.empty()  # Clear the previous login card on the successful-login rerun.
         return session
     with st.container(border=True, key="facebook_connection"):
@@ -309,8 +367,12 @@ def _render_facebook_connection(session: Optional[FacebookSession] = None) -> Fa
                     os.environ["PLAYWRIGHT_STORAGE_STATE"] = path
                     _check_facebook_session.clear()
                     st.rerun()
+                except FacebookLoginError as exc:
+                    st.error(str(exc))
                 except Exception:
-                    st.error("Facebook login did not finish. Please try again.")
+                    logging.getLogger(__name__).exception("Facebook login failed")
+                    st.error("Facebook login could not start or be saved. Please try again. "
+                             "The error details have been recorded in the SenseMaker server log.")
         if IS_CLOUD:
             st.caption("Log in from SenseMaker on your computer to collect Facebook posts.")
         elif session.status == "unavailable":
@@ -413,11 +475,8 @@ def _render_link_workspace(user_email: str, platform: str | None = None) -> tupl
 
     with st.container(border=True, key=widget_key("link_workspace")):
         st.subheader("Your links")
-        st.caption(
-            "Add Facebook pages, groups or post links below; links are saved automatically."
-            if platform == "facebook" else
-            "r/cambodia is included by default. Add other sources below; links are saved automatically."
-        )
+        if platform != "facebook":
+            st.caption("r/cambodia is included by default. Add other sources below; links are saved automatically.")
         if message_key in st.session_state:
             st.success(st.session_state.pop(message_key))
         if library["error"]:
@@ -599,7 +658,8 @@ def _render_processed_deletion(rows: List[Dict[str, Any]]) -> None:
         pending = st.session_state.get(pending_key)
         if pending:
             st.warning(f"Permanently delete {len(pending)} processed record(s) and their saved analyses "
-                       "from the shared library? This affects all users and cannot be undone.")
+                       "from the shared library? This affects all users and cannot be undone. "
+                       "Sentiment timeline summaries are kept.")
             confirm, cancel = st.columns(2)
             if confirm.button(f"Permanently delete {len(pending)} record(s)", key="confirm_processed_delete",
                               type="primary", use_container_width=True):
@@ -865,7 +925,7 @@ def _render_collection_workspace(
         target_urls, links_valid = [CAMBODIA_URL], True
 
     if platform == "facebook":
-        if target_urls and facebook_session.status != "connected":
+        if target_urls and facebook_session.status not in {"connected", "saved"}:
             st.info("Connect your Facebook account above before collecting Facebook posts.")
         tc1, tc2 = st.columns(2)
         use_headless = tc1.checkbox("Headless Browser", value=True, disabled=IS_CLOUD, key="facebook_headless")
@@ -953,7 +1013,7 @@ def main() -> None:
     _apply_ui_theme()
     user_email = require_access()
     facebook_session = _get_facebook_session(_facebook_storage_path())
-    scrape_tab, analysis_tab = dashboard_views(user_email, facebook_session)
+    scrape_tab, analysis_tab, trends_tab = dashboard_views(user_email, facebook_session)
 
     with scrape_tab:
         facebook_tab, reddit_tab, news_tab = st.tabs(["Facebook", "Reddit", "Online news"])
@@ -1105,6 +1165,10 @@ def main() -> None:
         _render_processed_deletion(processed_rows)
         if processed_rows:
             _render_processed_records(processed_rows)
+
+    # Render after processing so the trends page includes the latest saved run.
+    with trends_tab:
+        _render_sentiment_history()
 
 
 if __name__ == "__main__":

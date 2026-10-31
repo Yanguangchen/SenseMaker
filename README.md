@@ -320,7 +320,7 @@ Notes:
 .\.venv\Scripts\python -m streamlit run dashboard.py
 ```
 
-The dashboard has **two tabs**:
+The dashboard has **three pages**, accessible from the left toolbar:
 
 ### Tab 1 — Scrap data
 
@@ -346,6 +346,20 @@ The dashboard has **two tabs**:
 - **Processed/Error metric counters**
 - **View processed records** section to review previously analysed data from Firestore
 
+### Tab 3 — Sentiment Trends
+
+Open **Sentiment Trends** from the left toolbar (the rising-line icon when collapsed).
+**Sentiment over time** saves one dated point for each analysis run, including
+reanalysis of the same records. The index is `100 × (Joy − Anger − Anxiety) / N`,
+where `N` includes all successfully analyzed records, including Neutral. The
+dashed line is the equally weighted mean of the saved run scores. Failed
+records do not affect a score; entirely failed runs do not create a point.
+Post updates and the run summary commit together in Firestore. History lives in
+`<FIREBASE_COLLECTION>_analysis_runs`, survives refreshes and restarts, and keeps
+aggregate summaries when source records are deleted. Tracking starts with the
+next analysis; earlier run boundaries cannot be recovered from overwritten post
+results. The timeline uses completion time in UTC, with details in Analysis history.
+
 ## Validated Facebook Workflow
 
 Use this sequence for the most reliable results:
@@ -358,6 +372,13 @@ Use this sequence for the most reliable results:
 
 2) Click **Log in to Facebook** in the connection card, if your account is not already connected.
 3) Log into Facebook in the opened Chrome window and wait for capture completion.
+   SenseMaker restores the saved login on future visits and after app restarts on
+   this computer. It saves renewed cookies, local storage and IndexedDB after
+   successful checks and collection, and keeps the same browser identity.
+   A temporary connection-check failure shows **Facebook · Saved** and keeps the
+   session; use **Check Facebook connection** to retry without logging in again.
+   Facebook can still expire or revoke a login or require its own verification.
+   Session files stay private on this computer and are excluded from Git and deployments.
 4) In scraper panel, set:
    - select saved Facebook links or add new URLs, one per line
    - `Headless Browser` as needed

@@ -11,6 +11,10 @@ from typing import Any, Awaitable, Callable, Dict, List, Optional
 from urllib.parse import parse_qs, urljoin, urlparse
 
 from playwright.async_api import async_playwright
+from modules.facebook_session import (
+    facebook_context_options, facebook_state_revision, facebook_storage_path,
+    launch_facebook_browser, save_facebook_session,
+)
 from modules.reddit import is_reddit_url, scrape_reddit
 
 PostData = Dict[str, Any]
@@ -422,12 +426,19 @@ async def scrape_group(
 
     collected: List[PostData] = []
     seen_urls: set[str] = set()
+    host = (urlparse(target_url).hostname or "").lower()
+    is_facebook = host in {"facebook.com", "fb.com"} or host.endswith(".facebook.com")
     async with async_playwright() as p:
-        browser = await _launch_browser_with_fallback(p, headless=headless)
-        storage_state = os.getenv("PLAYWRIGHT_STORAGE_STATE")
-        context_kwargs: Dict[str, Any] = {"user_agent": random.choice(USER_AGENTS)}
-        if storage_state:
-            context_kwargs["storage_state"] = storage_state
+        if is_facebook:
+            browser = await launch_facebook_browser(p, headless=headless)
+            storage_state = facebook_storage_path()
+            revision = facebook_state_revision(storage_state)
+            context_kwargs = facebook_context_options(storage_state)
+        else:
+            browser = await _launch_browser_with_fallback(p, headless=headless)
+            context_kwargs = {"user_agent": random.choice(USER_AGENTS)}
+            if os.getenv("PLAYWRIGHT_STORAGE_STATE"):
+                context_kwargs["storage_state"] = os.environ["PLAYWRIGHT_STORAGE_STATE"]
         context = await browser.new_context(**context_kwargs)
         page = await context.new_page()
 
@@ -507,8 +518,19 @@ async def scrape_group(
             if not collected:
                 collected.append(_build_emergency_fallback(target_url, reason=str(exc)))
         finally:
-            await context.close()
-            await browser.close()
+            try:
+                if is_facebook:
+                    # Facebook renews its cookies during use; keep that renewal
+                    # for the next run instead of going back to the login snapshot.
+                    await save_facebook_session(context, storage_state, revision,
+                                                user_agent=await page.evaluate("navigator.userAgent"))
+            except Exception:
+                # A closed tab or network failure must not erase the saved login
+                # or discard collection results that are already available.
+                print("[scraper] Could not update the saved Facebook session; the previous session was kept.")
+            finally:
+                await context.close()
+                await browser.close()
 
     if not collected:
         collected.append(_build_emergency_fallback(target_url))

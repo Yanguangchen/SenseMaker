@@ -1,6 +1,6 @@
 """A persistent glass navigation rail backed by Streamlit's tab state.
 
-Keeping both views mounted preserves form inputs and collected/loaded records when
+Keeping the views mounted preserves form inputs and collected/loaded records when
 switching workspaces. The standard tabs remain usable if the enhancement cannot load.
 """
 
@@ -30,19 +30,21 @@ def dashboard_views(email: str, facebook_session: FacebookSession | None = None)
     """Render navigation only after require_access has verified the account."""
     panel = _icon('<rect x="3" y="4" width="18" height="16" rx="3"/><path d="M9 4v16"/>')
     chart = _icon('<path d="M4 4v16h16M8 14l4-5 4 3 4-7"/>')
+    trend = _icon('<path d="m3 17 6-6 4 4 8-12M15 3h6v6"/>')
     collect = _icon('<ellipse cx="12" cy="5" rx="8" ry="3"/><path d="M4 5v7c0 1.7 3.6 3 8 3M4 12v6c0 1.7 3.6 3 8 3M20 5v5M16 16l3 3 3-3M19 12v7"/>')
     logout = _icon('<path d="M9 4H5a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h4M10 12h11M17 8l4 4-4 4"/>')
     chevron = _icon('<path d="m14 8-4 4 4 4"/>')
     safe_email = html.escape(email, quote=True)
     facebook_account = ""
-    if facebook_session is not None and facebook_session.status == "connected":
+    if facebook_session is not None and facebook_session.status in {"connected", "saved"}:
+        connection = "Connected" if facebook_session.status == "connected" else "Saved"
         name = " ".join((facebook_session.name or f"Facebook account {facebook_session.user_id}").split())
         safe_name = html.escape(name, quote=True)
         facebook_account = (
-            f'<div class="sm-rail-account sm-rail-facebook" title="Facebook connected: {safe_name}" '
-            f'role="img" aria-label="Facebook connected: {safe_name}">'
+            f'<div class="sm-rail-account sm-rail-facebook" title="Facebook {connection.lower()}: {safe_name}" '
+            f'role="img" aria-label="Facebook {connection.lower()}: {safe_name}">'
             '<span class="sm-rail-avatar sm-rail-facebook-avatar" aria-hidden="true">f</span>'
-            '<span class="sm-rail-label sm-rail-account-meta"><span>Facebook · Connected</span>'
+            f'<span class="sm-rail-label sm-rail-account-meta"><span>Facebook · {connection}</span>'
             f'<span class="sm-rail-email">{safe_name}</span></span></div>'
         )
     with st.sidebar.container(key="sm_navigation"):
@@ -62,7 +64,11 @@ def dashboard_views(email: str, facebook_session: FacebookSession | None = None)
             '<button class="sm-rail-button" type="button" data-sm-view="Sentiment Analysis" '
             'aria-label="Sentiment Analysis" title="Sentiment Analysis">'
             f'<span class="sm-rail-icon">{chart}</span>'
-            '<span class="sm-rail-label">Sentiment Analysis</span></button></nav>'
+            '<span class="sm-rail-label">Sentiment Analysis</span></button>'
+            '<button class="sm-rail-button" type="button" data-sm-view="Sentiment Trends" '
+            'aria-label="Sentiment Trends" title="Sentiment Trends">'
+            f'<span class="sm-rail-icon">{trend}</span>'
+            '<span class="sm-rail-label">Sentiment Trends</span></button></nav>'
             '<div class="sm-sidebar-footer">'
             f'{facebook_account}'
             f'<div class="sm-rail-account" title="Signed in as {safe_email}">'
@@ -78,7 +84,7 @@ def dashboard_views(email: str, facebook_session: FacebookSession | None = None)
 
     st.html(THEME_DIR / "sidebar.css")
     with st.container(key="sm_views"):
-        views = st.tabs(["Scrap data", "Sentiment Analysis"])
+        views = st.tabs(["Scrap data", "Sentiment Analysis", "Sentiment Trends"])
 
     script = (THEME_DIR / "sidebar.js").read_text(encoding="utf-8")
     version = hashlib.sha256(script.encode()).hexdigest()[:12]
