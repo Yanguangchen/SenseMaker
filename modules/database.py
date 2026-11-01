@@ -20,6 +20,8 @@ from modules.config import firebase_credentials, get_setting
 from modules.signals import NON_CONTENT_TYPES
 
 PostData = Dict[str, Any]
+NEWS_FIELDS = ("platform", "created_at", "title", "publisher", "publisher_url", "news_category",
+               "news_categories", "news_query", "news_edition", "news_assessment")
 
 
 def _now_iso() -> str:
@@ -108,6 +110,10 @@ def upsert_post(db: firestore.Client, post_data: PostData) -> str:
         payload["saved_at"] = str(post_data.get("saved_at", "")).strip()
     if "target_url" in post_data:
         payload["target_url"] = str(post_data.get("target_url", "")).strip()
+    if post_data.get("source_type") == "news_article":
+        for key in NEWS_FIELDS:
+            if key in post_data:
+                payload[key] = post_data[key]
 
     if is_reddit:
         for key in ("platform", "subreddit", "reddit_id", "created_at", "parent_url", "parent_text",
