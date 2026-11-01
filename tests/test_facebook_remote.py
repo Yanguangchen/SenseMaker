@@ -1,5 +1,6 @@
 """Hosted login, account isolation and remote-browser lifecycle regressions."""
 
+import asyncio
 import time
 import unittest
 from types import SimpleNamespace
@@ -192,6 +193,23 @@ class BrowserLifecycleTests(unittest.IsolatedAsyncioTestCase):
             async with remote.remote_facebook_context(self.playwright, "editor@example.com"):
                 self.fail("Failed connection must not yield a browser")
         self.assertNotIn("private-key", str(caught.exception))
+        self.bb.sessions.update.assert_awaited_once()
+        self.release.assert_called_once_with("editor@example.com", "lease", None)
+
+    async def test_hung_browser_close_still_releases_provider_session_and_profile_lock(self):
+        async def stall():
+            await asyncio.Event().wait()
+        self.browser.close.side_effect = stall
+        with patch("modules.facebook_remote.CLOSE_SECONDS", 0.01):
+            async with remote.remote_facebook_context(self.playwright, "editor@example.com", verify_on_exit=False):
+                pass
+        self.bb.sessions.update.assert_awaited_once()
+        self.release.assert_called_once_with("editor@example.com", "lease", None)
+
+    async def test_cancelled_collection_still_releases_provider_session_and_profile_lock(self):
+        with self.assertRaises(asyncio.CancelledError):
+            async with remote.remote_facebook_context(self.playwright, "editor@example.com", verify_on_exit=False):
+                raise asyncio.CancelledError()
         self.bb.sessions.update.assert_awaited_once()
         self.release.assert_called_once_with("editor@example.com", "lease", None)
 

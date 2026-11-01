@@ -34,6 +34,7 @@ from modules.facebook_session import (
 from modules.facebook_remote import (
     forget_login, login_job, remote_facebook_configured, remote_facebook_session, start_login,
 )
+from modules.collection_jobs import active_collection, cancel_collection, collection_job, start_collection
 from modules.processor import analyze_posts
 from modules.gemini import AUTO_MODEL, GeminiError, list_text_models, normalize_model_name
 from modules.reddit import CAMBODIA_URL, is_reddit_url, reddit_configured
@@ -318,76 +319,79 @@ def _run_scrape_sync(url: str, headless: bool, scroll_times: int) -> List[Dict[s
     return asyncio.run(_runner())
 
 
-def _run_multi_scrape_sync(
+async def _run_multi_scrape_async(
     urls: List[str], headless: bool, scroll_times: int,
     concurrency: int = 3,
     on_progress: Optional[Callable[[int, int, str], None]] = None,
     reddit_limit: int = 50, reddit_comments: int = 20,
     facebook_owner: str | None = None,
+    on_results: Optional[Callable[[List[Dict[str, Any]]], None]] = None,
 ) -> List[Dict[str, Any]]:
+    # Persistent remote profiles must not be opened concurrently.
+    semaphore = asyncio.Semaphore(1 if facebook_owner else max(1, concurrency))
+    completed = 0
+
+    async def scrape_one(url: str) -> List[Dict[str, Any]]:
+        try:
+            rows = await scrape_group(
+                target_url=url,
+                headless=headless,
+                scroll_min=scroll_times,
+                scroll_max=scroll_times,
+                reddit_limit=reddit_limit, reddit_comments=reddit_comments,
+                **({"facebook_owner": facebook_owner} if facebook_owner else {}),
+            )
+            # Preserve which input URL produced each row.
+            for row in rows:
+                row["target_url"] = url
+            return rows
+        except Exception as exc:
+            return [
+                {
+                    "url": url,
+                    "target_url": url,
+                    "raw_text": f"Scrape failed for input URL. Reason: {str(exc).strip() or repr(exc)}",
+                    "comments": [],
+                    "comment_count": 0,
+                    "source_type": "batch_error",
+                    "facebook_connection_error": bool(facebook_owner and isinstance(exc, FacebookLoginError)),
+                }
+            ]
+
+    async def bounded_scrape(url: str) -> List[Dict[str, Any]]:
+        nonlocal completed
+        async with semaphore:
+            rows = await scrape_one(url)
+            completed += 1
+            if on_progress:
+                on_progress(completed, len(urls), url)
+            return rows
+
+    if facebook_owner:
+        batches = []
+        for index, url in enumerate(urls):
+            rows = await bounded_scrape(url)
+            batches.append(rows)
+            if on_results:
+                on_results([row for batch in batches for row in batch])
+            connection_errors = [row for row in rows if row.get("facebook_connection_error") or row.get("collection_stopped")]
+            if connection_errors:
+                remaining = len(urls) - index - 1
+                if remaining:
+                    connection_errors[0]["raw_text"] += f" Collection stopped; {remaining} remaining links were not attempted."
+                break
+    else:
+        batches = await asyncio.gather(*(bounded_scrape(url) for url in urls))
+    merged: List[Dict[str, Any]] = []
+    for batch in batches:
+        merged.extend(batch)
+    return merged
+
+
+def _run_multi_scrape_sync(*args, **kwargs) -> List[Dict[str, Any]]:
     if sys.platform.startswith("win") and hasattr(asyncio, "WindowsProactorEventLoopPolicy"):
         asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
-
-    async def _runner() -> List[Dict[str, Any]]:
-        # Persistent remote profiles must not be opened concurrently.
-        semaphore = asyncio.Semaphore(1 if facebook_owner else max(1, concurrency))
-        completed = 0
-
-        async def scrape_one(url: str) -> List[Dict[str, Any]]:
-            try:
-                rows = await scrape_group(
-                    target_url=url,
-                    headless=headless,
-                    scroll_min=scroll_times,
-                    scroll_max=scroll_times,
-                    reddit_limit=reddit_limit, reddit_comments=reddit_comments,
-                    **({"facebook_owner": facebook_owner} if facebook_owner else {}),
-                )
-                # Preserve which input URL produced each row.
-                for row in rows:
-                    row["target_url"] = url
-                return rows
-            except Exception as exc:
-                return [
-                    {
-                        "url": url,
-                        "target_url": url,
-                        "raw_text": f"Scrape failed for input URL. Reason: {str(exc).strip() or repr(exc)}",
-                        "comments": [],
-                        "comment_count": 0,
-                        "source_type": "batch_error",
-                        "facebook_connection_error": bool(facebook_owner and isinstance(exc, FacebookLoginError)),
-                    }
-                ]
-
-        async def bounded_scrape(url: str) -> List[Dict[str, Any]]:
-            nonlocal completed
-            async with semaphore:
-                rows = await scrape_one(url)
-                completed += 1
-                if on_progress:
-                    on_progress(completed, len(urls), url)
-                return rows
-
-        if facebook_owner:
-            batches = []
-            for index, url in enumerate(urls):
-                rows = await bounded_scrape(url)
-                batches.append(rows)
-                connection_errors = [row for row in rows if row.get("facebook_connection_error")]
-                if connection_errors:
-                    remaining = len(urls) - index - 1
-                    if remaining:
-                        connection_errors[0]["raw_text"] += f" Collection stopped; {remaining} remaining links were not attempted."
-                    break
-        else:
-            batches = await asyncio.gather(*(bounded_scrape(url) for url in urls))
-        merged: List[Dict[str, Any]] = []
-        for batch in batches:
-            merged.extend(batch)
-        return merged
-
-    return asyncio.run(_runner())
+    return asyncio.run(_run_multi_scrape_async(*args, **kwargs))
 
 
 @st.cache_data(ttl=300, show_spinner=False)
@@ -461,6 +465,8 @@ def _render_remote_facebook_progress(email: str, job_id: str) -> None:
 
 
 def _render_remote_facebook_connection(email: str, session: FacebookSession) -> FacebookSession:
+    if active_collection(email):
+        return session
     if st.session_state.get("facebook_login_notice"):
         st.success(st.session_state.pop("facebook_login_notice"))
     if st.session_state.get("facebook_login_error"):
@@ -1099,6 +1105,36 @@ def _render_cloud_save(records: List[Dict[str, Any]], title_key: str, save_key: 
             st.error(f"Firestore write failed: {error_text}")
 
 
+@st.fragment(run_every=2)
+def _render_facebook_collection_progress(email: str, job_id: str) -> None:
+    from modules.auth import allowed_emails, verify_access
+    try:
+        if verify_access(st.session_state.get("auth_token", ""), allowed_emails()) != email:
+            raise PermissionError()
+    except Exception:
+        cancel_collection(email, job_id)
+        st.rerun(scope="app")
+    job = collection_job(email, job_id)
+    if job is None or job.status not in {"running", "cancelling"}:
+        st.session_state.pop("facebook_collection_job", None)
+        if job:
+            st.session_state["last_scrape_results"] = job.results
+            st.session_state["last_scrape_urls"] = list(job.urls)
+            st.session_state["last_scrape_error"] = job.error or (
+                "Collection cancelled. Completed results have been kept." if job.status == "cancelled" else "")
+        else:
+            st.session_state["last_scrape_error"] = "The collection ended when the app restarted. Please try again."
+        st.rerun(scope="app")
+    total = len(job.urls)
+    st.progress(job.completed / max(total, 1), text=f"Collection running · {job.completed} of {total} sources finished")
+    if job.status == "cancelling":
+        st.info("Stopping collection and releasing your Facebook connection…")
+    else:
+        st.caption("You can switch workspaces. Another click or browser tab will keep using this collection.")
+    if st.button("Cancel collection", key="cancel_facebook_collection", disabled=job.status == "cancelling"):
+        cancel_collection(email, job_id)
+
+
 def _render_collection_workspace(
     platform: str, user_email: str, facebook_session: FacebookSession,
 ) -> None:
@@ -1123,10 +1159,17 @@ def _render_collection_workspace(
     result_key = "last_scrape" if platform == "facebook" else "last_reddit_scrape"
     title_key = "custom_title_value" if platform == "facebook" else "reddit_custom_title_value"
     save_key = "save_last_results_btn" if platform == "facebook" else "save_reddit_results_btn"
+    hosted_facebook = platform == "facebook" and IS_CLOUD
+    active_job = active_collection(user_email) if hosted_facebook else None
+    if active_job:
+        st.session_state["facebook_collection_job"] = active_job.id
+    collection_id = st.session_state.get("facebook_collection_job") if hosted_facebook else None
+    if collection_id:
+        _render_facebook_collection_progress(user_email, collection_id)
     if st.button(
         "Collect posts", key=f"collect_{platform}_posts", type="primary", use_container_width=True,
         disabled=platform == "facebook" and IS_CLOUD and (
-            facebook_session.status != "connected" or bool(st.session_state.get("facebook_login_job"))),
+            facebook_session.status != "connected" or bool(st.session_state.get("facebook_login_job")) or bool(active_job)),
     ):
         if not links_valid:
             st.error("Correct the invalid links above before collecting posts.")
@@ -1135,6 +1178,16 @@ def _render_collection_workspace(
         else:
             st.session_state[f"{result_key}_urls"] = target_urls
             st.session_state[f"{result_key}_error"] = ""
+            # Remove warnings from the previous attempt as soon as a new run starts.
+            st.session_state[f"{result_key}_results"] = None
+            if hosted_facebook:
+                async def run(progress, partial):
+                    return await _run_multi_scrape_async(
+                        urls=list(target_urls), headless=True, scroll_times=scroll_times,
+                        facebook_owner=user_email, on_progress=progress, on_results=partial,
+                    )
+                st.session_state["facebook_collection_job"] = start_collection(user_email, target_urls, run)
+                st.rerun()
             progress = st.progress(0, text=f"Starting collection for {len(target_urls)} links…")
             with st.spinner("Running scraper..."):
                 try:
@@ -1159,6 +1212,8 @@ def _render_collection_workspace(
                     st.session_state[f"{result_key}_error"] = error_text
                     st.error(f"Scrape failed: {error_text}")
 
+    if active_job:
+        return  # Previous results/errors are not the status of the running job.
     scrape_results = st.session_state.get(f"{result_key}_results", None)
     scrape_urls = st.session_state.get(f"{result_key}_urls", [])
     scrape_error = st.session_state.get(f"{result_key}_error", "")

@@ -26,6 +26,7 @@ from modules.facebook_session import FacebookLoginError, FacebookSession, _profi
 from modules.saved_links import library_owner_id
 
 LOGIN_SECONDS = 180
+CLOSE_SECONDS = 10
 _jobs: dict[tuple[str, str], "LoginJob"] = {}
 _jobs_lock = threading.Lock()
 
@@ -173,7 +174,10 @@ async def remote_facebook_context(playwright, email: str, *, timeout_seconds: in
             finally:
                 try:
                     if browser:
-                        await browser.close()
+                        try:
+                            await asyncio.wait_for(browser.close(), timeout=CLOSE_SECONDS)
+                        except Exception:
+                            pass  # The provider release below also ends a stalled browser.
                 finally:
                     if session:
                         # Also terminate when connecting failed or the viewer was abandoned.

@@ -28,6 +28,8 @@ USER_AGENTS = [
     "(KHTML, like Gecko) Version/17.5 Safari/605.1.15",
 ]
 
+REMOTE_COLLECTION_SECONDS = 150
+
 
 def _now_iso() -> str:
     return datetime.now(tz=timezone.utc).isoformat()
@@ -96,7 +98,10 @@ async def _extract_permalink(container: Any, base_url: str) -> Optional[str]:
         links = container.locator(selector)
         count = await links.count()
         for i in range(count):
-            href = await links.nth(i).get_attribute("href")
+            try:
+                href = await links.nth(i).get_attribute("href", timeout=1000)
+            except Exception:
+                continue
             if not href:
                 continue
             try:
@@ -216,7 +221,10 @@ async def _collect_from_container_list(
     count = await container_list.count()
     for i in range(count):
         container = container_list.nth(i)
-        raw_text = (await container.inner_text()).strip()
+        try:
+            raw_text = (await container.inner_text(timeout=1500)).strip()
+        except Exception:
+            continue  # Virtualized posts may disappear between count() and read.
         if not raw_text or len(raw_text) < 20:
             continue
 
@@ -226,10 +234,14 @@ async def _collect_from_container_list(
             continue
         seen_urls.add(resolved_url)
 
+        try:
+            comments = await asyncio.wait_for(_extract_comments(container, raw_text=raw_text), timeout=4)
+        except Exception:
+            comments = []
         payload: PostData = {
             "url": resolved_url,
             "raw_text": raw_text,
-            "comments": await _extract_comments(container, raw_text=raw_text),
+            "comments": comments,
             "source_type": "container_post",
             "scraped_at": _now_iso(),
         }
@@ -428,6 +440,15 @@ async def scrape_group(
 
     collected: List[PostData] = []
     seen_urls: set[str] = set()
+    partial_records: dict[str, PostData] = {}
+
+    async def remember_post(record: PostData) -> None:
+        partial_records[record["url"]] = record
+        if persist_cb:
+            maybe = persist_cb(record)
+            if asyncio.iscoroutine(maybe):
+                await maybe
+
     host = (urlparse(target_url).hostname or "").lower()
     is_facebook = host in {"facebook.com", "fb.com"} or host.endswith(".facebook.com")
     remote = is_facebook and bool(facebook_owner)
@@ -454,78 +475,89 @@ async def scrape_group(
         page = await context.new_page()
 
         try:
-            await _goto_with_resilient_wait(page, target_url=target_url, timeout_ms=60_000)
+            async with asyncio.timeout(REMOTE_COLLECTION_SECONDS if remote else None):
+                await _goto_with_resilient_wait(page, target_url=target_url, timeout_ms=60_000)
 
-            min_cycles = max(1, scroll_min)
-            max_cycles = max(min_cycles, scroll_max + 6)
-            no_growth_cycles = 0
+                min_cycles = max(1, scroll_min)
+                max_cycles = max(min_cycles, scroll_max + 6)
+                no_growth_cycles = 0
 
-            for cycle in range(max_cycles):
-                before = len(seen_urls)
-                # Harvest each scroll cycle because older nodes may be virtualized out.
+                for cycle in range(max_cycles):
+                    before = len(seen_urls)
+                    # Harvest each scroll cycle because older nodes may be virtualized out.
+                    collected.extend(
+                        await _harvest_visible_posts(
+                            page=page,
+                            target_url=target_url,
+                            seen_urls=seen_urls,
+                            persist_cb=remember_post,
+                        )
+                    )
+                    await _click_expand_controls(page)
+                    await page.mouse.wheel(0, random.randint(1600, 3200))
+                    await page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
+                    await _wait_for_feed_settle(page, rounds=2)
+
+                    # Second harvest after dynamic content settles.
+                    collected.extend(
+                        await _harvest_visible_posts(
+                            page=page,
+                            target_url=target_url,
+                            seen_urls=seen_urls,
+                            persist_cb=remember_post,
+                        )
+                    )
+                    after = len(seen_urls)
+                    if after > before:
+                        no_growth_cycles = 0
+                    else:
+                        no_growth_cycles += 1
+
+                    # Adaptive stop once we have scrolled enough and growth has stalled.
+                    if cycle + 1 >= min_cycles and no_growth_cycles >= 3:
+                        break
+
                 collected.extend(
                     await _harvest_visible_posts(
                         page=page,
                         target_url=target_url,
                         seen_urls=seen_urls,
-                        persist_cb=persist_cb,
-                    )
-                )
-                await _click_expand_controls(page)
-                await page.mouse.wheel(0, random.randint(1600, 3200))
-                await page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
-                await _wait_for_feed_settle(page, rounds=2)
-
-                # Second harvest after dynamic content settles.
-                collected.extend(
-                    await _harvest_visible_posts(
-                        page=page,
-                        target_url=target_url,
-                        seen_urls=seen_urls,
-                        persist_cb=persist_cb,
-                    )
-                )
-                after = len(seen_urls)
-                if after > before:
-                    no_growth_cycles = 0
-                else:
-                    no_growth_cycles += 1
-
-                # Adaptive stop once we have scrolled enough and growth has stalled.
-                if cycle + 1 >= min_cycles and no_growth_cycles >= 3:
-                    break
-
-            collected.extend(
-                await _harvest_visible_posts(
-                    page=page,
-                    target_url=target_url,
-                    seen_urls=seen_urls,
-                    persist_cb=persist_cb,
-                )
-            )
-
-            # Fallback for sparse profile layouts where only one visible container is exposed.
-            if len(collected) <= 1:
-                collected.extend(
-                    await _collect_from_permalink_links(
-                        page=page,
-                        target_url=target_url,
-                        seen_urls=seen_urls,
-                        persist_cb=persist_cb,
+                        persist_cb=remember_post,
                     )
                 )
 
-            if not collected:
-                fallback_payload = await _collect_page_level_fallback(target_url=target_url, page=page)
-                if fallback_payload:
-                    collected.append(fallback_payload)
-                    if persist_cb:
-                        maybe = persist_cb(fallback_payload)
-                        if asyncio.iscoroutine(maybe):
-                            await maybe
+                # Fallback for sparse profile layouts where only one visible container is exposed.
+                if len(collected) <= 1:
+                    collected.extend(
+                        await _collect_from_permalink_links(
+                            page=page,
+                            target_url=target_url,
+                            seen_urls=seen_urls,
+                            persist_cb=remember_post,
+                        )
+                    )
+
+                if not collected:
+                    fallback_payload = await _collect_page_level_fallback(target_url=target_url, page=page)
+                    if fallback_payload:
+                        collected.append(fallback_payload)
+                        if persist_cb:
+                            maybe = persist_cb(fallback_payload)
+                            if asyncio.iscoroutine(maybe):
+                                await maybe
+        except TimeoutError:
+            seen = {record["url"] for record in collected}
+            collected.extend(record for url, record in partial_records.items() if url not in seen)
+            collected.append({
+                "url": target_url, "target_url": target_url, "source_type": "batch_warning",
+                "raw_text": "This source took too long to respond. Any completed posts were kept. Try fewer scroll iterations.",
+                "comments": [], "comment_count": 0, "collection_stopped": True,
+            })
         except Exception as exc:
             # Keep scraper resilient and return whatever was collected.
             print(f"[scraper] non-fatal error: {exc}")
+            seen = {record["url"] for record in collected}
+            collected.extend(record for url, record in partial_records.items() if url not in seen)
             if not collected:
                 collected.append(_build_emergency_fallback(target_url, reason=str(exc)))
         finally:
