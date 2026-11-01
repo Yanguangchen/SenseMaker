@@ -1,7 +1,7 @@
 // Firebase Authentication only. All database access stays on the Python server.
 const button = document.getElementById("sign-in");
 const message = document.getElementById("message");
-button.textContent = "Connecting to SenseMaker…";
+button.textContent = "Connecting to CrisisRadar…";
 // This component is served by the app itself. Never send Firebase tokens to a
 // different origin that happens to embed its URL.
 const parentOrigin = new URL(location.href).origin;
@@ -102,8 +102,8 @@ async function initialize(config, clearSession) {
           "auth/popup-closed-by-user": "The Google sign-in window was closed. Select Continue with Google to try again.",
           "auth/cancelled-popup-request": "Another sign-in window is already open. Finish signing in there, or try again.",
           "auth/network-request-failed": "Google could not be reached. Check your connection and try again.",
-          "auth/web-storage-unsupported": "Your browser could not save the sign-in session. Allow site storage for SenseMaker and try again.",
-          "auth/operation-not-supported-in-this-environment": "Google sign-in is unavailable in this browser. Open SenseMaker in a regular browser window and try again.",
+          "auth/web-storage-unsupported": "Your browser could not save the sign-in session. Allow site storage for CrisisRadar and try again.",
+          "auth/operation-not-supported-in-this-environment": "Google sign-in is unavailable in this browser. Open CrisisRadar in a regular browser window and try again.",
         };
         const code = /^auth\/[a-z.-]{1,100}$/.test(error?.code || "") ? error.code : "auth/unknown-error";
         message.textContent = hints[code] || `Google sign-in could not complete. Try again. Error: ${code}`;

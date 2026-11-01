@@ -1,6 +1,6 @@
-# SenseMaker on Railway
+# CrisisRadar on Railway
 
-`railway.ts` describes the single Streamlit container in the dedicated SenseMaker project.
+`railway.ts` describes the single Streamlit container in the dedicated CrisisRadar project.
 The Dockerfile installs Python and Chromium. Firebase remains the persistent database.
 
 Production: https://sensemaker-production.up.railway.app/

@@ -1,5 +1,6 @@
 [server]
 headless = true
+enableStaticServing = true
 
 # Dark glass theme. Card, tab and background styling lives in modules/theme/glass.css;
 # backgroundColor matches a glass card so dataframes blend into it.

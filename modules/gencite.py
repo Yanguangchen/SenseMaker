@@ -1,7 +1,7 @@
 """GenCite: brand share of voice in Gemini and ChatGPT answers.
 
 A Python port of the GenCite web app's Cloud Functions and client-side scoring,
-running on SenseMaker's server with SenseMaker's provider credentials:
+running on CrisisRadar's server with CrisisRadar's provider credentials:
 
 1. Expand a source query into tagged variations across ten search intents.
 2. Ask each provider for five independently worded answers per query and count
@@ -55,7 +55,7 @@ COVERAGE_LEVELS = ("missing", "weak", "adjacent")
 COVERAGE_LABELS = {"missing": "Missing intent", "weak": "Weak spot", "adjacent": "Adjacent topic"}
 
 # --- Provider configuration ---------------------------------------------------
-# GenCite reuses SenseMaker's provider keys. Its models default to those of the
+# GenCite reuses CrisisRadar's provider keys. Its models default to those of the
 # GenCite web app so share-of-voice numbers stay comparable between the two apps.
 DEFAULT_MODELS = {"gemini": "gemini-2.5-flash", "openai": "gpt-4.1-mini"}
 MODEL_SETTINGS = {"gemini": "GENCITE_GEMINI_MODEL", "openai": "GENCITE_OPENAI_MODEL"}

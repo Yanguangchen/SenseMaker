@@ -454,7 +454,7 @@ async def scrape_group(
     remote = is_facebook and bool(facebook_owner)
     if is_facebook and os.getenv("SENSEMAKER_HOSTED") == "1" and not remote:
         from modules.facebook_session import FacebookLoginError
-        raise FacebookLoginError("Sign in to SenseMaker and connect Facebook before collecting posts.")
+        raise FacebookLoginError("Sign in to CrisisRadar and connect Facebook before collecting posts.")
     async with async_playwright() as p, AsyncExitStack() as resources:
         if remote:
             from modules.facebook_remote import remote_facebook_context

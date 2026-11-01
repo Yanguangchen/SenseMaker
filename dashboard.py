@@ -1,4 +1,4 @@
-"""Frontend-first Streamlit dashboard for Project Sentinel."""
+"""Frontend-first Streamlit dashboard for CrisisRadar."""
 
 from __future__ import annotations
 
@@ -17,6 +17,7 @@ import pandas as pd
 import streamlit as st
 
 from modules.auth import require_access
+from modules.ui import apply_brand
 from modules.analysis_library import select_history, select_records, source_key
 from modules.navigation import dashboard_views
 from modules.ai_errors import AIError, redact
@@ -494,7 +495,7 @@ def _render_remote_facebook_connection(email: str, session: FacebookSession) -> 
             st.button("Log in to Facebook", key="capture_fb_session_btn", on_click=begin)
         else:
             st.subheader("Connect your Facebook account")
-            st.caption("Sign in through the interactive browser. Your saved login is private to your SenseMaker account.")
+            st.caption("Sign in through the interactive browser. Your saved login is private to your CrisisRadar account.")
             st.button("Log in to Facebook", key="capture_fb_session_btn", type="primary",
                       use_container_width=True, disabled=not remote_facebook_configured(), on_click=begin)
         if not remote_facebook_configured():
@@ -543,7 +544,7 @@ def _render_facebook_connection(session: Optional[FacebookSession] = None, user_
                 except Exception:
                     logging.getLogger(__name__).exception("Facebook login failed")
                     st.error("Facebook login could not start or be saved. Please try again. "
-                             "The error details have been recorded in the SenseMaker server log.")
+                             "The error details have been recorded in the CrisisRadar server log.")
         if session.status == "unavailable":
             st.caption("We couldn’t confirm your saved session. Log in again to reconnect.")
     return session
@@ -785,7 +786,7 @@ def _render_signal_overview(analyses: List[Dict[str, Any]], key: str) -> List[Di
         # Quotes and titles are untrusted spreadsheet cells.
         safe = pd.DataFrame(export).map(lambda v: "'" + v if isinstance(v, str) and v.lstrip().startswith(("=", "+", "-", "@")) else v)
         st.download_button("Export findings CSV", safe.to_csv(index=False).encode("utf-8-sig"),
-                           "sensemaker-findings.csv", "text/csv", key=f"{key}_export")
+                           "crisisradar-findings.csv", "text/csv", key=f"{key}_export")
     else:
         st.info("No records match this filter.")
     return visible
@@ -1062,6 +1063,7 @@ button[data-testid="stExpandSidebarButton"], [data-testid="stSidebarCollapseButt
 
 def _apply_ui_theme() -> None:
     st.markdown(_UI_THEME, unsafe_allow_html=True)
+    apply_brand()
 
 
 def _render_reddit_settings() -> tuple[int, int]:
@@ -1428,7 +1430,8 @@ def _render_news_risk_history() -> None:
 def main() -> None:
     load_environment()
     _bridge_secrets_to_env()
-    st.set_page_config(page_title="SenseMaker", layout="wide")
+    icon = Path(__file__).resolve().parent / "static" / "apple-touch-icon.png"
+    st.set_page_config(page_title="CrisisRadar", page_icon=str(icon), layout="wide")
     _apply_ui_theme()
     user_email = require_access()
     if user_email is None:

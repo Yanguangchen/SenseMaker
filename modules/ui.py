@@ -1,4 +1,4 @@
-"""Glass theme, scroll reveal and shared markup for the SenseMaker UI."""
+"""Glass theme, scroll reveal and shared markup for the CrisisRadar UI."""
 
 from __future__ import annotations
 
@@ -38,6 +38,45 @@ def apply_theme() -> None:
     )
 
 
+def apply_brand() -> None:
+    """Set the browser title, Apple home-screen icon, and page metadata."""
+    icon = "/app/static/apple-touch-icon.png"
+    description = "Bring conversations together. Understand sentiment and follow emerging signals."
+    components.html(
+        "<script>"
+        "const doc = window.parent.document;"
+        "if (!doc.getElementById('cr-brand')) {"
+        "const marker = doc.createElement('meta');"
+        "marker.id = 'cr-brand'; marker.name = 'crisisradar-brand';"
+        "doc.head.appendChild(marker);"
+        "const add = (tag, attrs) => { const el = doc.createElement(tag);"
+        "Object.entries(attrs).forEach(([key, value]) => el.setAttribute(key, value));"
+        "doc.head.appendChild(el); };"
+        f"add('link', {{rel: 'apple-touch-icon', sizes: '180x180', href: '{icon}'}});"
+        "add('link', {rel: 'icon', type: 'image/png', sizes: '32x32', href: '/app/static/favicon-32.png'});"
+        "add('link', {rel: 'manifest', href: '/app/static/manifest.webmanifest'});"
+        "add('meta', {name: 'application-name', content: 'CrisisRadar'});"
+        "add('meta', {name: 'apple-mobile-web-app-title', content: 'CrisisRadar'});"
+        "add('meta', {name: 'apple-mobile-web-app-capable', content: 'yes'});"
+        "add('meta', {name: 'mobile-web-app-capable', content: 'yes'});"
+        "add('meta', {name: 'apple-mobile-web-app-status-bar-style', content: 'black-translucent'});"
+        "add('meta', {name: 'theme-color', content: '#0D1129'});"
+        f"add('meta', {{name: 'description', content: {json.dumps(description)}}});"
+        "add('meta', {property: 'og:title', content: 'CrisisRadar'});"
+        "add('meta', {property: 'og:site_name', content: 'CrisisRadar'});"
+        f"add('meta', {{property: 'og:description', content: {json.dumps(description)}}});"
+        "add('meta', {property: 'og:type', content: 'website'});"
+        f"add('meta', {{property: 'og:image', content: '{icon}'}});"
+        "add('meta', {name: 'twitter:card', content: 'summary'});"
+        "add('meta', {name: 'twitter:title', content: 'CrisisRadar'});"
+        f"add('meta', {{name: 'twitter:description', content: {json.dumps(description)}}});"
+        "}"
+        "doc.title = 'CrisisRadar';"
+        "</script>",
+        height=0,
+    )
+
+
 def _text(value: Any) -> str:
     # Blank lines would end the HTML block and let Markdown parse scraped text.
     return html.escape(" ".join(str(value or "").split()))
@@ -46,8 +85,8 @@ def _text(value: Any) -> str:
 def hero() -> None:
     st.markdown(
         '<div class="sm-hero sm-reveal">'
-        '<span class="sm-eyebrow"><span class="sm-pulse" aria-hidden="true"></span>Project Sentinel</span>'
-        '<div class="sm-hero__title" role="heading" aria-level="1">SenseMaker</div>'
+        '<span class="sm-eyebrow"><span class="sm-pulse" aria-hidden="true"></span>CrisisRadar</span>'
+        '<div class="sm-hero__title" role="heading" aria-level="1">CrisisRadar</div>'
         '<p class="sm-hero__lede">Collect posts from the sources you follow, then read their sentiment '
         "and risk with Gemini or ChatGPT.</p></div>",
         unsafe_allow_html=True,
@@ -57,8 +96,8 @@ def hero() -> None:
 def sign_in_gate() -> None:
     st.markdown(
         f'<div class="sm-gate sm-reveal"><div class="sm-gate__icon">{_LOCK_ICON}</div>'
-        '<span class="sm-eyebrow">Project Sentinel</span>'
-        '<div class="sm-hero__title" role="heading" aria-level="1">SenseMaker</div>'
+        '<span class="sm-eyebrow">CrisisRadar</span>'
+        '<div class="sm-hero__title" role="heading" aria-level="1">CrisisRadar</div>'
         '<p class="sm-hero__lede">Sign in with your approved Google account to continue.</p>'
         '<p class="sm-gate__hint">Use <b>Sign in with Google</b> in the sidebar.</p></div>',
         unsafe_allow_html=True,

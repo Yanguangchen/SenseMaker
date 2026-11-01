@@ -16,6 +16,7 @@ RUN python -m pip install -r requirements-hosted.txt \
 COPY dashboard.py ./
 COPY hosted.py ./
 COPY modules ./modules
+COPY static ./static
 COPY .streamlit/config.toml ./.streamlit/config.toml
 
 # Railway supplies PORT at runtime; 8080 is the local container default.

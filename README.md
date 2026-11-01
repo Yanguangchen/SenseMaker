@@ -1,4 +1,4 @@
-# SenseMaker (Project Sentinel MVP)
+# CrisisRadar
 
 Social listening workspace for monitoring Thailand-related discussion, border tensions and boycott signals.
 
@@ -82,8 +82,8 @@ and can be changed to a Responses-compatible text model with JSON mode support.
 ## GenCite: AI share of voice
 
 Open **GenCite** from the left toolbar (the speech-bubble icon). It brings the
-[GenCite](https://github.com/Yanguangchen/gencite) web app's functionality into SenseMaker. It runs on
-SenseMaker's server with SenseMaker's Google sign-in, approved-user list and provider keys. The
+[GenCite](https://github.com/Yanguangchen/gencite) web app's functionality into CrisisRadar. It runs on
+CrisisRadar's server with CrisisRadar's Google sign-in, approved-user list and provider keys. The
 GenCite web app itself is unchanged and can keep running separately.
 
 **Analyze**
@@ -222,7 +222,7 @@ Live access requires an approved Reddit app. Configure these server settings in
 ```env
 REDDIT_CLIENT_ID=...
 REDDIT_CLIENT_SECRET=...
-REDDIT_USER_AGENT=web:SenseMaker:1.0 (by /u/your_reddit_username)
+REDDIT_USER_AGENT=web:CrisisRadar:1.0 (by /u/your_reddit_username)
 # Optional, for an approved user-authorized app with read scope:
 REDDIT_REFRESH_TOKEN=...
 ```
@@ -236,7 +236,7 @@ this repository. See [Reddit's access policy](https://support.reddithelp.com/hc/
 
 ## Google News monitoring: OYOSHI, border tension and boycotts
 
-Open **Scrape Data → Online news** and click **Search Google News**. SenseMaker runs the same
+Open **Scrape Data → Online news** and click **Search Google News**. CrisisRadar runs the same
 searches as Google Search's **News** tab for three categories, each with editable search terms:
 
 | Category | Default search |
@@ -279,7 +279,7 @@ terms for your use case.
 
 Production: **https://sensemaker-production.up.railway.app/**
 
-Railway is the container host for SenseMaker. The root `Dockerfile` installs the
+Railway is the container host for CrisisRadar. The root `Dockerfile` installs the
 tested Python versions from `requirements-hosted.txt` and Chromium for headless
 collection. `hosted.py` runs Streamlit on `0.0.0.0:$PORT` (8080 locally) and registers
 Google sign-in assets before accepting requests. `.railway/railway.ts` selects the Dockerfile
@@ -427,9 +427,9 @@ Copy the **complete** `FAQ_EDITOR_EMAILS` list and public Firebase web configura
 from OYOSHI into these top-level settings. Keep this list synchronized in both apps
 when adding or removing access; the apps do not read each other's deployment secrets.
 Use the same Firebase project for Authentication and Firestore. Enable the Google
-sign-in provider in Firebase Authentication and add SenseMaker's deployed hostname
+sign-in provider in Firebase Authentication and add CrisisRadar's deployed hostname
 and `localhost` to **Authentication > Settings > Authorized domains**, without a
-scheme or port. Existing OYOSHI Google accounts can then sign in to SenseMaker.
+scheme or port. Existing OYOSHI Google accounts can then sign in to CrisisRadar.
 
 ### 4) What works on Streamlit Cloud
 
@@ -590,7 +590,7 @@ Use this sequence for the most reliable results:
 
 2) Click **Log in to Facebook** in the connection card, if your account is not already connected.
 3) Log into Facebook in the opened Chrome window and wait for capture completion.
-   SenseMaker restores the saved login on future visits and after app restarts on
+   CrisisRadar restores the saved login on future visits and after app restarts on
    this computer. It saves renewed cookies, local storage and IndexedDB after
    successful checks and collection, and keeps the same browser identity.
    A temporary connection-check failure shows **Facebook · Saved** and keeps the
@@ -664,7 +664,7 @@ Analysis output per post:
 ### Shared Firebase project and access
 
 Keep the shared database's existing deny-all Firestore rules exactly as deployed.
-SenseMaker reads and writes through the Python Firebase Admin SDK on the server,
+CrisisRadar reads and writes through the Python Firebase Admin SDK on the server,
 which authenticates with IAM and bypasses client security rules. The included
 `firestore.rules` mirrors that shared deny-all policy. The browser uses Firebase only for
 Google Authentication, never for database queries.
@@ -697,10 +697,10 @@ enabled; clearing site data or using a new private-browsing session requires log
 
 The supplied Firestore rules contain **no user list**. `FAQ_EDITOR_EMAILS` is a
 separate server setting, not a Firestore permission. All listed users receive the
-same SenseMaker dashboard access. The command-line ingestion pipeline remains a
+same CrisisRadar dashboard access. The command-line ingestion pipeline remains a
 trusted server job using its service account rather than an interactive user login.
 
-SenseMaker's posts use `FIREBASE_COLLECTION` (default `raw_posts`), and personal
+CrisisRadar's posts use `FIREBASE_COLLECTION` (default `raw_posts`), and personal
 link libraries use `sensemaker_saved_links/{owner_hash}/links/{url_hash}`.
 The owner is derived from the email returned by the server's authentication check;
 users see and manage only their own library. Each URL is a separate document, so

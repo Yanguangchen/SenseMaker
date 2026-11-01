@@ -283,7 +283,7 @@ def capture_facebook_session(path: str, timeout_seconds: int = 240) -> FacebookS
                 while time.monotonic() < deadline:
                     if page.is_closed() or not browser.is_connected():
                         raise FacebookLoginError("The Facebook window closed before your login was saved. "
-                                                 "Click Log in to Facebook and keep that window open until SenseMaker connects.")
+                                                 "Click Log in to Facebook and keep that window open until CrisisRadar connects.")
                     try:
                         session = await _profile_session(page, context, navigate=False)
                         if session.status != "connected":
@@ -302,7 +302,7 @@ def capture_facebook_session(path: str, timeout_seconds: int = 240) -> FacebookS
                         # expected during login and must not close the login window.
                         if page.is_closed() or not browser.is_connected():
                             raise FacebookLoginError("The Facebook window closed before your login was saved. "
-                                                     "Keep it open until SenseMaker connects.") from None
+                                                     "Keep it open until CrisisRadar connects.") from None
                         if not isinstance(exc, BrowserTimeout) and not any(
                             message in str(exc).lower() for message in (
                                 "execution context was destroyed", "cannot find context",

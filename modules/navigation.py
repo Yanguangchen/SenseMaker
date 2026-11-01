@@ -55,7 +55,7 @@ def dashboard_views(email: str, facebook_session: FacebookSession | None = None)
             'aria-label="Collapse sidebar" aria-expanded="true" aria-controls="sm-workspace-nav" '
             'title="Collapse sidebar">'
             f'<span class="sm-rail-icon">{panel}</span>'
-            '<span class="sm-rail-label sm-brand">SenseMaker</span>'
+            '<span class="sm-rail-label sm-brand">CrisisRadar</span>'
             f'<span class="sm-sidebar-chevron">{chevron}</span></button>'
             '<nav id="sm-workspace-nav" class="sm-workspace-nav" aria-label="Workspaces">'
             '<button class="sm-rail-button" type="button" data-sm-view="Scrap data" '

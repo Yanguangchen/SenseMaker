@@ -1,2 +1,2 @@
-"""Core modules for Project Sentinel."""
+"""Core modules for CrisisRadar."""
 

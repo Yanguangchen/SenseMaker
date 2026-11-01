@@ -207,7 +207,7 @@ def parse_feed(payload: bytes, category: str, query: str, edition: str = "en",
 
 
 def fetch_feed(url: str, timeout: float = 20) -> bytes:
-    request = Request(url, headers={"User-Agent": "Mozilla/5.0 (compatible; SenseMaker news monitor)",
+    request = Request(url, headers={"User-Agent": "Mozilla/5.0 (compatible; CrisisRadar news monitor)",
                                     "Accept": "application/rss+xml, application/xml;q=0.9"})
     try:
         with urlopen(request, timeout=timeout, context=ssl.create_default_context(cafile=certifi.where())) as response:

@@ -1,4 +1,4 @@
-"""Firestore persistence helpers for Project Sentinel."""
+"""Firestore persistence helpers for CrisisRadar."""
 
 from __future__ import annotations
 

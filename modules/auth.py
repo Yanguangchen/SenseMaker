@@ -15,9 +15,9 @@ from modules.component_assets import sign_in_component_path
 from modules.database import init_firebase
 
 _SIGN_IN_INTRO = """
-<div class="sm-login-brand"><span class="sm-login-mark" aria-hidden="true">S</span><span>SenseMaker</span></div>
+<div class="sm-login-brand"><span class="sm-login-mark" aria-hidden="true">C</span><span>CrisisRadar</span></div>
 <p class="sm-login-kicker">YOUR RESEARCH WORKSPACE</p>
-<h1>Sign in to SenseMaker</h1>
+<h1>Sign in to CrisisRadar</h1>
 <p class="sm-login-description">Bring conversations together.<br>Understand sentiment and follow emerging signals.</p>
 """
 
@@ -59,7 +59,7 @@ def verify_access(id_token: str, emails: set[str]) -> str:
         or not isinstance(email, str)
         or email.strip().lower() not in emails
     ):
-        raise PermissionError("This Google account does not have access to SenseMaker.")
+        raise PermissionError("This Google account does not have access to CrisisRadar.")
     return email.strip().lower()
 
 
