@@ -35,6 +35,11 @@ from modules.reddit import CAMBODIA_URL, is_reddit_url, reddit_configured
 from modules.signals import NON_CONTENT_TYPES, SIGNAL_LABELS, is_analyzable, is_flagged, watch_terms
 from modules.saved_links import library_owner_id, load_saved_links, parse_links, remove_saved_links, save_links
 from modules.sentiment_history import chart_spec, load_history, persist_analysis_run
+from modules.google_news import (
+    EDITIONS, MAX_ARTICLES, NEWS_CATEGORIES, TIME_WINDOWS, browse_url, build_scan_snapshot, collect_news,
+    daily_flag_counts,
+)
+from modules.news_risk import daily_chart_spec, load_news_history, persist_news_scan, risk_chart_spec
 
 try:
     from modules.scraper import scrape_group
@@ -149,7 +154,8 @@ def _load_sentiment_history() -> list[dict[str, Any]]:
 def _render_sentiment_history() -> None:
     with st.container(border=True, key="sentiment_history"):
         st.subheader("Sentiment over time")
-        st.caption("One point per analysis · Higher is more positive · Dashed line is the average across runs")
+        st.caption("One point per analysis · Higher is more positive · Dashed line is the average across runs · "
+                   "Red rings mark runs with border tension or boycott signals")
         if st.button("Refresh timeline", key="refresh_sentiment_history"):
             _load_sentiment_history.clear()
         try:
@@ -913,6 +919,29 @@ def _render_reddit_settings() -> tuple[int, int]:
     return int(limit), int(comments)
 
 
+def _render_cloud_save(records: List[Dict[str, Any]], title_key: str, save_key: str, noun: str = "posts") -> None:
+    custom_title = st.text_input(
+        "Custom title",
+        value=st.session_state.get(title_key, ""),
+        key=title_key,
+        help="This title will be saved on each object uploaded to Firestore.",
+    )
+    if st.button("Save data to cloud", key=save_key):
+        try:
+            if not custom_title.strip():
+                st.error("Please enter a custom title before saving.")
+            else:
+                write_summary = _write_results_to_firestore(records, custom_title=custom_title)
+                st.success(
+                    "Saved to Firestore: "
+                    f"{write_summary['inserted']} {noun} "
+                    f"(skipped: {write_summary['skipped']})."
+                )
+        except Exception as exc:
+            error_text = str(exc).strip() or repr(exc)
+            st.error(f"Firestore write failed: {error_text}")
+
+
 def _render_collection_workspace(
     platform: str, user_email: str, facebook_session: FacebookSession,
 ) -> None:
@@ -979,31 +1008,200 @@ def _render_collection_workspace(
         scrape_results = [r for r in scrape_results if r.get("source_type") not in NON_CONTENT_TYPES]
         st.write(f"**Records collected:** {len(scrape_results)}")
         if scrape_results:
-            custom_title = st.text_input(
-                "Custom title",
-                value=st.session_state.get(title_key, ""),
-                key=title_key,
-                help="This title will be saved on each object uploaded to Firestore.",
-            )
-            if st.button("Save data to cloud", key=save_key):
-                try:
-                    if not custom_title.strip():
-                        st.error("Please enter a custom title before saving.")
-                    else:
-                        write_summary = _write_results_to_firestore(scrape_results, custom_title=custom_title)
-                        st.success(
-                            "Saved to Firestore: "
-                            f"{write_summary['inserted']} posts "
-                            f"(skipped: {write_summary['skipped']})."
-                        )
-                except Exception as exc:
-                    error_text = str(exc).strip() or repr(exc)
-                    st.error(f"Firestore write failed: {error_text}")
+            _render_cloud_save(scrape_results, title_key, save_key)
             st.dataframe(pd.DataFrame(scrape_results), use_container_width=True, hide_index=True)
             with st.expander("Raw JSON Output"):
                 st.json(scrape_results)
         else:
             st.info("No source records were collected. Check any connection notices above.")
+
+
+@st.cache_data(ttl=60, show_spinner=False)
+def _load_news_history() -> list[dict[str, Any]]:
+    return load_news_history(init_db())
+
+
+def _risk_metric(column: Any, label: str, snapshot: Dict[str, Any]) -> None:
+    delta = snapshot.get("risk_delta")
+    column.metric(label, f"{snapshot['risk_score']:.0f} · {snapshot['risk_level']}",
+                  None if delta is None else f"{delta:+.1f} vs previous scan",
+                  delta_color="off" if not delta else "inverse")
+
+
+def _render_risk_alerts(snapshot: Dict[str, Any], scope: str) -> None:
+    risk, level, delta = snapshot["risk_score"], snapshot["risk_level"], snapshot.get("risk_delta")
+    if snapshot.get("rising"):
+        st.error(f"Border tension risk is rising: {risk:.0f}/100 ({level}), up {delta:.1f} points since the previous scan.")
+    elif level == "High":
+        st.error(f"Border tension risk is high in {scope}: {risk:.0f}/100.")
+    elif level == "Elevated":
+        st.warning(f"Border tension risk is elevated in {scope}: {risk:.0f}/100.")
+    if snapshot.get("boycott_count"):
+        count = snapshot["boycott_count"]
+        st.warning(f"{count} article{'s' if count != 1 else ''} in {scope} mention{'s' if count == 1 else ''} "
+                   "a boycott linked to Thailand or Cambodia.")
+
+
+def _news_table(articles: List[Dict[str, Any]]) -> pd.DataFrame:
+    rows = []
+    for article in articles:
+        assessment = article.get("news_assessment") or {}
+        categories = article.get("news_categories") or [article.get("news_category", "")]
+        rows.append({
+            "Published": pd.to_datetime(article.get("created_at") or None, utc=True),
+            "Flags": ", ".join(assessment.get("flags", [])) or "—",
+            "Headline": article.get("title") or article.get("raw_text", ""),
+            "Publisher": article.get("publisher", ""),
+            "Category": ", ".join(NEWS_CATEGORIES.get(c, {}).get("label", c) for c in categories if c),
+            "Tone": assessment.get("tone", ""),
+            "Matched terms": ", ".join(assessment.get("matched_terms", [])),
+            "Link": article.get("url", ""),
+        })
+    return pd.DataFrame(rows)
+
+
+def _render_news_workspace() -> None:
+    st.subheader("Online news · Google News")
+    st.caption("Searches Google News, the News tab of Google Search, for each watch category and scans every "
+               "headline for boycotts and Thailand–Cambodia border tension.")
+    with st.container(border=True, key="news_settings"):
+        searches: Dict[str, str] = {}
+        for key, category in NEWS_CATEGORIES.items():
+            toggle, terms = st.columns([2, 3], vertical_alignment="center")
+            enabled = toggle.checkbox(category["label"], value=True, key=f"news_enabled_{key}")
+            query = terms.text_input(f"{category['label']} search terms", value=category["query"],
+                                     key=f"news_query_{key}", label_visibility="collapsed", disabled=not enabled)
+            if enabled and query.strip():
+                searches[key] = query.strip()
+        window_col, edition_col, limit_col = st.columns(3)
+        window = window_col.selectbox("Published", list(TIME_WINDOWS), index=list(TIME_WINDOWS).index("30d"),
+                                      format_func=TIME_WINDOWS.get, key="news_window")
+        editions = edition_col.multiselect("Google News editions", list(EDITIONS), default=list(EDITIONS),
+                                           format_func=lambda e: EDITIONS[e]["label"], key="news_editions")
+        limit = limit_col.number_input("Articles per search", min_value=10, max_value=MAX_ARTICLES,
+                                       value=50, step=10, key="news_limit")
+
+    if st.button("Search Google News", key="collect_news_articles", type="primary", use_container_width=True):
+        if not searches:
+            st.error("Choose at least one category with search terms.")
+        elif not editions:
+            st.error("Choose at least one Google News edition.")
+        else:
+            progress = st.progress(0, text="Searching Google News…")
+            with st.spinner("Scanning news coverage…"):
+                rows = collect_news(searches, window=window, editions=editions, limit=int(limit),
+                                    on_progress=lambda done, total, query: progress.progress(
+                                        done / total, text=f"Searched {done} of {total}: {query}"))
+            try:
+                history = _load_news_history()
+            except Exception:
+                history = []
+            snapshot = build_scan_snapshot(rows, searches=searches, window=window, editions=editions,
+                                           previous=history[-1] if history else None)
+            saved = False
+            if snapshot:
+                try:
+                    persist_news_scan(init_db(), snapshot)
+                    saved = True
+                except Exception:
+                    logging.getLogger(__name__).exception("News scan snapshot could not be saved")
+                _load_news_history.clear()
+            st.session_state["news_scan"] = {"rows": rows, "snapshot": snapshot, "saved": saved,
+                                             "searches": searches, "window": window, "editions": editions}
+
+    scan = st.session_state.get("news_scan")
+    if not scan:
+        return
+    for issue in (r for r in scan["rows"] if r.get("source_type") in NON_CONTENT_TYPES):
+        st.warning(f"{issue.get('target_url', 'Search')}: {issue.get('raw_text', 'Search incomplete')}")
+    articles = [r for r in scan["rows"] if r.get("source_type") == "news_article"]
+    snapshot = scan["snapshot"]
+    if not articles or not snapshot:
+        st.info("Google News returned no articles for these searches. Try a longer time window or broader terms.")
+        return
+    if not scan["saved"]:
+        st.warning("This scan's risk point couldn't be saved to the timeline. Search again to retry.")
+    _render_risk_alerts(snapshot, "this scan")
+    articles_metric, boycott_metric, tension_metric, risk_metric = st.columns(4)
+    articles_metric.metric("Articles found", snapshot["article_count"])
+    boycott_metric.metric("Boycott flags", snapshot["boycott_count"])
+    tension_metric.metric("Border tension flags", snapshot["tension_count"] + snapshot["escalation_count"],
+                          help=f"{snapshot['escalation_count']} escalation · {snapshot['tension_count']} tension")
+    _risk_metric(risk_metric, "Border tension risk", snapshot)
+    st.caption("Flags come from a keyword scan of headlines and need a Thailand or Cambodia mention. They are "
+               "leads for review, not confirmed events. Save the articles to run AI sentiment and boycott analysis.")
+    daily = daily_flag_counts(articles)
+    if daily:
+        st.markdown("**Flagged coverage by publication day**")
+        st.vega_lite_chart(spec=daily_chart_spec(daily), use_container_width=True)
+
+    show_col, category_col = st.columns(2)
+    show = show_col.selectbox("Show", ["All articles", "Flagged articles", "Boycott", "Border tension & escalation"],
+                              key="news_show_filter")
+    category = category_col.selectbox("Category", ["all"] + list(scan["searches"]), key="news_category_filter",
+                                      format_func=lambda c: "All categories" if c == "all" else NEWS_CATEGORIES[c]["label"])
+
+    def visible(article: Dict[str, Any]) -> bool:
+        flags = set((article.get("news_assessment") or {}).get("flags", []))
+        return ((category == "all" or category in article.get("news_categories", []))
+                and (show == "All articles"
+                     or (show == "Flagged articles" and flags - {"De-escalation"})
+                     or (show == "Boycott" and "Boycott" in flags)
+                     or (show == "Border tension & escalation" and flags & {"Border tension", "Escalation"})))
+
+    shown = [a for a in articles if visible(a)]
+    if shown:
+        st.dataframe(_news_table(shown), use_container_width=True, hide_index=True, column_config={
+            "Published": st.column_config.DatetimeColumn("Published (UTC)", format="D MMM YYYY, HH:mm"),
+            "Link": st.column_config.LinkColumn("Link", display_text="Open article"),
+        })
+    else:
+        st.info("No articles match this filter.")
+    with st.expander("Open these searches in Google News"):
+        for key, query in scan["searches"].items():
+            for edition in scan["editions"]:
+                st.markdown(f"[{NEWS_CATEGORIES[key]['label']} · {EDITIONS[edition]['label']}]"
+                            f"({browse_url(query, scan['window'], edition)})")
+    _render_cloud_save(articles, "news_custom_title_value", "save_news_results_btn", noun="articles")
+
+
+def _render_news_risk_history() -> None:
+    with st.container(border=True, key="news_risk_history"):
+        st.subheader("Border tension risk over time")
+        st.caption("One point per Google News scan · Shaded bands mark Low, Elevated and High risk · "
+                   "▲ marks a rise of 10 or more points · Dashed purple line is the boycott index")
+        if st.button("Refresh risk timeline", key="refresh_news_history"):
+            _load_news_history.clear()
+        try:
+            rows = _load_news_history()
+        except Exception:
+            st.warning("Border tension history could not be loaded. Refresh the timeline to try again.")
+            return
+        if not rows:
+            st.info("Search Google News in Scrape Data → Online news to start tracking border tension risk.")
+            return
+        latest = rows[-1]
+        _render_risk_alerts(latest, "the latest scan")
+        risk_metric, boycott_metric, scans_metric = st.columns(3)
+        _risk_metric(risk_metric, "Latest border tension risk", latest)
+        boycott_metric.metric("Boycott articles (latest scan)", latest["boycott_count"])
+        scans_metric.metric("News scans", len(rows))
+        st.vega_lite_chart(spec=risk_chart_spec(rows), use_container_width=True)
+        st.caption("Risk = share of Thailand/Cambodia articles reporting border tension, where escalation "
+                   "(clashes, shelling, casualties, evacuations) counts double and ceasefire or talks coverage "
+                   "lowers an article by one level. Scans with fewer than 10 such articles are scaled as if they "
+                   "had 10. Low < 20 ≤ Elevated < 45 ≤ High. Compare scans that use the same searches and time window.")
+        with st.expander("Scan history"):
+            st.dataframe(pd.DataFrame([{
+                "Scanned (UTC)": row["scanned_at"],
+                "Risk": row["risk_score"], "Level": row["risk_level"],
+                "Change": row.get("risk_delta"),
+                "Escalation": row["escalation_count"], "Tension": row["tension_count"],
+                "De-escalation": row["deescalation_count"], "Boycott": row["boycott_count"],
+                "Articles": row["article_count"],
+                "Window": TIME_WINDOWS.get(row.get("window", ""), row.get("window", "")),
+                "Searches": " | ".join(row.get("searches", {}).values()),
+            } for row in reversed(rows)]), use_container_width=True, hide_index=True)
 
 
 def main() -> None:
@@ -1022,8 +1220,7 @@ def main() -> None:
         with reddit_tab:
             _render_collection_workspace("reddit", user_email, facebook_session)
         with news_tab:
-            st.subheader("Online news")
-            st.info("Online news collection is coming soon.")
+            _render_news_workspace()
 
     with analysis_tab:
         st.subheader("Sentiment Analysis")
@@ -1169,6 +1366,7 @@ def main() -> None:
     # Render after processing so the trends page includes the latest saved run.
     with trends_tab:
         _render_sentiment_history()
+        _render_news_risk_history()
 
 
 if __name__ == "__main__":

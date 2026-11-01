@@ -57,6 +57,8 @@ SenseMaker/
     ├── __init__.py
     ├── database.py            # Firestore helpers (upsert, query, mark processed)
     ├── scraper.py             # Playwright web scraper
+    ├── google_news.py         # Google News searches and boycott/border-tension keyword scan
+    ├── news_risk.py           # Saved news scans and border-tension risk charts
     ├── openai.py              # OpenAI Responses API transport
     └── processor.py           # Shared Gemini/ChatGPT analysis with retry & backoff
 ```
@@ -136,6 +138,47 @@ there is no unauthenticated scraping fallback. No Reddit credentials are include
 this repository. See [Reddit's access policy](https://support.reddithelp.com/hc/en-us/articles/42728983564564-Responsible-Builder-Policy),
 [Data API documentation](https://www.reddit.com/dev/api/) and
 [OAuth application credentials](https://github.com/reddit-archive/reddit/wiki/OAuth2#application-only-oauth).
+
+## Google News monitoring: OYOSHI, border tension and boycotts
+
+Open **Scrape Data → Online news** and click **Search Google News**. SenseMaker runs the same
+searches as Google Search's **News** tab for three categories, each with editable search terms:
+
+| Category | Default search |
+|---|---|
+| OYOSHI mentions | `OYOSHI` |
+| Thailand–Cambodia border tension | `Thailand Cambodia border tension` |
+| Boycott of Thai products in Cambodia | `boycott Thailand products Cambodia` |
+
+Choose the publication window (past day, week, month or year), the English and/or Thai Google
+News editions, and up to 100 articles per search. Results come from Google News' public search
+feed rather than a scripted browser, so collection works on hosted deployments without
+CAPTCHAs or credentials. Articles found by several searches are listed once with all their
+categories. A failed search is shown as a notice and does not discard the other results.
+
+Every headline is scanned with transparent English, Thai and Khmer keyword lists:
+
+- **Tone**: Positive, Neutral or Negative headline wording.
+- **Boycott**: boycott wording in an article that mentions Thailand or Cambodia.
+- **Border tension**: disputes, troop movements, border closures or protests.
+- **Escalation**: clashes, shelling, casualties, evacuations or ceasefire violations.
+- **De-escalation**: ceasefires, talks, reopenings or agreements, which lower an article's tension by one level.
+
+Each search saves one point on **Sentiment Trends → Border tension risk over time**:
+`risk = 100 × Σ tension level / (2 × max(Thailand/Cambodia articles, 10))`, where escalation is
+level 2 and tension level 1. The chart shades **Low** (< 20), **Elevated** (20–45) and **High**
+(≥ 45) bands, marks scans that rose 10 or more points with **▲ Rising**, and shows the boycott
+index as a dashed line. High, elevated or rising risk and any boycott articles raise alerts on
+both pages. Scans are stored in `<FIREBASE_COLLECTION>_news_scans`. Compare scans that use the
+same searches and window, because the score depends on what each search returns.
+
+Keyword flags are leads for review, not confirmed events, and only headlines are scanned. Use
+**Save data to cloud** to store the articles, then run the AI provider on them in **Sentiment
+Analysis** for evidence-grounded sentiment, boycott and tension assessments. On the
+**Sentiment over time** chart, red rings mark analysis runs that found border-tension or
+boycott signals. Short search terms such as `OYOSHI` can also match unrelated news, so refine
+the terms when needed. Google's feed is intended for personal, non-commercial use; check its
+terms for your use case.
 
 ## Deploy to Vercel
 
@@ -324,7 +367,7 @@ The dashboard has **three pages**, accessible from the left toolbar:
 
 ### Tab 1 — Scrap data
 
-- Source tabs: **Facebook**, **Reddit**, and **Online news** (coming soon).
+- Source tabs: **Facebook**, **Reddit**, and **Online news** (Google News monitoring).
 - Facebook and Reddit each keep their own source selections, collection settings and results.
 - Facebook auth session capture (opens Chrome for manual login)
 - Save a personal library of links, available on future visits and other devices

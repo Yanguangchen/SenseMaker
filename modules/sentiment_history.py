@@ -11,6 +11,7 @@ from firebase_admin import firestore
 from modules.database import _get_collection_name
 
 SENTIMENT_VALUES = {"Joy": 1, "Neutral": 0, "Anger": -1, "Anxiety": -1}
+RISK_SIGNALS = ("tension", "boycott_call", "boycott_report")
 
 
 def history_collection() -> str:
@@ -29,6 +30,11 @@ def build_snapshot(
     scored_count = sum(counts.values())
     if not scored_count:
         return None
+    signals = {signal: 0 for signal in RISK_SIGNALS}
+    for analysis in analyses:
+        monitor = analysis.get("monitor") or {}
+        if monitor.get("signal_type") in signals and monitor.get("thailand_relevance") in {"explicit", "watchlist"}:
+            signals[monitor["signal_type"]] += 1
     return {
         "run_id": run_id,
         "completed_at": completed_at,
@@ -41,6 +47,7 @@ def build_snapshot(
         "provider": provider,
         "models": sorted({str(row["model"]) for row in analyses if row.get("model")}),
         "targets": targets,
+        "signal_counts": signals,
         "score_version": 1,
     }
 
@@ -92,8 +99,13 @@ def load_history(db: Any) -> list[dict[str, Any]]:
 def chart_spec(rows: list[dict[str, Any]]) -> dict[str, Any]:
     """One point per run; fixed polarity scale and an equally weighted run mean."""
     average = sum(row["score"] for row in rows) / len(rows)
-    points = [{**row, "completed_label": datetime.fromisoformat(row["completed_at"]).strftime("%d %b %Y %H:%M:%S UTC")}
-              for row in rows]
+    points = []
+    for row in rows:
+        signals = row.get("signal_counts") or {}
+        points.append({**row, "completed_label": datetime.fromisoformat(row["completed_at"]).strftime("%d %b %Y %H:%M:%S UTC"),
+                       "tension_signals": signals.get("tension", 0),
+                       "boycott_signals": signals.get("boycott_call", 0) + signals.get("boycott_report", 0)})
+    flagged = [p for p in points if p["tension_signals"] or p["boycott_signals"]]
     y = {"type": "quantitative", "scale": {"domain": [-100, 100]},
          "axis": {"values": [-100, -50, 0, 50, 100]}, "title": "Sentiment"}
     return {
@@ -128,5 +140,17 @@ def chart_spec(rows: list[dict[str, Any]]) -> dict[str, Any]:
              "mark": {"type": "text", "color": "#f8fafc", "align": "left", "fontWeight": 600, "fontSize": 12,
                       "dy": 14 if average > 85 else -10},
              "encoding": {"x": {"value": 8}, "y": {"field": "average", **y}, "text": {"field": "label"}}},
+            {"data": {"values": flagged},
+             "mark": {"type": "point", "shape": "circle", "size": 320, "strokeWidth": 3, "color": "#dc2626",
+                      "filled": False},
+             "encoding": {
+                 "x": {"field": "completed_at", "type": "temporal", "scale": {"type": "utc"}},
+                 "y": {"field": "score", **y},
+                 "tooltip": [
+                     {"field": "completed_label", "type": "nominal", "title": "Completed"},
+                     {"field": "tension_signals", "type": "quantitative", "title": "Border tension signals"},
+                     {"field": "boycott_signals", "type": "quantitative", "title": "Boycott signals"},
+                 ],
+             }},
         ],
     }
