@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 import json
 import os
-import re
 import sys
 import tempfile
 import threading
@@ -175,43 +174,52 @@ def saved_facebook_user_id(path: str) -> str:
     return facebook_user_id(_read_state(path).get("cookies", []))
 
 
-async def _profile_session(page: Any, context: Any, *, navigate: bool = True) -> FacebookSession:
-    if navigate:
-        await page.goto("https://www.facebook.com/me", wait_until="domcontentloaded", timeout=20_000)
+async def _facebook_page_session(page: Any, context: Any) -> FacebookSession:
+    """Inspect authentication without moving away from the current page."""
     location = urlparse(page.url)
     host = (location.hostname or "").lower()
     if (
-        (host != "facebook.com" and not host.endswith(".facebook.com"))
-        or any(part in location.path.lower() for part in ("login", "checkpoint", "recover", "two_step"))
+        any(part in location.path.lower() for part in ("login", "checkpoint", "recover", "two_step"))
         or await page.locator('input[type="password"]:visible').count()
     ):
         return FacebookSession()
+    if host != "facebook.com" and not host.endswith(".facebook.com"):
+        return FacebookSession(status="unavailable")
     user_id = facebook_user_id(await context.cookies())
     if not user_id:
-        return FacebookSession()
-    if not navigate:
-        # Observe the completed login without redirecting away from Facebook's
-        # sign-in/verification flow as soon as it starts issuing cookies.
-        account = page.locator('[aria-label="Account controls and settings"]:visible, '
-                               '[aria-label="Account, your profile"]:visible')
-        if not await account.count():
-            return FacebookSession(status="unavailable")
-        profile = page.locator('a[aria-label$="\'s timeline"]').first
-        label = await profile.get_attribute("aria-label") if await profile.count() else ""
-        name = (label or "").removesuffix("'s timeline").strip()
-        return FacebookSession(status="connected", user_id=user_id, name=name[:160])
-    try:
-        name = (await page.locator("h1").first.inner_text(timeout=5_000)).strip()
-    except Exception:
-        name = ""
-    if not name:
-        title = await page.title()
-        name = re.sub(r"\s*[|–-]\s*Facebook\s*$", "", title, flags=re.I)
-        name = re.sub(r"^\(\d+\)\s*", "", name).strip()
-        if name.lower() in ("facebook", "log in to facebook", ""):
-            # A cookie alone cannot confirm that Facebook accepted the session.
-            return FacebookSession(status="unavailable")
+        return FacebookSession(status="unavailable")
+    # Use the same authenticated account controls for login and collection.
+    # A profile heading/title is neither required nor proof of authentication:
+    # Facebook can leave /me loading, or render an unrelated heading such as Chats.
+    account = page.locator('[aria-label="Account controls and settings"]:visible, '
+                           '[aria-label="Account, your profile"]:visible')
+    if not await account.count():
+        return FacebookSession(status="unavailable")
+    profile = page.locator('a[aria-label$="\'s timeline"]').first
+    label = await profile.get_attribute("aria-label") if await profile.count() else ""
+    name = (label or "").removesuffix("'s timeline").strip()
     return FacebookSession(status="connected", user_id=user_id, name=name[:160])
+
+
+async def _profile_session(page: Any, context: Any, *, navigate: bool = True) -> FacebookSession:
+    from playwright.async_api import Error as BrowserError
+
+    if navigate:
+        try:
+            await page.goto("https://www.facebook.com/", wait_until="domcontentloaded", timeout=20_000)
+        except BrowserError:
+            pass  # A navigation timeout can still leave a usable page to inspect.
+    # DOMContentLoaded precedes Facebook's authenticated UI. Allow hydration and
+    # redirects to finish, without repeatedly navigating or declaring logout.
+    attempts = 13 if navigate else 1
+    for attempt in range(attempts):
+        try:
+            session = await _facebook_page_session(page, context)
+        except BrowserError:
+            session = FacebookSession(status="unavailable")
+        if session.status != "unavailable" or attempt == attempts - 1:
+            return session
+        await asyncio.sleep(1)
 
 
 def _run(coroutine: Any) -> Any:

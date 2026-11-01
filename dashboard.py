@@ -356,6 +356,7 @@ def _run_multi_scrape_sync(
                         "comments": [],
                         "comment_count": 0,
                         "source_type": "batch_error",
+                        "facebook_connection_error": bool(facebook_owner and isinstance(exc, FacebookLoginError)),
                     }
                 ]
 
@@ -368,8 +369,19 @@ def _run_multi_scrape_sync(
                     on_progress(completed, len(urls), url)
                 return rows
 
-        tasks = [bounded_scrape(url) for url in urls]
-        batches = await asyncio.gather(*tasks)
+        if facebook_owner:
+            batches = []
+            for index, url in enumerate(urls):
+                rows = await bounded_scrape(url)
+                batches.append(rows)
+                connection_errors = [row for row in rows if row.get("facebook_connection_error")]
+                if connection_errors:
+                    remaining = len(urls) - index - 1
+                    if remaining:
+                        connection_errors[0]["raw_text"] += f" Collection stopped; {remaining} remaining links were not attempted."
+                    break
+        else:
+            batches = await asyncio.gather(*(bounded_scrape(url) for url in urls))
         merged: List[Dict[str, Any]] = []
         for batch in batches:
             merged.extend(batch)
@@ -473,6 +485,7 @@ def _render_remote_facebook_connection(email: str, session: FacebookSession) -> 
         if session.status == "saved":
             st.info("Your Facebook login is saved. Check the connection before collecting again.")
             st.button("Check Facebook connection", key="check_fb_session_btn", on_click=begin, args=(True,))
+            st.button("Log in to Facebook", key="capture_fb_session_btn", on_click=begin)
         else:
             st.subheader("Connect your Facebook account")
             st.caption("Sign in through the interactive browser. Your saved login is private to your SenseMaker account.")
@@ -1136,6 +1149,10 @@ def _render_collection_workspace(
                         ),
                     )
                     st.session_state[f"{result_key}_results"] = results
+                    if any(row.get("facebook_connection_error") for row in results):
+                        # Refresh connection controls from the saved check result,
+                        # while retaining any posts collected before the failure.
+                        st.rerun()
                 except Exception as exc:
                     st.session_state[f"{result_key}_results"] = []
                     error_text = str(exc).strip() or repr(exc)

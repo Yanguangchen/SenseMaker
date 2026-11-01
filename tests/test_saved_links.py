@@ -256,6 +256,25 @@ class SourceWorkspaceTests(unittest.TestCase):
 
 
 class LargeScrapeTests(unittest.TestCase):
+    def test_facebook_connection_failure_stops_remaining_links_and_preserves_collected_posts(self):
+        from dashboard import _run_multi_scrape_sync
+        from modules.facebook_session import FacebookLoginError
+
+        urls = [f"https://www.facebook.com/groups/{index}" for index in range(9)]
+        calls = []
+        async def scrape(target_url, **kwargs):
+            calls.append(target_url)
+            if target_url == urls[1]:
+                raise FacebookLoginError("Facebook's sign-in check did not finish loading. Your saved login has been kept.")
+            return [{"url": target_url, "raw_text": "A collected post"}]
+        with patch("dashboard.scrape_group", side_effect=scrape):
+            rows = _run_multi_scrape_sync(urls, True, 10, facebook_owner="editor@example.com")
+        self.assertEqual(calls, urls[:2])
+        self.assertEqual(rows[0]["raw_text"], "A collected post")
+        self.assertEqual(rows[1]["source_type"], "batch_error")
+        self.assertTrue(rows[1]["facebook_connection_error"])
+        self.assertIn("7 remaining links were not attempted", rows[1]["raw_text"])
+
     def test_every_link_runs_with_bounded_parallelism_progress_and_error_isolation(self):
         from dashboard import _run_multi_scrape_sync
 

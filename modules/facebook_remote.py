@@ -48,7 +48,7 @@ def remote_facebook_session(email: str) -> FacebookSession:
     record = _record(email)
     if not record.get("context_id") or not record.get("user_id") or record.get("needs_login"):
         return FacebookSession()
-    recent = 0 <= time.time() - record.get("verified_at", 0) < 300
+    recent = not record.get("verification_pending") and 0 <= time.time() - record.get("verified_at", 0) < 300
     return FacebookSession("connected" if recent else "saved", record["user_id"], record.get("name", ""))
 
 
@@ -99,9 +99,12 @@ def _release(email: str, lease: str, identity: FacebookSession | None) -> None:
         updates: dict[str, Any] = {"lease": "", "busy_until": 0}
         if identity and identity.status == "connected":
             updates.update(user_id=identity.user_id, name=identity.name,
-                           verified_at=time.time(), needs_login=False)
+                           verified_at=time.time(), needs_login=False, verification_pending=False)
         elif identity and identity.status == "disconnected":
             updates["needs_login"] = True
+        elif identity and identity.status == "unavailable":
+            # Preserve the saved profile and identity; offer a connection retry.
+            updates["verification_pending"] = True
         transaction.update(ref, updates)
 
     release(init_db().transaction())
@@ -142,7 +145,11 @@ async def remote_facebook_context(playwright, email: str, *, timeout_seconds: in
                     page = await context.new_page()
                     identity = await _profile_session(page, context)
                     if identity.status != "connected":
-                        raise FacebookLoginError("Your saved Facebook login needs to be renewed. Click Log in to Facebook.")
+                        logging.getLogger(__name__).warning("Facebook connection check: %s", identity.status)
+                        if identity.status == "disconnected":
+                            raise FacebookLoginError("Facebook is asking you to sign in or complete verification. Click Log in to Facebook.")
+                        raise FacebookLoginError("Facebook's sign-in check did not finish loading. Your saved login has been kept. "
+                                                 "Click Check Facebook connection to try again.")
                 if on_ready:
                     links = await bb.sessions.debug(session.id, expires_in=timeout_seconds)
                     url = links.debugger_fullscreen_url

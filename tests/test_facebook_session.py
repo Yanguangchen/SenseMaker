@@ -199,12 +199,28 @@ class SessionLifecycleTests(unittest.TestCase):
 
 
 class ProfileSessionTests(unittest.IsolatedAsyncioTestCase):
-    def make_page(self, url="https://www.facebook.com/example.user", name="Alex Tan"):
+    def setUp(self):
+        self.sleep = patch("modules.facebook_session.asyncio.sleep", new_callable=AsyncMock).start()
+        self.addCleanup(patch.stopall)
+
+    def make_page(self, url="https://www.facebook.com/example.user", name="Alex Tan", authenticated=True):
         page = MagicMock()
         page.goto = AsyncMock()
         page.url = url
-        page.locator.return_value.count = AsyncMock(return_value=0)
-        page.locator.return_value.first.inner_text = AsyncMock(return_value=name)
+        page.password = MagicMock(count=AsyncMock(return_value=0))
+        page.account = MagicMock(count=AsyncMock(return_value=int(authenticated)))
+        profile = MagicMock()
+        profile.first.count = AsyncMock(return_value=int(bool(name)))
+        profile.first.get_attribute = AsyncMock(return_value=f"{name}'s timeline")
+        def locator(selector):
+            if selector.startswith('input[type="password"]'):
+                return page.password
+            if selector.startswith('[aria-label="Account'):
+                return page.account
+            if selector.startswith('a[aria-label'):
+                return profile
+            raise AssertionError(f"Unexpected selector: {selector}")
+        page.locator.side_effect = locator
         page.title = AsyncMock(return_value="Facebook")
         context = MagicMock()
         context.cookies = AsyncMock(return_value=cookies())
@@ -215,18 +231,55 @@ class ProfileSessionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(await _profile_session(page, context), FacebookSession("connected", "123456", "Alex Tan"))
 
     async def test_login_and_checkpoint_redirects_are_not_connected(self):
-        for url in ("https://www.facebook.com/login/", "https://www.facebook.com/checkpoint/", "https://notfacebook.com/profile"):
+        for url in ("https://www.facebook.com/login/", "https://www.facebook.com/checkpoint/"):
             page, context = self.make_page(url=url)
             self.assertEqual((await _profile_session(page, context)).status, "disconnected")
 
     async def test_cookie_alone_does_not_claim_a_confirmed_connection(self):
-        page, context = self.make_page(name="")
+        page, context = self.make_page(authenticated=False)
         self.assertEqual((await _profile_session(page, context)).status, "unavailable")
 
     async def test_passive_login_check_waits_for_account_controls_without_navigating(self):
-        page, context = self.make_page(url="https://www.facebook.com/")
+        page, context = self.make_page(url="https://www.facebook.com/", authenticated=False)
         self.assertEqual((await _profile_session(page, context, navigate=False)).status, "unavailable")
         page.goto.assert_not_awaited()
+
+    async def test_collection_check_waits_for_account_controls_after_dom_content_loaded(self):
+        page, context = self.make_page(name="")
+        page.account.count.side_effect = [0, 0, 1]
+        self.assertEqual(await _profile_session(page, context), FacebookSession("connected", "123456", ""))
+        page.goto.assert_awaited_once_with("https://www.facebook.com/", wait_until="domcontentloaded", timeout=20_000)
+        self.assertEqual(self.sleep.await_count, 2)
+        page.title.assert_not_awaited()
+
+    async def test_a_navigation_timeout_does_not_reject_an_authenticated_page(self):
+        from playwright.async_api import TimeoutError
+        page, context = self.make_page()
+        page.goto.side_effect = TimeoutError("Slow navigation")
+        self.assertEqual((await _profile_session(page, context)).status, "connected")
+
+    async def test_transient_redirect_context_error_is_retried(self):
+        from playwright.async_api import Error
+        page, context = self.make_page()
+        page.password.count.side_effect = [Error("Execution context replaced"), 0]
+        self.assertEqual((await _profile_session(page, context)).status, "connected")
+        self.sleep.assert_awaited_once()
+
+    async def test_unloaded_or_unexpected_page_is_unavailable_instead_of_expired(self):
+        for url in ("about:blank", "https://notfacebook.com/profile"):
+            page, context = self.make_page(url=url)
+            self.assertEqual((await _profile_session(page, context)).status, "unavailable")
+
+    async def test_authenticated_controls_still_require_valid_session_cookies(self):
+        page, context = self.make_page()
+        context.cookies.return_value = []
+        self.assertEqual((await _profile_session(page, context)).status, "unavailable")
+
+    async def test_visible_password_prompt_requires_reauthentication_even_with_old_cookies(self):
+        page, context = self.make_page()
+        page.password.count.return_value = 1
+        self.assertEqual((await _profile_session(page, context)).status, "disconnected")
+        self.sleep.assert_not_awaited()
 
     async def test_passive_login_captures_the_account_without_interrupting_the_page(self):
         page, context = self.make_page(url="https://www.facebook.com/")

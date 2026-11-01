@@ -69,6 +69,14 @@ class HostedLoginUITests(unittest.TestCase):
             self.assertIn("login saved", app.success[0].value)
             forget.assert_called_once_with("editor@example.com", "private-job")
 
+    def test_saved_login_offers_both_retry_and_interactive_reconnection(self):
+        script = self.script.replace("FacebookSession()", "FacebookSession('saved', '123')")
+        with patch("dashboard.IS_CLOUD", True), patch("dashboard.remote_facebook_configured", return_value=True):
+            app = AppTest.from_string(script).run()
+            self.assertFalse(list(app.exception))
+            self.assertFalse(app.button(key="check_fb_session_btn").disabled)
+            self.assertFalse(app.button(key="capture_fb_session_btn").disabled)
+
 
 class ProfileTests(unittest.TestCase):
     def test_owner_profiles_and_job_handles_are_separate(self):
@@ -110,10 +118,26 @@ class ProfileTests(unittest.TestCase):
         with patch("modules.facebook_remote.remote_facebook_configured", return_value=True), \
              patch("modules.facebook_remote._record", return_value=record):
             self.assertEqual(remote.remote_facebook_session("editor@example.com").status, "connected")
+            record["verification_pending"] = True
+            self.assertEqual(remote.remote_facebook_session("editor@example.com").status, "saved")
+            record["verification_pending"] = False
             record["verified_at"] -= 600
             self.assertEqual(remote.remote_facebook_session("editor@example.com").status, "saved")
             record["needs_login"] = True
             self.assertEqual(remote.remote_facebook_session("editor@example.com").status, "disconnected")
+
+    def test_unavailable_check_preserves_identity_and_requests_a_retry_without_marking_logout(self):
+        ref = MagicMock()
+        ref.get.return_value.to_dict.return_value = {"lease": "worker", "user_id": "123", "verified_at": time.time()}
+        with patch("modules.facebook_remote._profile_ref", return_value=ref), \
+             patch("modules.facebook_remote.init_db") as db, \
+             patch("modules.facebook_remote.firestore.transactional", side_effect=lambda function: function):
+            remote._release("editor@example.com", "worker", FacebookSession(status="unavailable"))
+            updates = db.return_value.transaction.return_value.update.call_args.args[1]
+        self.assertTrue(updates["verification_pending"])
+        self.assertNotIn("needs_login", updates)
+        self.assertNotIn("user_id", updates)
+        self.assertNotIn("verified_at", updates)
 
 
 class BrowserLifecycleTests(unittest.IsolatedAsyncioTestCase):
@@ -173,11 +197,20 @@ class BrowserLifecycleTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_expired_facebook_login_blocks_collection_and_marks_reauthentication(self):
         with patch("modules.facebook_remote._profile_session", AsyncMock(return_value=FacebookSession())):
-            with self.assertRaisesRegex(FacebookLoginError, "renewed"):
+            with self.assertRaisesRegex(FacebookLoginError, "asking you to sign in"):
                 async with remote.remote_facebook_context(self.playwright, "editor@example.com", check_before_use=True):
                     self.fail("Logged-out Facebook pages must not be collected")
         self.release.assert_called_once_with("editor@example.com", "lease", FacebookSession())
         self.browser.close.assert_awaited_once()
+
+    async def test_inconclusive_check_does_not_report_an_expired_login_or_allow_collection(self):
+        identity = FacebookSession(status="unavailable")
+        with patch("modules.facebook_remote._profile_session", AsyncMock(return_value=identity)):
+            with self.assertRaisesRegex(FacebookLoginError, "saved login has been kept") as caught:
+                async with remote.remote_facebook_context(self.playwright, "editor@example.com", check_before_use=True):
+                    self.fail("An unconfirmed session must not start collection")
+        self.assertNotIn("renewed", str(caught.exception))
+        self.release.assert_called_once_with("editor@example.com", "lease", identity)
 
     async def test_signed_in_viewer_stays_open_until_save_and_uses_that_page_for_verification(self):
         page = self.login_page()

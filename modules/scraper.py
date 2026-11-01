@@ -438,7 +438,7 @@ async def scrape_group(
         if remote:
             from modules.facebook_remote import remote_facebook_context
             context = await resources.enter_async_context(
-                remote_facebook_context(p, facebook_owner, check_before_use=True))
+                remote_facebook_context(p, facebook_owner, check_before_use=True, verify_on_exit=False))
         elif is_facebook:
             browser = await launch_facebook_browser(p, headless=headless)
             storage_state = facebook_storage_path()
