@@ -277,6 +277,22 @@ class NewsUITests(unittest.TestCase):
         self.assertNotIn("oyoshi", collect.call_args.args[0])
         self.assertIn("no articles", app.info[0].value)
 
+    def test_header_is_short_and_flag_guidance_lives_on_the_tutorial_page(self):
+        rows = [article("Thai and Cambodian troops clash")]
+        with patch("dashboard.collect_news", return_value=rows), patch("dashboard.persist_news_scan"), \
+                patch("dashboard._load_news_history", return_value=[]), patch("dashboard.init_db"):
+            app = AppTest.from_string(self.workspace).run()
+            app.button(key="collect_news_articles").click().run()
+        self.assertEqual([h.value for h in app.subheader], ["Online News"])
+        self.assertFalse(any("keyword scan" in c.value or "News tab of Google Search" in c.value for c in app.caption))
+        tutorial = AppTest.from_string("from dashboard import _render_tutorial\n_render_tutorial()\n").run()
+        self.assertFalse(list(tutorial.exception))
+        self.assertEqual(tutorial.expander[0].label, "Online News")
+        guide = tutorial.markdown[0].value
+        self.assertIn("News** tab of\nGoogle Search", guide)
+        self.assertIn("not a confirmed event", guide)
+        self.assertIn("Save data to cloud", guide)
+
     def test_trends_risk_history_states(self):
         with patch("dashboard._load_news_history", return_value=[]):
             app = AppTest.from_string(self.history).run()

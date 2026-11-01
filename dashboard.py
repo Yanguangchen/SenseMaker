@@ -1061,9 +1061,7 @@ def _news_table(articles: List[Dict[str, Any]]) -> pd.DataFrame:
 
 
 def _render_news_workspace() -> None:
-    st.subheader("Online news · Google News")
-    st.caption("Searches Google News, the News tab of Google Search, for each watch category and scans every "
-               "headline for boycotts and Thailand–Cambodia border tension.")
+    st.subheader("Online News")
     with st.container(border=True, key="news_settings"):
         window_col, edition_col, limit_col = st.columns(3)
         window = window_col.selectbox("Published", list(TIME_WINDOWS), index=list(TIME_WINDOWS).index("30d"),
@@ -1143,8 +1141,6 @@ def _render_news_workspace() -> None:
     tension_metric.metric("Border tension flags", snapshot["tension_count"] + snapshot["escalation_count"],
                           help=f"{snapshot['escalation_count']} escalation · {snapshot['tension_count']} tension")
     _risk_metric(risk_metric, "Border tension risk", snapshot)
-    st.caption("Flags come from a keyword scan of headlines and need a Thailand or Cambodia mention. They are "
-               "leads for review, not confirmed events. Save the articles to run AI sentiment and boycott analysis.")
     daily = daily_flag_counts(articles)
     if daily:
         st.markdown("**Flagged coverage by publication day**")
@@ -1194,7 +1190,7 @@ def _render_news_risk_history() -> None:
             st.warning("Border tension history could not be loaded. Refresh the timeline to try again.")
             return
         if not rows:
-            st.info("Search Google News in Scrape Data → Online news to start tracking border tension risk.")
+            st.info("Search Google News in Scrape Data → Online News to start tracking border tension risk.")
             return
         latest = rows[-1]
         _render_risk_alerts(latest, "the latest scan")
@@ -1220,6 +1216,61 @@ def _render_news_risk_history() -> None:
             } for row in reversed(rows)]), use_container_width=True, hide_index=True)
 
 
+TUTORIAL_ONLINE_NEWS = """
+**What it does**
+
+Online News searches Google News for you, the same results you would see on the **News** tab of
+Google Search. It looks for three topics:
+
+- **OYOSHI mentions**: any news that mentions OYOSHI.
+- **Thailand–Cambodia border tension**: news about the border between the two countries.
+- **Boycott of Thai products in Cambodia**: news about people refusing to buy Thai goods.
+
+It then reads every headline and points out anything about boycotts or rising border tension.
+
+**How to use it**
+
+1. Open **Scrape Data** and choose the **Online News** tab.
+2. Choose how far back to look, the languages to search, and how many articles you want.
+3. Click **Search Google News**.
+4. Review the articles. Use **Show** to see only flagged articles.
+5. To look deeper, enter a title and click **Save data to cloud**. Then open
+   **Sentiment Analysis** and run the AI on the saved articles.
+
+**What the flags mean**
+
+| Flag | Meaning |
+|---|---|
+| Boycott | The headline talks about a boycott. |
+| Border tension | The headline talks about a dispute, troops, a border closure or protests. |
+| Escalation | The headline talks about fighting, shelling, injuries or people leaving their homes. |
+| De-escalation | The headline talks about a ceasefire, peace talks or the border reopening. |
+
+Flags only appear when a headline mentions Thailand or Cambodia. The app finds them by looking
+for key words in the headline, so a flag is a lead to check, not a confirmed event. Open the
+article to read the full story. Saving the articles and running the AI gives a more careful
+reading of sentiment and boycotts.
+
+**The border tension risk score**
+
+Each search gives a score from 0 to 100, saved on **Sentiment Trends**:
+
+- **Low** (below 20): little tension in the news.
+- **Elevated** (20 to 44): noticeable tension.
+- **High** (45 and above): a lot of tension or fighting in the news.
+
+Fighting counts more than general tension, and news about peace or ceasefires lowers the score.
+When the score jumps by 10 points or more since the last search, the app warns you that risk is
+**rising**. For a fair comparison, use the same topics and time range each time.
+"""
+
+
+def _render_tutorial() -> None:
+    st.subheader("Tutorial")
+    with st.expander("Online News", expanded=True):
+        st.markdown(TUTORIAL_ONLINE_NEWS)
+
+
 def main() -> None:
     load_environment()
     _bridge_secrets_to_env()
@@ -1227,10 +1278,10 @@ def main() -> None:
     _apply_ui_theme()
     user_email = require_access()
     facebook_session = _get_facebook_session(_facebook_storage_path())
-    scrape_tab, analysis_tab, trends_tab = dashboard_views(user_email, facebook_session)
+    scrape_tab, analysis_tab, trends_tab, tutorial_tab = dashboard_views(user_email, facebook_session)
 
     with scrape_tab:
-        facebook_tab, reddit_tab, news_tab = st.tabs(["Facebook", "Reddit", "Online news"])
+        facebook_tab, reddit_tab, news_tab = st.tabs(["Facebook", "Reddit", "Online News"])
         with facebook_tab:
             _render_collection_workspace("facebook", user_email, facebook_session)
         with reddit_tab:
@@ -1383,6 +1434,9 @@ def main() -> None:
     with trends_tab:
         _render_sentiment_history()
         _render_news_risk_history()
+
+    with tutorial_tab:
+        _render_tutorial()
 
 
 if __name__ == "__main__":
