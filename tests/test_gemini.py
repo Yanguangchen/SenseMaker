@@ -10,7 +10,9 @@ from urllib.error import HTTPError, URLError
 
 from streamlit.testing.v1 import AppTest
 
-from modules.gemini import GeminiError, api_error, list_text_models, normalize_model_name, resolve_model
+from modules.gemini import (
+    GeminiError, api_error, display_name, list_text_models, normalize_model_name, picker_models, resolve_model,
+)
 from modules.processor import _generate_content, analyze_posts_with_gemini
 
 
@@ -41,12 +43,12 @@ class ModelTests(unittest.TestCase):
         with patch("modules.gemini.list_text_models", return_value=names):
             self.assertEqual(resolve_model("key", "auto"), "models/gemini-3.6-flash")
             self.assertEqual(resolve_model("key", "gemini-2.5-flash"), "models/gemini-2.5-flash")
-            with self.assertRaisesRegex(GeminiError, "not available.*Automatic"):
+            with self.assertRaisesRegex(GeminiError, "not available.*Gemini \\(automatic\\)"):
                 resolve_model("key", "models/gemini-2.0-flash")
 
     def test_automatic_selection_never_silently_chooses_pro(self):
         with patch("modules.gemini.list_text_models", return_value=["models/gemini-4-pro"]):
-            with self.assertRaisesRegex(GeminiError, "choose a model explicitly"):
+            with self.assertRaisesRegex(GeminiError, "Choose a specific Gemini model"):
                 resolve_model("key", "auto")
 
     def test_automatic_prefers_available_stable_flash_lite_for_classification(self):
@@ -104,38 +106,56 @@ class ModelTests(unittest.TestCase):
 
 
 class GeminiSettingsTests(unittest.TestCase):
-    script = "from dashboard import _render_gemini_settings\n_render_gemini_settings()\n"
+    script = "from dashboard import _render_ai_settings\n_render_ai_settings()\n"
 
-    def test_refresh_replaces_unavailable_legacy_model_and_key_change_clears_catalogue(self):
-        with patch.dict(os.environ, {"GEMINI_KEY": "first-server-key"}), \
-             patch("dashboard.list_text_models", return_value=["models/gemini-test-flash"]) as catalogue:
-            app = AppTest.from_string(self.script)
-            app.session_state["gemini_model_name"] = "models/gemini-retired"
-            app.run()
-            self.assertEqual(len(app.text_input), 0)
-            app.button(key="refresh_gemini_models").click().run()
+    def test_picker_lists_general_models_newest_first_with_readable_names(self):
+        names = ["models/gemini-2.0-flash", "models/gemini-2.0-flash-001", "models/gemini-2.5-flash-lite",
+                 "models/gemini-3.5-flash", "models/gemini-flash-latest", "models/gemini-3-pro-preview",
+                 "models/gemini-2.5-pro"]
+        self.assertEqual([display_name(n) for n in picker_models(names)],
+                         ["Gemini 3.5 Flash", "Gemini 2.5 Pro", "Gemini 2.5 Flash-Lite", "Gemini 2.0 Flash"])
+
+    def test_models_load_automatically_and_choosing_one_sets_the_gemini_model(self):
+        with patch.dict(os.environ, {"GEMINI_KEY": "first-server-key", "AI_PROVIDER": "gemini", "GEMINI_MODEL": "auto"}), \
+             patch("dashboard.list_text_models", return_value=["models/gemini-3.5-flash"]) as catalogue:
+            app = AppTest.from_string(self.script).run()
             self.assertFalse(list(app.exception))
-            self.assertEqual(app.selectbox(key="gemini_model_name").value, "auto")
-            self.assertIn("gemini-test-flash", app.selectbox(key="gemini_model_name").options)
+            self.assertEqual(len(app.button), 0)
+            self.assertEqual(len(app.text_input), 0)
+            app.selectbox(key="ai_model").select("gemini:models/gemini-3.5-flash").run()
+            self.assertEqual(app.session_state["gemini_model_name"], "models/gemini-3.5-flash")
+            app.run()
             catalogue.assert_called_once_with("first-server-key")
             os.environ["GEMINI_KEY"] = "rotated-server-key"
             app.run()
-            self.assertNotIn("gemini_available_models", app.session_state)
+            self.assertEqual(catalogue.call_args.args[0], "rotated-server-key")
 
-    def test_catalogue_failure_is_visible_after_rerun(self):
-        with patch.dict(os.environ, {"GEMINI_KEY": "server-key"}), \
-             patch("dashboard.list_text_models", side_effect=GeminiError("Gemini HTTP 403: Access denied.")):
-            app = AppTest.from_string(self.script).run()
-            app.button(key="refresh_gemini_models").click().run()
+    def test_unavailable_saved_model_switches_to_automatic(self):
+        with patch.dict(os.environ, {"GEMINI_KEY": "server-key", "AI_PROVIDER": "gemini"}), \
+             patch("dashboard.list_text_models", return_value=["models/gemini-3.5-flash"]):
+            app = AppTest.from_string(self.script)
+            app.session_state["ai_model"] = "gemini:models/gemini-retired"
             app.run()
-            self.assertTrue(any("HTTP 403" in error.value for error in app.error))
+            self.assertEqual(app.selectbox(key="ai_model").value, "gemini:auto")
+            self.assertIn("no longer available", app.info[0].value)
+
+    def test_catalogue_failure_keeps_automatic_and_configured_model_and_is_visible(self):
+        with patch.dict(os.environ, {"GEMINI_KEY": "server-key", "AI_PROVIDER": "gemini", "GEMINI_MODEL": "gemini-2.5-flash"}), \
+             patch("dashboard.list_text_models", side_effect=GeminiError("Gemini HTTP 403: Access denied.")) as catalogue:
+            app = AppTest.from_string(self.script).run()
+            app.run()
             self.assertFalse(list(app.exception))
+            self.assertEqual(catalogue.call_count, 1)
+            self.assertEqual(app.selectbox(key="ai_model").value, "gemini:models/gemini-2.5-flash")
+            self.assertIn("Gemini (automatic)", app.selectbox(key="ai_model").options)
+            self.assertTrue(any("HTTP 403" in warning.value for warning in app.warning))
 
     def test_dashboard_analysis_failure_persists_actual_error_without_replacing_saved_analysis(self):
         with patch.dict(os.environ, {"GEMINI_KEY": "server-key", "AI_PROVIDER": "gemini"}), \
              patch("modules.auth.require_access", return_value="editor@example.com"), \
              patch("modules.database.init_db"), patch("modules.sentiment_history.persist_analysis_run") as save, \
-             patch("modules.processor.resolve_model", side_effect=GeminiError("Gemini HTTP 404: Model unavailable.")):
+             patch("modules.processor.resolve_model", side_effect=GeminiError("Gemini HTTP 404: Model unavailable.")), \
+             patch("modules.gemini.list_text_models", return_value=["models/gemini-3.5-flash"]):
             app = AppTest.from_file(str(Path(__file__).resolve().parents[1] / "dashboard.py"))
             app.session_state["firestore_rows"] = [{"_id": "a", "raw_text": "A Thai project", "status": "processed"}]
             app.run()

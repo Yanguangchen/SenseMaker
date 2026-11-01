@@ -10,7 +10,9 @@ The dashboard requires Google sign-in. Access is limited to verified accounts in
 ## AI provider setup
 
 Configure credentials once on the server in `.env.local` or `.env`; dashboard users choose **Gemini**
-or **ChatGPT** in the **AI provider** dropdown without entering an API key.
+or **ChatGPT** in the single **AI model** dropdown without entering an API key. It lists
+**Gemini (automatic)**, the stable Gemini models available to the server key (for example
+**Gemini 3.5 Flash**), and **ChatGPT** with its configured model.
 
 ```env
 AI_PROVIDER=gemini
@@ -474,7 +476,7 @@ Known limitations:
 - Exact ID matching; unknown and duplicate IDs are rejected rather than assigned to another record
 - Robust JSON extraction from Gemini responses (handles markdown fences, surrounding text)
 - Live status callback for UI progress updates during retries
-- Default model: `auto` (an available stable Flash model is preferred); use **Refresh available models** to choose an explicit text model returned by Google. Bare names and `models/` names are both accepted in server configuration.
+- Default model: `auto` (an available stable Flash model is preferred); the **AI model** dropdown loads Google's model list automatically and shows stable Flash, Flash-Lite and Pro models. Bare names and `models/` names are both accepted in server configuration.
 
 Analysis output per post:
 - `translation` — English translation (unchanged if already English)
@@ -632,10 +634,10 @@ The dashboard now displays the actual Google HTTP error and redacted diagnostic,
 or a specific content-blocking, output-length, JSON/ID validation or time-budget error.
 It no longer assumes that every failure is caused by unmatched record IDs.
 
-1. Have the app administrator configure `GEMINI_KEY` on the server, then click **Refresh available models**.
-2. Choose **Automatic** or an available text model and retry your selection.
+1. Have the app administrator configure `GEMINI_KEY` on the server, then reload the page to load the Gemini models.
+2. Choose **Gemini (automatic)** or a listed Gemini model and retry your selection.
 3. For HTTP 400/401/403, check the key, API restrictions and project permissions.
-4. For HTTP 404, refresh models; the chosen model may not support `generateContent`
+4. For HTTP 404, reload the page or choose Gemini (automatic); the chosen model may not support `generateContent`
    for your key/API version. For HTTP 429, check quota and billing before retrying.
 
 Automatic selection prefers stable Flash-Lite text models for lower-latency

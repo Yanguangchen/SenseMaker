@@ -26,7 +26,7 @@ def api_error(exc: HTTPError, api_key: str) -> GeminiError:
         400: "Google rejected the request. Check the API key and the model's supported features.",
         401: "The server's Gemini API key was not accepted. Contact the app administrator.",
         403: "Access was denied. Check this key's API restrictions and project permissions.",
-        404: "The model is unavailable for this key or API method. Select Automatic or refresh available models.",
+        404: "The model is unavailable for this key or API method. Choose Gemini (automatic) or another model.",
         429: "Gemini quota or rate limit reached. Check your project's quota and billing, then retry.",
         503: "Gemini is temporarily unavailable. Try again later.",
     }
@@ -50,7 +50,7 @@ def normalize_model_name(name: str) -> str:
     if not name.startswith("models/"):
         name = "models/" + name
     if not re.fullmatch(r"models/[A-Za-z0-9._-]+", name):
-        raise GeminiError("Choose Automatic or a model from the available-model list.")
+        raise GeminiError("Choose Gemini (automatic) or a model from the list.")
     return name
 
 
@@ -94,20 +94,38 @@ def list_text_models(api_key: str) -> list[str]:
     return sorted(names)
 
 
+_GENERAL_STABLE = re.compile(r"models/gemini-(\d+)(?:\.(\d+))?-(flash|flash-lite|pro)")
+
+
+def picker_models(available: list[str]) -> list[str]:
+    """Stable general-purpose models, newest first; dated, preview and specialist variants are hidden."""
+    def version(name: str) -> tuple:
+        match = _GENERAL_STABLE.fullmatch(name)
+        return int(match[1]), int(match[2] or 0), ["pro", "flash", "flash-lite"].index(match[3])
+    return sorted((name for name in available if _GENERAL_STABLE.fullmatch(name)),
+                  key=lambda name: (-version(name)[0], -version(name)[1], version(name)[2]))
+
+
+def display_name(name: str) -> str:
+    """models/gemini-3.5-flash-lite -> Gemini 3.5 Flash-Lite."""
+    words = name.removeprefix("models/").split("-")
+    return " ".join(w.capitalize() if not w[:1].isdigit() else w for w in words).replace("Flash Lite", "Flash-Lite")
+
+
 def resolve_model(api_key: str, requested: str) -> str:
     name = normalize_model_name(requested)
     available = list_text_models(api_key)
     if name != AUTO_MODEL:
         if name not in available:
             raise GeminiError(f"{name} is not available for this key with generateContent. "
-                              "Choose Automatic or refresh available models.")
+                              "Choose Gemini (automatic) or another model.")
         return name
     # Choose general text Flash models, not specialized variants such as Flash Cyber.
     general_flash = r"models/gemini-(?:\d+(?:\.\d+)?-)?flash(?:-lite)?(?:-(?:latest|\d{3}|preview(?:-[\w.-]+)?|exp(?:-[\w.-]+)?))?"
     flash = [n for n in available if re.fullmatch(general_flash, n)]
     if not flash:
         raise GeminiError("No Flash text model is available for automatic selection. "
-                          "Refresh available models and choose a model explicitly.")
+                          "Choose a specific Gemini model instead.")
 
     def rank(model: str):
         version = re.search(r"gemini-(\d+)(?:\.(\d+))?", model)

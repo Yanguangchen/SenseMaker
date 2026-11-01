@@ -8,6 +8,7 @@ import hashlib
 import logging
 import os
 import sys
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
@@ -30,7 +31,7 @@ from modules.facebook_session import (
     saved_facebook_session,
 )
 from modules.processor import analyze_posts
-from modules.gemini import AUTO_MODEL, GeminiError, list_text_models, normalize_model_name
+from modules.gemini import AUTO_MODEL, GeminiError, display_name, list_text_models, normalize_model_name, picker_models
 from modules.reddit import CAMBODIA_URL, is_reddit_url, reddit_configured
 from modules.signals import NON_CONTENT_TYPES, SIGNAL_LABELS, is_analyzable, is_flagged, watch_terms
 from modules.saved_links import library_owner_id, load_saved_links, parse_links, remove_saved_links, save_links
@@ -192,53 +193,77 @@ def _render_sentiment_history() -> None:
             } for row in reversed(rows)]), use_container_width=True, hide_index=True)
 
 
-def _render_gemini_settings() -> None:
-    api_key = get_ai_key("gemini")
-    fingerprint = hashlib.sha256(api_key.strip().encode()).hexdigest()
+GEMINI_CATALOG_RETRY_SECONDS = 300
+
+
+def _gemini_models() -> Optional[List[str]]:
+    """Google's text models for the server key, loaded once per session; None if unavailable."""
+    api_key = get_ai_key("gemini").strip()
+    if not api_key:
+        return None
+    fingerprint = hashlib.sha256(api_key.encode()).hexdigest()
     if st.session_state.get("gemini_catalog_key") != fingerprint:
         st.session_state["gemini_catalog_key"] = fingerprint
         st.session_state.pop("gemini_available_models", None)
         st.session_state.pop("gemini_catalog_error", None)
-    if st.button("Refresh available models", key="refresh_gemini_models", use_container_width=True,
-                 disabled=not api_key):
+    failed_at = st.session_state.get("gemini_catalog_failed_at", 0)
+    if ("gemini_available_models" not in st.session_state
+            and (not st.session_state.get("gemini_catalog_error")
+                 or time.monotonic() - failed_at > GEMINI_CATALOG_RETRY_SECONDS)):
         try:
-            with st.spinner("Checking available Gemini models…"):
-                st.session_state["gemini_available_models"] = list_text_models(api_key.strip())
+            with st.spinner("Loading Gemini models…"):
+                st.session_state["gemini_available_models"] = list_text_models(api_key)
             st.session_state.pop("gemini_catalog_error", None)
         except GeminiError as exc:
-            st.session_state.pop("gemini_available_models", None)
             st.session_state["gemini_catalog_error"] = str(exc)
-    if st.session_state.get("gemini_catalog_error"):
-        st.error(st.session_state["gemini_catalog_error"])
-    available = st.session_state.get("gemini_available_models")
-    options = [AUTO_MODEL] + (available or [])
-    try:
-        current = normalize_model_name(st.session_state.get("gemini_model_name", get_ai_model("gemini")))
-    except GeminiError:
-        current = AUTO_MODEL
-    if current not in options:
-        if available is None:
-            options.append(current)  # Preserve explicit settings until Google validates them.
-        else:
-            st.info(f"{current} was not returned by Google. Switched to Automatic.")
-            current = AUTO_MODEL
-    st.session_state["gemini_model_name"] = current
-    st.selectbox("Gemini model", options, key="gemini_model_name",
-                 format_func=lambda name: "Automatic · available Flash model" if name == AUTO_MODEL else name.removeprefix("models/"))
-    st.caption("Automatic checks the available models before analysis. Model availability does not guarantee remaining quota.")
+            st.session_state["gemini_catalog_failed_at"] = time.monotonic()
+    return st.session_state.get("gemini_available_models")
+
+
+def _model_choice(provider: str, model: str) -> str:
+    return f"{provider}:{model}"
 
 
 def _render_ai_settings() -> str:
-    if "ai_provider" not in st.session_state:
-        st.session_state["ai_provider"] = get_ai_provider()
-    provider = st.selectbox("AI provider", list(AI_PROVIDERS), key="ai_provider",
-                            format_func=AI_PROVIDERS.get)
-    if not get_ai_key(provider):
-        st.warning(f"{AI_PROVIDERS[provider]} is not configured yet. Choose another provider or contact the app administrator.")
+    """One picker for provider and model; the choice also sets ai_provider and gemini_model_name."""
+    available = _gemini_models()
+    auto = _model_choice("gemini", AUTO_MODEL)
+    options = {auto: "Gemini (automatic)"}
+    options.update({_model_choice("gemini", name): display_name(name) for name in picker_models(available or [])})
+    try:
+        configured_gemini = normalize_model_name(get_ai_model("gemini"))
+    except GeminiError:
+        configured_gemini = AUTO_MODEL
+    if available is None and configured_gemini != AUTO_MODEL:
+        # Keep the server's explicit model selectable until Google's list can confirm it.
+        options[_model_choice("gemini", configured_gemini)] = display_name(configured_gemini)
+    elif configured_gemini in (available or []):
+        options.setdefault(_model_choice("gemini", configured_gemini), display_name(configured_gemini))
+    openai_model = get_ai_model("openai")
+    options[_model_choice("openai", openai_model)] = f"ChatGPT ({openai_model})"
+
+    if "ai_model" not in st.session_state:
+        default_provider = get_ai_provider()
+        st.session_state["ai_model"] = (_model_choice("openai", openai_model) if default_provider == "openai"
+                                        else _model_choice("gemini", configured_gemini))
+    if st.session_state["ai_model"] not in options:
+        if st.session_state["ai_model"].startswith("gemini:") and available is not None:
+            st.info(f"{display_name(st.session_state['ai_model'].split(':', 1)[1])} is no longer available. "
+                    "Switched to Gemini (automatic).")
+        st.session_state["ai_model"] = auto if st.session_state["ai_model"].startswith("gemini:") \
+            else _model_choice("openai", openai_model)
+    choice = st.selectbox("AI model", list(options), key="ai_model", format_func=options.get)
+    provider, model = choice.split(":", 1)
+    st.session_state["ai_provider"] = provider
     if provider == "gemini":
-        _render_gemini_settings()
-    else:
-        st.caption(f"ChatGPT model: {get_ai_model(provider)}")
+        st.session_state["gemini_model_name"] = model
+    if not get_ai_key(provider):
+        st.warning(f"{AI_PROVIDERS[provider]} is not configured yet. Choose another model or contact the app administrator.")
+    elif provider == "gemini" and st.session_state.get("gemini_catalog_error"):
+        st.warning("The list of Gemini models couldn't be loaded, so only Gemini (automatic) is shown. "
+                   + st.session_state["gemini_catalog_error"])
+    elif choice == auto:
+        st.caption("Automatic picks a fast Gemini model for you.")
     return provider
 
 
