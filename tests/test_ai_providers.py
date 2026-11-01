@@ -149,12 +149,17 @@ class ProviderUITests(unittest.TestCase):
     script = "from dashboard import _render_ai_settings\n_render_ai_settings()\n"
 
     def test_switching_providers_never_renders_or_stores_keys_in_widgets(self):
-        with patch.dict(os.environ, {"AI_PROVIDER": "gemini", "GEMINI_KEY": "private-gemini", "OPENAI_API_KEY": "private-openai"}):
+        with patch.dict(os.environ, {"AI_PROVIDER": "gemini", "GEMINI_KEY": "private-gemini", "OPENAI_API_KEY": "private-openai",
+                                     "OPENAI_MODEL": "gpt-test"}), \
+             patch("dashboard.list_text_models", return_value=["models/gemini-3.5-flash", "models/gemini-2.0-flash"]):
             app = AppTest.from_string(self.script).run()
-            self.assertEqual(app.selectbox(key="ai_provider").value, "gemini")
-            self.assertEqual(app.selectbox(key="ai_provider").options, ["Gemini", "ChatGPT"])
-            for provider in ("openai", "gemini"):
-                app.selectbox(key="ai_provider").select(provider).run()
+            self.assertEqual(app.selectbox(key="ai_model").value, "gemini:auto")
+            self.assertEqual(app.selectbox(key="ai_model").options,
+                             ["Gemini (automatic)", "Gemini 3.5 Flash", "Gemini 2.0 Flash", "ChatGPT (gpt-test)"])
+            self.assertEqual(len(app.selectbox), 1)
+            for choice in ("openai:gpt-test", "gemini:models/gemini-3.5-flash"):
+                app.selectbox(key="ai_model").select(choice).run()
+                self.assertEqual(app.session_state["ai_provider"], choice.split(":")[0])
                 self.assertFalse(list(app.exception))
                 self.assertEqual(len(app.text_input), 0)
                 visible = str(app) + repr(app.session_state.filtered_state)
@@ -167,11 +172,12 @@ class ProviderUITests(unittest.TestCase):
              patch("streamlit.secrets", {}), patch("modules.auth.require_access", return_value="editor@example.com"), \
              patch("modules.database.init_db"), patch("modules.sentiment_history.persist_analysis_run", return_value=None) as save, \
              patch("modules.openai.urlopen", return_value=response(completed(result_text()))) as request, \
-             patch("modules.processor._generate_content") as gemini:
+             patch("modules.processor._generate_content") as gemini, \
+             patch("modules.gemini.list_text_models", return_value=["models/gemini-3.5-flash"]):
             app = AppTest.from_file(str(Path(__file__).resolve().parents[1] / "dashboard.py"), default_timeout=30)
             app.session_state["firestore_rows"] = [{"_id": "a", "raw_text": "Hello", "status": "pending"}]
             app.run()
-            app.selectbox(key="ai_provider").select("openai").run()
+            app.selectbox(key="ai_model").select("openai:gpt-5.4-mini").run()
             self.assertEqual(app.button(key="run_analysis_selected_btn").label, "Run ChatGPT on selected records")
             app.button(key="run_analysis_selected_btn").click().run()
             self.assertFalse(list(app.exception))
