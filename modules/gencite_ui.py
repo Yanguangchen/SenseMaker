@@ -105,8 +105,22 @@ def _render_provider_status() -> None:
     parts = []
     for provider, label in AI_PROVIDERS.items():
         model = gencite.provider_model(provider)
-        parts.append(f"{label} · {model} · {'ready' if get_ai_key(provider) else 'not configured'}")
+        parts.append(f"{label} · {model} · {'key set' if get_ai_key(provider) else 'not configured'}")
     st.caption("Providers: " + "  |  ".join(parts))
+    with st.expander("Check provider access"):
+        st.caption("Sends one small GenCite request with each configured server key to confirm the key can use "
+                   "GenCite's model and structured answers. It cannot show remaining daily quota.")
+        configured = gencite.configured_providers()
+        if st.button("Run check", key="gencite_check_providers", disabled=not configured):
+            with st.spinner("Checking provider access…"):
+                st.session_state["gencite_provider_check"] = [gencite.check_provider(p) for p in configured]
+        if not configured:
+            st.info("No provider key is configured. Set GEMINI_KEY (or GEMINI_API_KEY) and/or OPENAI_API_KEY.")
+        for report in st.session_state.get("gencite_provider_check", []):
+            verdict = "works with GenCite" if report["ok"] else "cannot run GenCite yet"
+            (st.success if report["ok"] else st.error)(f"**{report['label']} · {report['model']}** {verdict}")
+            st.markdown("\n".join(f"- {'✓' if s['ok'] else '✗'} **{s['name']}:** {s['detail']}"
+                                  for s in report["steps"]))
 
 
 def _render_topic() -> None:
