@@ -114,7 +114,7 @@ class DeleteProcessedUITests(unittest.TestCase):
             self.assertFalse(list(app.exception))
             self.assertEqual(len(app.session_state["processed_rows"]), 2)
             self.assertEqual(len(app.session_state["firestore_rows"]), 3)
-            self.assertIn("Reload processed records", app.error[0].value)
+            self.assertIn("Click Show history", app.error[0].value)
 
 
 if __name__ == "__main__":
