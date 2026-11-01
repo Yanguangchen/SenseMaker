@@ -175,8 +175,8 @@ same searches and window, because the score depends on what each search returns.
 Keyword flags are leads for review, not confirmed events, and only headlines are scanned. Use
 **Save data to cloud** to store the articles, then run the AI provider on them in **Sentiment
 Analysis** for evidence-grounded sentiment, boycott and tension assessments. On the
-**Sentiment over time** chart, red rings mark analysis runs that found border-tension or
-boycott signals. Short search terms such as `OYOSHI` can also match unrelated news, so refine
+**Sentiment over time** chart, each search's headline tone appears as an **Online News**
+point, and red rings mark searches and analysis runs that found border-tension or boycott signals. Short search terms such as `OYOSHI` can also match unrelated news, so refine
 the terms when needed. Google's feed is intended for personal, non-commercial use; check its
 terms for your use case.
 
@@ -401,7 +401,13 @@ Post updates and the run summary commit together in Firestore. History lives in
 `<FIREBASE_COLLECTION>_analysis_runs`, survives refreshes and restarts, and keeps
 aggregate summaries when source records are deleted. Tracking starts with the
 next analysis; earlier run boundaries cannot be recovered from overwritten post
-results. The timeline uses completion time in UTC, with details in Analysis history.
+results. The timeline uses completion time in UTC, with details in **History**.
+
+Every Online News search also adds a point to the same chart, drawn as a separate
+teal **Online News** line beside the blue **AI analysis** line. Its score is
+`100 × (positive − negative headlines) / headlines`, from the keyword tone scan, so
+earlier saved searches appear automatically. Both kinds of point count equally in
+the average, and red rings mark points with border-tension or boycott flags.
 
 ## Validated Facebook Workflow
 
