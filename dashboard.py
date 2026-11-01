@@ -34,7 +34,9 @@ from modules.gemini import AUTO_MODEL, GeminiError, list_text_models, normalize_
 from modules.reddit import CAMBODIA_URL, is_reddit_url, reddit_configured
 from modules.signals import NON_CONTENT_TYPES, SIGNAL_LABELS, is_analyzable, is_flagged, watch_terms
 from modules.saved_links import library_owner_id, load_saved_links, parse_links, remove_saved_links, save_links
-from modules.sentiment_history import chart_spec, load_history, persist_analysis_run
+from modules.sentiment_history import (
+    NEWS_SOURCE, chart_spec, combined_history, load_history, news_sentiment_rows, persist_analysis_run,
+)
 from modules.google_news import (
     EDITIONS, MAX_ARTICLES, NEWS_CATEGORIES, TIME_WINDOWS, browse_url, build_scan_snapshot, collect_news,
     daily_flag_counts,
@@ -154,40 +156,53 @@ def _load_sentiment_history() -> list[dict[str, Any]]:
 def _render_sentiment_history() -> None:
     with st.container(border=True, key="sentiment_history"):
         st.subheader("Sentiment over time")
-        st.caption("One point per analysis · Higher is more positive · Dashed line is the average across runs · "
-                   "Red rings mark runs with border tension or boycott signals")
+        st.caption("One point per AI analysis and per Online News search · Higher is more positive · "
+                   "Dashed line is the average of all points · Red rings mark border tension or boycott signals")
         if st.button("Refresh timeline", key="refresh_sentiment_history"):
             _load_sentiment_history.clear()
+            _load_news_history.clear()
         try:
-            rows = _load_sentiment_history()
+            analysis_rows = _load_sentiment_history()
         except Exception:
             st.warning("Sentiment history could not be loaded. Refresh the timeline to try again.")
             return
+        try:
+            news_rows = news_sentiment_rows(_load_news_history())
+        except Exception:
+            news_rows = []
+            st.caption("Online News points couldn't be loaded. Refresh the timeline to try again.")
+        rows = combined_history(analysis_rows, news_rows)
         if not rows:
-            st.info("Complete an analysis to start your timeline. Each result will be saved here automatically.")
+            st.info("Run an analysis or search Online News to start your timeline. Each result is saved here automatically.")
             return
         average = sum(row["score"] for row in rows) / len(rows)
         latest = rows[-1]["score"]
-        delta = f"{latest - rows[-2]['score']:+.1f} vs previous run" if len(rows) > 1 else None
-        first, second, third = st.columns(3)
-        first.metric("Latest sentiment", f"{latest:+.1f}", delta)
+        delta = f"{latest - rows[-2]['score']:+.1f} vs previous point" if len(rows) > 1 else None
+        first, second, third, fourth = st.columns(4)
+        first.metric("Latest sentiment", f"{latest:+.1f}", delta, help=f"From {rows[-1]['source']}")
         second.metric("Average sentiment", f"{average:+.1f}")
-        third.metric("Analysis runs", len(rows))
+        third.metric("Analysis runs", len(analysis_rows))
+        fourth.metric("News searches", len(news_rows))
         st.vega_lite_chart(spec=chart_spec(rows), use_container_width=True)
         st.caption("−100 = all negative · 0 = balanced or neutral · +100 = all positive. "
-                   "Joy counts as positive; Anger and Anxiety as negative. "
-                   "Scores use successful records only, and each run has equal weight in the average.")
+                   "AI analysis: Joy counts as positive, Anger and Anxiety as negative, using successful records only. "
+                   "Online News: positive minus negative headlines, from a keyword scan. "
+                   "Each point has equal weight in the average.")
         if len(rows) == 1:
-            st.caption("Your first point is saved. Run another analysis to see the direction of change.")
-        with st.expander("Analysis history"):
+            st.caption("Your first point is saved. Run another analysis or news search to see the direction of change.")
+        with st.expander("History"):
             st.dataframe(pd.DataFrame([{
                 "Completed (UTC)": row["completed_at"],
+                "Source": row["source"],
                 "Sentiment": round(row["score"], 1),
                 "Analyzed": row["processed_count"],
                 "Failed": row["error_count"],
-                "Joy": row["counts"]["Joy"], "Neutral": row["counts"]["Neutral"],
-                "Anger": row["counts"]["Anger"], "Anxiety": row["counts"]["Anxiety"],
-                "Provider": AI_PROVIDERS.get(row["provider"], row["provider"]),
+                "Positive": row["counts"]["Joy"] if "counts" in row else row["tone_counts"].get("Positive", 0),
+                "Neutral": row["counts"]["Neutral"] if "counts" in row else row["tone_counts"].get("Neutral", 0),
+                "Negative": (row["counts"]["Anger"] + row["counts"]["Anxiety"] if "counts" in row
+                             else row["tone_counts"].get("Negative", 0)),
+                "Method": ("Headline keywords" if row["source"] == NEWS_SOURCE
+                           else AI_PROVIDERS.get(row["provider"], row["provider"])),
                 "Watch terms": ", ".join(row.get("targets", [])),
             } for row in reversed(rows)]), use_container_width=True, hide_index=True)
 

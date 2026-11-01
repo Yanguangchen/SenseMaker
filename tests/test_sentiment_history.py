@@ -10,7 +10,10 @@ from unittest.mock import MagicMock, patch
 import altair as alt
 from streamlit.testing.v1 import AppTest
 
-from modules.sentiment_history import build_snapshot, chart_spec, load_history, persist_analysis_run
+from modules.sentiment_history import (
+    AI_SOURCE, NEWS_SOURCE, build_snapshot, chart_spec, combined_history, load_history, news_sentiment_rows,
+    persist_analysis_run,
+)
 
 
 def snapshot(sentiments, day=1, selected_count=None):
@@ -71,6 +74,38 @@ class SnapshotTests(unittest.TestCase):
         alt.LayerChart.from_dict(spec).to_dict(validate=True)
 
 
+def news_scan(day, positive=0, neutral=0, negative=0, **extra):
+    return {"scan_id": f"scan-{day}", "scanned_at": f"2026-10-{day:02d}T08:00:00+00:00",
+            "tone_counts": {"Positive": positive, "Neutral": neutral, "Negative": negative}, **extra}
+
+
+class NewsTimelineTests(unittest.TestCase):
+    def test_news_scans_become_scored_points_and_empty_scans_are_skipped(self):
+        rows = news_sentiment_rows([
+            news_scan(1, positive=1, neutral=2, negative=5, tension_count=2, escalation_count=1, boycott_count=3),
+            news_scan(2),
+            {"scan_id": "old", "scanned_at": "2026-10-03T00:00:00+00:00"},
+        ])
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["score"], -50)
+        self.assertEqual(rows[0]["source"], NEWS_SOURCE)
+        self.assertEqual(rows[0]["processed_count"], 8)
+        self.assertEqual(rows[0]["signal_counts"]["tension"], 3)
+        self.assertEqual(rows[0]["signal_counts"]["boycott_report"], 3)
+
+    def test_combined_history_orders_both_sources_and_colors_lines_by_source(self):
+        rows = combined_history([snapshot(["Joy"], day=3), snapshot(["Anger"], day=1)],
+                                news_sentiment_rows([news_scan(2, positive=1, neutral=1)]))
+        self.assertEqual([row["source"] for row in rows], [AI_SOURCE, NEWS_SOURCE, AI_SOURCE])
+        self.assertEqual([row["score"] for row in rows], [-100, 50, 100])
+        spec = chart_spec(rows)
+        color = spec["layer"][1]["encoding"]["color"]
+        self.assertEqual(color["field"], "source")
+        self.assertEqual(color["scale"]["domain"], [AI_SOURCE, NEWS_SOURCE])
+        self.assertAlmostEqual(spec["layer"][2]["data"]["values"][0]["average"], 50 / 3)
+        alt.LayerChart.from_dict(spec).to_dict(validate=True)
+
+
 class PersistenceTests(unittest.TestCase):
     def setUp(self):
         self.config = patch("modules.sentiment_history._get_collection_name", return_value="test_posts")
@@ -115,10 +150,15 @@ class PersistenceTests(unittest.TestCase):
 class TimelineUITests(unittest.TestCase):
     script = "from dashboard import _render_sentiment_history\n_render_sentiment_history()\n"
 
+    def setUp(self):
+        news = patch("dashboard._load_news_history", return_value=[])
+        self.news = news.start()
+        self.addCleanup(news.stop)
+
     def test_empty_and_unavailable_history_are_distinct(self):
         with patch("dashboard._load_sentiment_history", return_value=[]):
             app = AppTest.from_string(self.script).run()
-            self.assertIn("Complete an analysis", app.info[0].value)
+            self.assertIn("Run an analysis or search Online News", app.info[0].value)
         with patch("dashboard._load_sentiment_history", side_effect=RuntimeError("offline")):
             app = AppTest.from_string(self.script).run()
             self.assertIn("could not be loaded", app.warning[0].value)
@@ -134,8 +174,33 @@ class TimelineUITests(unittest.TestCase):
                 self.assertEqual(len(app.get("arrow_vega_lite_chart")), 1)
                 self.assertEqual(len(app.dataframe[0].value), count)
                 if count == 2:
-                    self.assertEqual(app.metric[0].delta, "-100.0 vs previous run")
+                    self.assertEqual(app.metric[0].delta, "-100.0 vs previous point")
                     self.assertEqual(app.metric[1].value, "+50.0")
+
+    def test_news_searches_appear_on_the_same_timeline(self):
+        self.news.return_value = [news_scan(2, positive=1, negative=3)]
+        with patch("dashboard._load_sentiment_history", return_value=[snapshot(["Joy"])]):
+            app = AppTest.from_string(self.script).run()
+        self.assertFalse(list(app.exception))
+        metrics = {metric.label: metric.value for metric in app.metric}
+        self.assertEqual(metrics["Analysis runs"], "1")
+        self.assertEqual(metrics["News searches"], "1")
+        self.assertEqual(metrics["Latest sentiment"], "-50.0")
+        table = app.dataframe[0].value
+        self.assertEqual(list(table["Source"]), [NEWS_SOURCE, AI_SOURCE])
+        self.assertEqual(list(table["Method"])[0], "Headline keywords")
+
+    def test_news_only_timeline_and_news_load_failure(self):
+        self.news.return_value = [news_scan(1, neutral=4)]
+        with patch("dashboard._load_sentiment_history", return_value=[]):
+            app = AppTest.from_string(self.script).run()
+        self.assertEqual(len(app.get("arrow_vega_lite_chart")), 1)
+        self.news.side_effect = RuntimeError("offline")
+        with patch("dashboard._load_sentiment_history", return_value=[snapshot(["Joy"])]):
+            app = AppTest.from_string(self.script).run()
+        self.assertFalse(list(app.exception))
+        self.assertEqual(len(app.get("arrow_vega_lite_chart")), 1)
+        self.assertTrue(any("Online News points" in caption.value for caption in app.caption))
 
     def test_dashboard_saves_one_run_and_invalidates_history_after_analysis(self):
         from dashboard import _process_selected_firestore_posts

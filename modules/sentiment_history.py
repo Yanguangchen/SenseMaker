@@ -12,6 +12,9 @@ from modules.database import _get_collection_name
 
 SENTIMENT_VALUES = {"Joy": 1, "Neutral": 0, "Anger": -1, "Anxiety": -1}
 RISK_SIGNALS = ("tension", "boycott_call", "boycott_report")
+AI_SOURCE = "AI analysis"
+NEWS_SOURCE = "Online News"
+SOURCE_COLORS = {AI_SOURCE: "#2563eb", NEWS_SOURCE: "#14b8a6"}
 
 
 def history_collection() -> str:
@@ -96,13 +99,42 @@ def load_history(db: Any) -> list[dict[str, Any]]:
     return [row for row in rows if row]
 
 
+def news_sentiment_rows(scans: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Each Online News search as a timeline point: 100 × (positive − negative) / headlines."""
+    rows = []
+    for scan in scans:
+        tones = scan.get("tone_counts") or {}
+        total = sum(tones.get(tone, 0) for tone in ("Positive", "Neutral", "Negative"))
+        if not total or not scan.get("scanned_at"):
+            continue
+        rows.append({
+            "run_id": scan.get("scan_id", ""),
+            "completed_at": scan["scanned_at"],
+            "score": 100 * (tones.get("Positive", 0) - tones.get("Negative", 0)) / total,
+            "source": NEWS_SOURCE,
+            "tone_counts": tones,
+            "processed_count": total,
+            "error_count": 0,
+            "provider": "headline_keywords",
+            "signal_counts": {"tension": scan.get("tension_count", 0) + scan.get("escalation_count", 0),
+                              "boycott_call": 0, "boycott_report": scan.get("boycott_count", 0)},
+        })
+    return rows
+
+
+def combined_history(analysis_rows: list[dict[str, Any]], news_rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    rows = [{**row, "source": row.get("source", AI_SOURCE)} for row in analysis_rows] + news_rows
+    return sorted(rows, key=lambda row: row["completed_at"])
+
+
 def chart_spec(rows: list[dict[str, Any]]) -> dict[str, Any]:
     """One point per run; fixed polarity scale and an equally weighted run mean."""
     average = sum(row["score"] for row in rows) / len(rows)
     points = []
     for row in rows:
         signals = row.get("signal_counts") or {}
-        points.append({**row, "completed_label": datetime.fromisoformat(row["completed_at"]).strftime("%d %b %Y %H:%M:%S UTC"),
+        points.append({**row, "source": row.get("source", AI_SOURCE),
+                       "completed_label": datetime.fromisoformat(row["completed_at"]).strftime("%d %b %Y %H:%M:%S UTC"),
                        "tension_signals": signals.get("tension", 0),
                        "boycott_signals": signals.get("boycott_call", 0) + signals.get("boycott_report", 0)})
     flagged = [p for p in points if p["tension_signals"] or p["boycott_signals"]]
@@ -117,18 +149,21 @@ def chart_spec(rows: list[dict[str, Any]]) -> dict[str, Any]:
             {"data": {"values": [{"zero": 0}]}, "mark": {"type": "rule", "color": "#94a3b8", "opacity": 0.5},
              "encoding": {"y": {"field": "zero", **y}}},
             {"data": {"values": points},
-             "mark": {"type": "line", "color": "#2563eb", "strokeWidth": 2.5,
-                      "point": {"filled": True, "size": 75}},
+             "mark": {"type": "line", "strokeWidth": 2.5, "point": {"filled": True, "size": 75}},
              "encoding": {
                  "x": {"field": "completed_at", "type": "temporal", "scale": {"type": "utc"},
-                       "title": "Analysis completed (UTC)",
+                       "title": "Completed (UTC)",
                        "axis": {"format": "%d %b %H:%M", "tickCount": 5, "labelOverlap": "greedy", "grid": False}},
                  "y": {"field": "score", **y},
+                 "color": {"field": "source", "type": "nominal", "title": "Source",
+                           "scale": {"domain": list(SOURCE_COLORS), "range": list(SOURCE_COLORS.values())},
+                           "legend": {"orient": "top"}},
                  "order": {"field": "completed_at", "type": "temporal"},
                  "tooltip": [
+                     {"field": "source", "type": "nominal", "title": "Source"},
                      {"field": "completed_label", "type": "nominal", "title": "Completed"},
                      {"field": "score", "type": "quantitative", "title": "Sentiment", "format": ".1f"},
-                     {"field": "processed_count", "type": "quantitative", "title": "Analyzed records"},
+                     {"field": "processed_count", "type": "quantitative", "title": "Records or headlines"},
                      {"field": "error_count", "type": "quantitative", "title": "Failed records"},
                      {"field": "provider", "type": "nominal", "title": "Provider"},
                  ],
