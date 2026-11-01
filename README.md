@@ -94,7 +94,7 @@ evaluation with your configured provider and representative, human-labeled data.
 
 ## Delete processed records
 
-In **Sentiment Analysis**, load processed records, open **Delete processed records**,
+In **Sentiment Analysis**, click **Show history**, open **Delete processed records**,
 select records, and confirm their permanent deletion. This removes the selected records
 and analyses from the shared library for all users. Records that are no longer processed
 are kept. Source links stay available for future collection.
@@ -275,7 +275,7 @@ scheme or port. Existing OYOSHI Google accounts can then sign in to SenseMaker.
 |---|---|---|
 | Gemini/ChatGPT processing (sentiment, risk, translation) | Yes | Yes |
 | Firestore read/write | Yes | Yes |
-| View processed records | Yes | Yes |
+| Show history (processed records) | Yes | Yes |
 | Web scraping (Playwright) | No | Yes |
 | Facebook auth capture | No | Yes |
 
@@ -379,7 +379,7 @@ The dashboard has **three pages**, accessible from the left toolbar:
 
 ### Tab 2 — Sentiment Analysis
 
-- Load records from Firestore by status (`all`, `pending`, `processed`, `error`)
+- **Load records** by status (`all`, `pending`, `processed`, `error`)
 - Choose Gemini or ChatGPT, select records and run analysis (translation, sentiment, risk score, topics)
 - **Live progress panel** shows retry status when rate-limited (429 errors)
 - **Visual analysis cards** after processing:
@@ -387,7 +387,7 @@ The dashboard has **three pages**, accessible from the left toolbar:
   - Color-coded risk scores (8-10=red, 5-7=amber, 1-4=green)
   - English translation, topics, original text preview, source link
 - **Processed/Error metric counters**
-- **View processed records** section to review previously analysed data from Firestore
+- **Show history** to review previously analysed records
 
 ### Tab 3 — Sentiment Trends
 
@@ -429,7 +429,7 @@ Use this sequence for the most reliable results:
 5) New valid links are saved and selected automatically when you finish editing. Click **Collect posts** and inspect results. Use **Clear** to deselect all sources and clear pasted links.
 6) Enter a **Custom title** and click **Save data to cloud** to persist to Firestore.
 7) Switch to the **Sentiment Analysis** tab:
-   - Click **Load records from Firestore** (status: `pending`)
+   - Click **Load records** (status: `pending`)
    - Choose an AI provider, select records and click **Run Gemini on selected records** or **Run ChatGPT on selected records**
    - View sentiment cards, risk scores, and translations inline
 

@@ -673,7 +673,7 @@ def _render_processed_deletion(rows: List[Dict[str, Any]]) -> None:
                     with st.spinner("Deleting processed records…"):
                         result = delete_processed_posts(init_db(), pending)
                 except Exception:
-                    st.error("Deletion could not be confirmed. Reload processed records to check their status before retrying.")
+                    st.error("Deletion could not be confirmed. Click Show history to check before trying again.")
                 else:
                     # Drop stale copies, including records another session already removed or changed.
                     stale = set(result["deleted"] + result["missing"] + result["skipped"])
@@ -1237,7 +1237,7 @@ def main() -> None:
         provider_label = AI_PROVIDERS[provider]
 
         # --- Load records ---
-        if st.button("Load records from Firestore", key="load_firestore_records_btn"):
+        if st.button("Load records", key="load_firestore_records_btn"):
             try:
                 rows = _fetch_firestore_posts(status_filter=status_filter, limit=load_limit)
                 st.session_state["firestore_rows"] = rows
@@ -1260,7 +1260,7 @@ def main() -> None:
                     "Scrape and save data first, or switch status filter to 'all'."
                 )
             else:
-                st.success(f"Loaded {firestore_last_load_count} records from Firestore.")
+                st.success(f"Loaded {firestore_last_load_count} records.")
 
         if firestore_rows:
             display_rows = []
@@ -1348,9 +1348,7 @@ def main() -> None:
 
         # --- View previously processed records ---
         st.divider()
-        st.subheader("View processed records")
-        st.caption("Load records with status 'processed' to see their saved analysis.")
-        if st.button("Load processed records", key="load_processed_records_btn"):
+        if st.button("Show history", key="load_processed_records_btn"):
             try:
                 processed_rows = _fetch_firestore_posts(status_filter="processed", limit=load_limit)
                 st.session_state["processed_rows"] = processed_rows
