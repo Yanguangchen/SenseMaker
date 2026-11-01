@@ -150,8 +150,12 @@ searches as Google Search's **News** tab for three categories, each with editabl
 | Thailand–Cambodia border tension | `Thailand Cambodia border tension` |
 | Boycott of Thai products in Cambodia | `boycott Thailand products Cambodia` |
 
-Choose the publication window (past day, week, month or year), the English and/or Thai Google
-News editions, and up to 100 articles per search. Results come from Google News' public search
+Choose the publication window (past day, week, month or year), the languages (English, Thai
+and/or Khmer), and up to 100 articles per search. Google News has no Cambodia or Khmer edition,
+so selecting **Khmer** shows a second, editable Khmer search box for each category
+(`ថៃ កម្ពុជា` for border tension and `ពហិការ ទំនិញថៃ` for boycotts by default) and searches all of
+Google News with those terms. Khmer-language coverage is limited, so these searches often find
+few articles, especially in shorter time windows. Results come from Google News' public search
 feed rather than a scripted browser, so collection works on hosted deployments without
 CAPTCHAs or credentials. Articles found by several searches are listed once with all their
 categories. A failed search is shown as a notice and does not discard the other results.
