@@ -57,6 +57,22 @@ because classification favors different models (for example Flash-Lite). If only
 configured, GenCite measures with that provider and generates ideas with it; with neither,
 analysis is disabled and query variations fall back to built-in templates.
 
+### Check that a key works with GenCite
+
+A key that already runs Sentiment Analysis is the same kind of key GenCite uses, but GenCite also
+needs its model (`gemini-2.5-flash` unless overridden) to be available to that key, structured JSON
+answers, and enough quota for about five requests per 50-query analysis. To confirm, open
+**GenCite → Check provider access → Run check** in the deployed app, or run locally:
+
+```sh
+python scripts/check_gencite_providers.py          # every configured provider
+python scripts/check_gencite_providers.py gemini   # just Gemini
+```
+
+Each check sends one small, real GenCite request and reports whether the key was found, whether the
+model is available to it, and whether it returned GenCite's five structured answers. Keys are never
+shown. A pass cannot show remaining daily quota; quota or billing limits appear as HTTP 429 during runs.
+
 ChatGPT uses the [OpenAI Responses API](https://developers.openai.com/api/docs/guides/text)
 with [JSON output](https://developers.openai.com/api/docs/guides/structured-outputs?api-mode=responses)
 and response storage disabled. `OPENAI_MODEL` defaults to

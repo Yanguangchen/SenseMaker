@@ -531,6 +531,64 @@ def run_analysis(brand: Any, queries: Any, providers: Optional[List[str]] = None
     return combined
 
 
+# --- Provider access check ----------------------------------------------------------
+
+CHECK_QUERY = "best project management software for small teams"
+KEY_SETTINGS = {"gemini": ("GEMINI_KEY", "GEMINI_API_KEY"), "openai": ("OPENAI_API_KEY",)}
+
+
+def check_provider(provider: str) -> Dict[str, Any]:
+    """Confirm the server key meets GenCite's needs with one real, one-query request.
+
+    Checks run in order and stop at the first failure: a key is configured, the
+    GenCite model is available to it, and it returns five structured answers using
+    the same schema, temperature, output budget and thinking setting as an analysis.
+    It cannot show remaining daily quota. The key itself is never returned.
+    """
+    label = provider_label(provider)
+    report: Dict[str, Any] = {"provider": provider, "label": label, "model": provider_model(provider),
+                              "ok": False, "steps": []}
+
+    def step(name: str, ok: bool, detail: str) -> bool:
+        report["steps"].append({"name": name, "ok": ok, "detail": detail})
+        return ok
+
+    setting = next((name for name in KEY_SETTINGS[provider] if get_setting(name)), "")
+    api_key = get_ai_key(provider)
+    if not step("Server key", bool(api_key), f"Found in {setting}." if api_key else
+                f"Not configured. Set {' or '.join(KEY_SETTINGS[provider])} on the server."):
+        return report
+
+    model = report["model"]
+    if provider == "gemini":
+        try:
+            model = resolve_model(api_key, normalize_model_name(model))
+        except Exception as exc:
+            detail = _safe_error(exc, api_key, provider)
+            if isinstance(exc, GeminiError) and exc.status_code is None:
+                detail += (f" Set {MODEL_SETTINGS[provider]} to a model this key can use, "
+                           f"or to {AUTO_MODEL}.")
+            step("Model access", False, detail)
+            return report
+        report["model"] = model.removeprefix("models/")
+        step("Model access", True, f"{report['model']} supports generateContent for this key.")
+
+    started = time.monotonic()
+    try:
+        parsed = _call_json(provider, api_key, model, _analysis_prompt([CHECK_QUERY]), _analysis_schema(1),
+                            temperature=0.9, max_output_tokens=12000, timeout=REQUEST_TIMEOUT_S)
+        if validate_analysis_batch(parsed, 1) is None:
+            raise ValueError(f"{label} answered, but not with GenCite's required structure "
+                             f"({ANSWERS_PER_QUERY} answers per query).")
+    except Exception as exc:
+        step("Structured answers", False, _safe_error(exc, api_key, provider))
+        return report
+    step("Structured answers", True, f"Returned {ANSWERS_PER_QUERY} valid answers in "
+                                     f"{time.monotonic() - started:.1f} s.")
+    report["ok"] = True
+    return report
+
+
 # --- Result summaries -------------------------------------------------------------
 
 def model_breakdown(result: Result) -> List[Dict[str, Any]]:

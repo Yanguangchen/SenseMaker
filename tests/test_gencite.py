@@ -489,5 +489,125 @@ class GenCiteWorkspaceTests(unittest.TestCase):
         self.assertTrue(any("No AI provider is configured" in e.value for e in app.error))
 
 
+def catalogue(*names):
+    return response({"models": [{"name": f"models/{n}", "supportedGenerationMethods": ["generateContent"]}
+                                for n in names]})
+
+
+def batch_reply(answers=5, reply=gemini_reply):
+    return reply({"results": [{"queryIndex": 0, "answers": [f"Answer {i}" for i in range(answers)]}]})
+
+
+def http_error(url, code, message):
+    return HTTPError(url, code, "error", {}, io.BytesIO(json.dumps({"error": {"message": message}}).encode()))
+
+
+class ProviderCheckTests(unittest.TestCase):
+    def setUp(self):
+        for patcher in (patch.dict(os.environ, KEYS), patch("streamlit.secrets", {})):
+            patcher.start()
+            self.addCleanup(patcher.stop)
+
+    def test_gencite_key_name_passes_with_the_exact_analysis_request(self):
+        os.environ.update({"GEMINI_KEY": "", "GEMINI_API_KEY": "private-gemini"})
+        with patch("modules.gemini.urlopen", return_value=catalogue("gemini-2.5-flash-lite", "gemini-2.5-flash")), \
+             patch("modules.processor.urlopen", return_value=batch_reply()) as generate:
+            report = gencite.check_provider("gemini")
+        self.assertTrue(report["ok"], report)
+        self.assertEqual(report["model"], "gemini-2.5-flash")
+        self.assertEqual([s["name"] for s in report["steps"]], ["Server key", "Model access", "Structured answers"])
+        self.assertEqual(report["steps"][0]["detail"], "Found in GEMINI_API_KEY.")
+        sent = generate.call_args.args[0]
+        config = json.loads(sent.data)["generationConfig"]
+        self.assertEqual((config["temperature"], config["maxOutputTokens"], config["thinkingConfig"]),
+                         (0.9, 12000, {"thinkingBudget": 0}))
+        self.assertEqual(config["responseJsonSchema"]["properties"]["results"]["minItems"], 1)
+        self.assertTrue(sent.full_url.endswith("/models/gemini-2.5-flash:generateContent"))
+        self.assertNotIn("private-gemini", repr(report))
+
+    def test_model_missing_from_the_keys_catalogue_stops_before_generation(self):
+        with patch("modules.gemini.urlopen", return_value=catalogue("gemini-3-flash")), \
+             patch("modules.processor.urlopen") as generate:
+            report = gencite.check_provider("gemini")
+        self.assertFalse(report["ok"])
+        self.assertEqual(report["steps"][-1]["name"], "Model access")
+        self.assertIn("models/gemini-2.5-flash is not available", report["steps"][-1]["detail"])
+        self.assertIn("Set GENCITE_GEMINI_MODEL to a model this key can use, or to auto.", report["steps"][-1]["detail"])
+        generate.assert_not_called()
+        with patch.dict(os.environ, {"GENCITE_GEMINI_MODEL": "auto"}), \
+             patch("modules.gemini.urlopen", return_value=catalogue("gemini-3-flash")), \
+             patch("modules.processor.urlopen", return_value=batch_reply()):
+            report = gencite.check_provider("gemini")
+        self.assertTrue(report["ok"])
+        self.assertEqual(report["model"], "gemini-3-flash")
+
+    def test_rejected_key_wrong_structure_and_quota_are_explained_without_the_key(self):
+        rejected = http_error("https://generativelanguage.googleapis.com", 400, "API key not valid: private-gemini")
+        with patch("modules.gemini.urlopen", side_effect=rejected):
+            report = gencite.check_provider("gemini")
+        self.assertIn("Gemini HTTP 400", report["steps"][-1]["detail"])
+        self.assertNotIn("private-gemini", repr(report))
+        cases = [(batch_reply(answers=4), "required structure"),
+                 (http_error("https://generativelanguage.googleapis.com", 429, "Quota exceeded"), "quota or rate limit")]
+        for reply, expected in cases:
+            with self.subTest(expected=expected), \
+                 patch("modules.gemini.urlopen", return_value=catalogue("gemini-2.5-flash")), \
+                 patch("modules.processor.urlopen", side_effect=[reply]):
+                report = gencite.check_provider("gemini")
+                self.assertFalse(report["ok"])
+                self.assertEqual(report["steps"][-1]["name"], "Structured answers")
+                self.assertIn(expected, report["steps"][-1]["detail"])
+
+    def test_chatgpt_and_unconfigured_providers(self):
+        with patch("modules.openai.urlopen", return_value=batch_reply(reply=openai_reply)) as request:
+            report = gencite.check_provider("openai")
+        self.assertTrue(report["ok"])
+        self.assertEqual(json.loads(request.call_args.args[0].data)["model"], "gpt-4.1-mini")
+        os.environ["OPENAI_API_KEY"] = ""
+        report = gencite.check_provider("openai")
+        self.assertEqual(report["steps"], [{"name": "Server key", "ok": False,
+                                            "detail": "Not configured. Set OPENAI_API_KEY on the server."}])
+
+    def test_command_line_check_reports_and_sets_exit_code(self):
+        import contextlib
+        import importlib.util
+        path = Path(__file__).resolve().parents[1] / "scripts" / "check_gencite_providers.py"
+        spec = importlib.util.spec_from_file_location("check_gencite_providers", path)
+        script = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(script)
+        passing = {"label": "Gemini", "model": "gemini-2.5-flash", "ok": True,
+                   "steps": [{"name": "Structured answers", "ok": True, "detail": "Returned 5 valid answers."}]}
+        failing = {**passing, "label": "ChatGPT", "ok": False}
+        for reports, args, expected in (([passing, failing], [], 1), ([passing], ["gemini"], 0), ([], ["x"], 2)):
+            output = io.StringIO()
+            with self.subTest(args=args), patch.object(script, "load_environment"), \
+                 patch.object(script, "check_provider", side_effect=reports), contextlib.redirect_stdout(output):
+                self.assertEqual(script.main(args), expected)
+        self.assertIn("Unknown provider: x", output.getvalue())
+        os.environ.update({"GEMINI_KEY": "", "OPENAI_API_KEY": ""})
+        with patch.object(script, "load_environment"), contextlib.redirect_stdout(io.StringIO()) as output:
+            self.assertEqual(script.main([]), 1)
+        self.assertIn("SKIPPED", output.getvalue())
+
+    def test_workspace_button_shows_each_providers_result(self):
+        stack = [patch("modules.config.load_environment"),
+                 patch("modules.auth.require_access", return_value="editor@example.com"),
+                 patch("modules.database.init_db", return_value=MemoryDB()),
+                 patch("modules.gemini.urlopen", return_value=catalogue("gemini-2.5-flash")),
+                 patch("modules.processor.urlopen", return_value=batch_reply()),
+                 patch("modules.openai.urlopen", side_effect=http_error("https://api.openai.com", 401, "bad key"))]
+        for patcher in stack:
+            patcher.start()
+            self.addCleanup(patcher.stop)
+        app = AppTest.from_file(str(Path(__file__).resolve().parents[1] / "dashboard.py"), default_timeout=30).run()
+        app.button(key="gencite_check_providers").click().run()
+        self.assertFalse(list(app.exception))
+        self.assertTrue(any("Gemini · gemini-2.5-flash** works with GenCite" in s.value for s in app.success))
+        self.assertTrue(any("ChatGPT · gpt-4.1-mini** cannot run GenCite yet" in e.value for e in app.error))
+        visible = str(app) + repr(app.session_state.filtered_state)
+        self.assertNotIn("private-gemini", visible)
+        self.assertNotIn("private-openai", visible)
+
+
 if __name__ == "__main__":
     unittest.main()
