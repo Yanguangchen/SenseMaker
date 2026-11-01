@@ -11,7 +11,7 @@ from streamlit.testing.v1 import AppTest
 from modules.database import upsert_post
 from modules.google_news import (
     NewsError, assess_article, browse_url, build_scan_snapshot, collect_news, daily_flag_counts, parse_feed,
-    search_url,
+    search_jobs, search_url,
 )
 from modules.news_risk import daily_chart_spec, load_news_history, persist_news_scan, risk_chart_spec
 from modules.sentiment_history import build_snapshot, chart_spec
@@ -38,6 +38,7 @@ def article(title, day="2026-10-26", categories=("border_tension",)):
 
 SEARCHES = {"oyoshi": "OYOSHI", "border_tension": "Thailand Cambodia border tension",
             "boycott": "boycott Thailand products Cambodia"}
+KHMER_SEARCHES = {"border_tension": "ថៃ កម្ពុជា", "boycott": "ពហិការ ទំនិញថៃ"}
 
 
 class FeedTests(unittest.TestCase):
@@ -117,6 +118,23 @@ class CollectionTests(unittest.TestCase):
         self.assertEqual(len(warnings), 1)
         self.assertIn("rate limiting", warnings[0]["raw_text"])
         self.assertIn("OYOSHI mentions", warnings[0]["target_url"])
+
+
+    def test_khmer_searches_use_khmer_terms_and_skip_categories_without_them(self):
+        self.assertEqual(search_jobs(SEARCHES, ["km"], KHMER_SEARCHES),
+                         [("border_tension", "ថៃ កម្ពុជា", "km"), ("boycott", "ពហិការ ទំនិញថៃ", "km")])
+        self.assertEqual(search_jobs(SEARCHES, ["km"]), [])
+        queries = []
+
+        def fetch(url):
+            queries.append(parse_qs(urlsplit(url).query)["q"][0])
+            return feed(item("ទាហានថៃ និងកម្ពុជា ប៉ះទង្គិចគ្នា"))
+
+        rows = collect_news({"oyoshi": "OYOSHI"}, window="30d", editions=["km"],
+                            khmer_searches={"border_tension": "ថៃ កម្ពុជា"}, fetch=fetch)
+        self.assertEqual(queries, ["ថៃ កម្ពុជា when:30d"])
+        self.assertEqual(rows[0]["news_edition"], "km")
+        self.assertIn("Escalation", rows[0]["news_assessment"]["flags"])
 
 
 class SnapshotTests(unittest.TestCase):
@@ -220,6 +238,9 @@ class NewsUITests(unittest.TestCase):
             self.assertFalse(list(app.exception))
         self.assertEqual(collect.call_args.args[0], SEARCHES)
         self.assertEqual(collect.call_args.kwargs["window"], "30d")
+        self.assertEqual(collect.call_args.kwargs["editions"], ["en", "th", "km"])
+        self.assertEqual(collect.call_args.kwargs["khmer_searches"], KHMER_SEARCHES)
+        self.assertEqual(persist.call_args.args[1]["khmer_searches"], KHMER_SEARCHES)
         persist.assert_called_once()
         metrics = {m.label: m.value for m in app.metric}
         self.assertEqual(metrics["Articles found"], "7")
@@ -233,6 +254,19 @@ class NewsUITests(unittest.TestCase):
         self.assertEqual(len(app.dataframe[0].value), 7)
         app.selectbox(key="news_show_filter").select("Boycott").run()
         self.assertEqual(len(app.dataframe[0].value), 1)
+
+    def test_khmer_terms_are_only_shown_when_khmer_is_selected(self):
+        with patch("dashboard.collect_news", return_value=[]) as collect, \
+                patch("dashboard._load_news_history", return_value=[]), patch("dashboard.init_db"):
+            app = AppTest.from_string(self.workspace).run()
+            self.assertEqual(app.text_input(key="news_query_km_border_tension").value, "ថៃ កម្ពុជា")
+            app.text_input(key="news_query_km_oyoshi").input("អូយ៉ូស៊ី").run()
+            app.button(key="collect_news_articles").click().run()
+            self.assertEqual(collect.call_args.kwargs["khmer_searches"]["oyoshi"], "អូយ៉ូស៊ី")
+            app.multiselect(key="news_editions").set_value(["en"]).run()
+            self.assertFalse(any(w.key and w.key.startswith("news_query_km_") for w in app.text_input))
+            app.button(key="collect_news_articles").click().run()
+        self.assertEqual(collect.call_args.kwargs["editions"], ["en"])
 
     def test_disabled_categories_are_not_searched(self):
         with patch("dashboard.collect_news", return_value=[]) as collect, \

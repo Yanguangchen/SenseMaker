@@ -37,7 +37,7 @@ from modules.saved_links import library_owner_id, load_saved_links, parse_links,
 from modules.sentiment_history import chart_spec, load_history, persist_analysis_run
 from modules.google_news import (
     EDITIONS, MAX_ARTICLES, NEWS_CATEGORIES, TIME_WINDOWS, browse_url, build_scan_snapshot, collect_news,
-    daily_flag_counts,
+    daily_flag_counts, search_jobs,
 )
 from modules.news_risk import daily_chart_spec, load_news_history, persist_news_scan, risk_chart_spec
 
@@ -1065,31 +1065,44 @@ def _render_news_workspace() -> None:
     st.caption("Searches Google News, the News tab of Google Search, for each watch category and scans every "
                "headline for boycotts and Thailand–Cambodia border tension.")
     with st.container(border=True, key="news_settings"):
+        window_col, edition_col, limit_col = st.columns(3)
+        window = window_col.selectbox("Published", list(TIME_WINDOWS), index=list(TIME_WINDOWS).index("30d"),
+                                      format_func=TIME_WINDOWS.get, key="news_window")
+        editions = edition_col.multiselect("Languages", list(EDITIONS), default=list(EDITIONS),
+                                           format_func=lambda e: EDITIONS[e]["label"], key="news_editions")
+        limit = limit_col.number_input("Articles per search", min_value=10, max_value=MAX_ARTICLES,
+                                       value=50, step=10, key="news_limit")
+        khmer = "km" in editions
         searches: Dict[str, str] = {}
+        khmer_searches: Dict[str, str] = {}
         for key, category in NEWS_CATEGORIES.items():
-            toggle, terms = st.columns([2, 3], vertical_alignment="center")
+            toggle, terms, *khmer_col = st.columns([2, 3, 3] if khmer else [2, 3], vertical_alignment="center")
             enabled = toggle.checkbox(category["label"], value=True, key=f"news_enabled_{key}")
             query = terms.text_input(f"{category['label']} search terms", value=category["query"],
                                      key=f"news_query_{key}", label_visibility="collapsed", disabled=not enabled)
             if enabled and query.strip():
                 searches[key] = query.strip()
-        window_col, edition_col, limit_col = st.columns(3)
-        window = window_col.selectbox("Published", list(TIME_WINDOWS), index=list(TIME_WINDOWS).index("30d"),
-                                      format_func=TIME_WINDOWS.get, key="news_window")
-        editions = edition_col.multiselect("Google News editions", list(EDITIONS), default=list(EDITIONS),
-                                           format_func=lambda e: EDITIONS[e]["label"], key="news_editions")
-        limit = limit_col.number_input("Articles per search", min_value=10, max_value=MAX_ARTICLES,
-                                       value=50, step=10, key="news_limit")
+            if khmer:
+                khmer_query = khmer_col[0].text_input(
+                    f"{category['label']} Khmer search terms", value=category["query_km"],
+                    key=f"news_query_km_{key}", label_visibility="collapsed", disabled=not enabled,
+                    placeholder="Khmer search terms (optional)")
+                if enabled and khmer_query.strip():
+                    khmer_searches[key] = khmer_query.strip()
+        if khmer:
+            st.caption("Khmer searches use the Khmer terms on the right. Google News has little Khmer-language "
+                       "coverage, so these often find few or no articles.")
 
     if st.button("Search Google News", key="collect_news_articles", type="primary", use_container_width=True):
-        if not searches:
+        if not editions:
+            st.error("Choose at least one language.")
+        elif not search_jobs(searches, editions, khmer_searches):
             st.error("Choose at least one category with search terms.")
-        elif not editions:
-            st.error("Choose at least one Google News edition.")
         else:
             progress = st.progress(0, text="Searching Google News…")
             with st.spinner("Scanning news coverage…"):
                 rows = collect_news(searches, window=window, editions=editions, limit=int(limit),
+                                    khmer_searches=khmer_searches,
                                     on_progress=lambda done, total, query: progress.progress(
                                         done / total, text=f"Searched {done} of {total}: {query}"))
             try:
@@ -1097,6 +1110,7 @@ def _render_news_workspace() -> None:
             except Exception:
                 history = []
             snapshot = build_scan_snapshot(rows, searches=searches, window=window, editions=editions,
+                                           khmer_searches=khmer_searches,
                                            previous=history[-1] if history else None)
             saved = False
             if snapshot:
@@ -1107,7 +1121,8 @@ def _render_news_workspace() -> None:
                     logging.getLogger(__name__).exception("News scan snapshot could not be saved")
                 _load_news_history.clear()
             st.session_state["news_scan"] = {"rows": rows, "snapshot": snapshot, "saved": saved,
-                                             "searches": searches, "window": window, "editions": editions}
+                                             "searches": searches, "khmer_searches": khmer_searches,
+                                             "window": window, "editions": editions}
 
     scan = st.session_state.get("news_scan")
     if not scan:
@@ -1138,7 +1153,9 @@ def _render_news_workspace() -> None:
     show_col, category_col = st.columns(2)
     show = show_col.selectbox("Show", ["All articles", "Flagged articles", "Boycott", "Border tension & escalation"],
                               key="news_show_filter")
-    category = category_col.selectbox("Category", ["all"] + list(scan["searches"]), key="news_category_filter",
+    jobs = search_jobs(scan["searches"], scan["editions"], scan.get("khmer_searches"))
+    searched = list(dict.fromkeys(key for key, _, _ in jobs))
+    category = category_col.selectbox("Category", ["all"] + searched, key="news_category_filter",
                                       format_func=lambda c: "All categories" if c == "all" else NEWS_CATEGORIES[c]["label"])
 
     def visible(article: Dict[str, Any]) -> bool:
@@ -1158,10 +1175,9 @@ def _render_news_workspace() -> None:
     else:
         st.info("No articles match this filter.")
     with st.expander("Open these searches in Google News"):
-        for key, query in scan["searches"].items():
-            for edition in scan["editions"]:
-                st.markdown(f"[{NEWS_CATEGORIES[key]['label']} · {EDITIONS[edition]['label']}]"
-                            f"({browse_url(query, scan['window'], edition)})")
+        for key, query, edition in jobs:
+            st.markdown(f"[{NEWS_CATEGORIES[key]['label']} · {EDITIONS[edition]['label']}]"
+                        f"({browse_url(query, scan['window'], edition)})")
     _render_cloud_save(articles, "news_custom_title_value", "save_news_results_btn", noun="articles")
 
 
@@ -1200,7 +1216,7 @@ def _render_news_risk_history() -> None:
                 "De-escalation": row["deescalation_count"], "Boycott": row["boycott_count"],
                 "Articles": row["article_count"],
                 "Window": TIME_WINDOWS.get(row.get("window", ""), row.get("window", "")),
-                "Searches": " | ".join(row.get("searches", {}).values()),
+                "Searches": " | ".join([*row.get("searches", {}).values(), *row.get("khmer_searches", {}).values()]),
             } for row in reversed(rows)]), use_container_width=True, hide_index=True)
 
 
