@@ -12,7 +12,7 @@ import threading
 import time
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Callable
 from urllib.parse import urlsplit
 from uuid import uuid4
 
@@ -118,7 +118,8 @@ def _safe_error(exc: Exception) -> str:
 
 @asynccontextmanager
 async def remote_facebook_context(playwright, email: str, *, timeout_seconds: int = 240,
-                                  on_ready=None, verify_on_exit: bool = True, check_before_use: bool = False):
+                                  on_ready=None, verify_on_exit: bool = True, check_before_use: bool = False,
+                                  confirmed_session: Callable[[], FacebookSession | None] | None = None):
     """Reuse the owner's complete browser profile and persist it before unlocking."""
     if not remote_facebook_configured():
         raise FacebookLoginError("Production Facebook login is not configured yet.")
@@ -150,7 +151,14 @@ async def remote_facebook_context(playwright, email: str, *, timeout_seconds: in
                         raise FacebookLoginError("The remote login window could not be opened. Please try again.")
                     on_ready(url)
                 yield context
-                if verify_on_exit:
+                if confirmed_session is not None:
+                    # Interactive login verifies the visible Facebook page after
+                    # the user finishes. Do not navigate a second tab and close
+                    # the viewer because that fresh page is still loading.
+                    identity = confirmed_session()
+                    if identity is None or identity.status != "connected":
+                        raise FacebookLoginError("Facebook login has not been confirmed yet.")
+                elif verify_on_exit:
                     page = await context.new_page()
                     identity = await _profile_session(page, context)
                     if identity.status != "connected":
@@ -181,6 +189,8 @@ class LoginJob:
     status: str = "starting"
     live_url: str = ""
     error: str = ""
+    notice: str = ""
+    finish: threading.Event = field(default_factory=threading.Event)
     cancel: threading.Event = field(default_factory=threading.Event)
     finished_at: float = 0
 
@@ -199,33 +209,59 @@ async def _login(email: str, job: LoginJob, check_only: bool) -> None:
     from playwright.async_api import Error as BrowserError, async_playwright
 
     async with async_playwright() as p:
+        if check_only:
+            job.status = "checking"
+            # A saved-session check has no interactive viewer to open or close.
+            async with remote_facebook_context(p, email, check_before_use=True, verify_on_exit=False):
+                job.status = "saving"
+            return
+        confirmed = None
         async with remote_facebook_context(p, email, on_ready=lambda url: setattr(job, "live_url", url),
-                                           verify_on_exit=True) as context:
+                                           verify_on_exit=False, confirmed_session=lambda: confirmed) as context:
             page = context.pages[0] if context.pages else await context.new_page()
-            if check_only:
-                identity = await _profile_session(page, context)
-                if identity.status != "connected":
-                    # Expired profiles need an interactive login next time.
-                    _profile_ref(email).update({"needs_login": True}, timeout=15)
-                    raise FacebookLoginError("Your saved Facebook login needs to be renewed. Click Log in to Facebook.")
-            else:
-                try:
-                    await page.goto("https://www.facebook.com/", wait_until="domcontentloaded", timeout=30_000)
-                except BrowserError:
-                    pass  # Let the user finish a slow page load in the live view.
-                job.status = "waiting"
-                deadline = time.monotonic() + LOGIN_SECONDS
-                while time.monotonic() < deadline and not job.cancel.is_set():
+            try:
+                await page.goto("https://www.facebook.com/", wait_until="domcontentloaded", timeout=30_000)
+            except BrowserError:
+                pass  # Let the user finish a slow page load in the live view.
+            job.status = "waiting"
+            deadline = time.monotonic() + LOGIN_SECONDS
+            while time.monotonic() < deadline:
+                if job.cancel.is_set():
+                    raise FacebookLoginError("Facebook login was cancelled. Open the login window to try again.")
+                if not context.browser.is_connected():
+                    raise FacebookLoginError("The remote Facebook login window disconnected. Open it again to continue.")
+                if page.is_closed():
+                    pages = [candidate for candidate in context.pages if not candidate.is_closed()]
+                    if not pages:
+                        raise FacebookLoginError("The Facebook login window was closed. Open it again to continue.")
+                    page = pages[-1]
+                if job.finish.is_set():
+                    job.finish.clear()
+                    job.status = "checking"
+                    job.notice = ""
                     try:
                         identity = await _profile_session(page, context, navigate=False)
                         if identity.status == "connected":
-                            break
+                            # Recheck after redirects/account switches settle. A
+                            # cookie alone never counts as an authenticated page.
+                            await asyncio.sleep(1)
+                            stable = await _profile_session(page, context, navigate=False)
+                            if stable.status == "connected" and stable.user_id == identity.user_id:
+                                if job.cancel.is_set():
+                                    raise FacebookLoginError("Facebook login was cancelled. Open the login window to try again.")
+                                confirmed = stable
+                                job.status = "saving"
+                                job.live_url = ""
+                                break
                     except BrowserError:
-                        pass  # Login redirects replace the page's execution context.
-                    await asyncio.sleep(1)
-                else:
-                    raise FacebookLoginError("Facebook login was cancelled or timed out. Click Log in to Facebook to try again.")
-            job.status = "saving"
+                        pass  # Keep the live view open while a redirect finishes.
+                    job.notice = ("Facebook has not confirmed sign-in yet. Finish any verification in the window, "
+                                  "then click Save Facebook login again.")
+                    job.status = "waiting"
+                await asyncio.sleep(0.5)
+            else:
+                raise FacebookLoginError("The Facebook login window expired after three minutes. "
+                                         "Open it again, finish verification, and click Save Facebook login.")
 
 
 def start_login(email: str, *, check_only: bool = False) -> str:
@@ -246,7 +282,9 @@ def start_login(email: str, *, check_only: bool = False) -> str:
         except Exception as exc:
             job.error = _safe_error(exc)
             job.status = "error"
+            logging.getLogger(__name__).warning("Facebook login job ended with an error (%s)", type(exc).__name__)
         finally:
+            job.live_url = ""
             job.finished_at = time.time()
 
     threading.Thread(target=run, name="facebook-login", daemon=True).start()

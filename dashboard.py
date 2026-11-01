@@ -419,15 +419,29 @@ def _render_remote_facebook_progress(email: str, job_id: str) -> None:
         st.session_state.pop("facebook_login_job", None)
         if job and job.error:
             st.session_state["facebook_login_error"] = job.error
+        elif job and job.status == "complete":
+            st.session_state["facebook_login_notice"] = "Facebook login saved. You can now collect posts."
+        elif job is None:
+            st.session_state["facebook_login_error"] = "The login session ended. Open the Facebook login window again."
         forget_login(email, job_id)
         st.rerun(scope="app")
     if job.status == "saving":
         st.info("Saving your Facebook login…")
     elif job.live_url:
         import streamlit.components.v1 as components
-        st.info("Sign in to Facebook below and complete any verification. Your login will save automatically.")
+        st.info("Finish Facebook sign-in and any verification below, then click Save Facebook login. "
+                "The window stays open for up to three minutes.")
+        if job.notice:
+            st.warning(job.notice)
         components.iframe(job.live_url, height=650, scrolling=True)
         st.link_button("Open login in a new tab", job.live_url)
+        if st.button("Save Facebook login", key="save_remote_facebook_login", type="primary",
+                     disabled=job.status != "waiting" or job.finish.is_set()):
+            job.finish.set()
+        if job.status == "checking" or job.finish.is_set():
+            st.info("Checking your Facebook sign-in…")
+    elif job.status == "checking":
+        st.info("Checking your saved Facebook connection…")
     else:
         st.info("Opening your Facebook login window…")
     if st.button("Cancel Facebook login", key="cancel_remote_facebook_login"):
@@ -435,6 +449,8 @@ def _render_remote_facebook_progress(email: str, job_id: str) -> None:
 
 
 def _render_remote_facebook_connection(email: str, session: FacebookSession) -> FacebookSession:
+    if st.session_state.get("facebook_login_notice"):
+        st.success(st.session_state.pop("facebook_login_notice"))
     if st.session_state.get("facebook_login_error"):
         st.error(st.session_state.pop("facebook_login_error"))
     job_id = st.session_state.get("facebook_login_job")

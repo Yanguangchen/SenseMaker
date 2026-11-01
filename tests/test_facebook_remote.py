@@ -40,6 +40,35 @@ class HostedLoginUITests(unittest.TestCase):
             app.button(key="capture_fb_session_btn").click().run()
             start.assert_not_called()
 
+    def test_save_requests_verification_and_incomplete_login_keeps_viewer_open(self):
+        job = remote.LoginJob(status="waiting", live_url="https://www.browserbase.com/devtools?session=test",
+                              notice="Finish any verification in the window.")
+        with patch("dashboard.IS_CLOUD", True), patch("dashboard.login_job", return_value=job), \
+             patch("modules.auth.verify_access", return_value="editor@example.com"):
+            app = AppTest.from_string(self.script)
+            app.session_state["facebook_login_job"] = "private-job"
+            app.run()
+            self.assertFalse(list(app.exception))
+            self.assertEqual(len(app.get("iframe")), 1)
+            self.assertIn("verification", app.warning[0].value)
+            app.button(key="save_remote_facebook_login").click().run()
+            self.assertTrue(job.finish.is_set())
+            self.assertEqual(len(app.get("iframe")), 1)
+            self.assertTrue(any("Checking your Facebook" in item.value for item in app.info))
+
+    def test_completed_login_removes_viewer_and_confirms_saved(self):
+        job = remote.LoginJob(status="complete")
+        with patch("dashboard.IS_CLOUD", True), patch("dashboard.remote_facebook_configured", return_value=True), \
+             patch("dashboard.login_job", return_value=job), patch("dashboard.forget_login") as forget, \
+             patch("modules.auth.verify_access", return_value="editor@example.com"):
+            app = AppTest.from_string(self.script)
+            app.session_state["facebook_login_job"] = "private-job"
+            app.run()
+            self.assertFalse(list(app.exception))
+            self.assertEqual(len(app.get("iframe")), 0)
+            self.assertIn("login saved", app.success[0].value)
+            forget.assert_called_once_with("editor@example.com", "private-job")
+
 
 class ProfileTests(unittest.TestCase):
     def test_owner_profiles_and_job_handles_are_separate(self):
@@ -94,7 +123,7 @@ class BrowserLifecycleTests(unittest.IsolatedAsyncioTestCase):
         patch("modules.facebook_remote.get_setting", return_value="server-secret").start()
         patch("modules.facebook_remote._acquire", return_value=("private-profile", "lease")).start()
         self.release = patch("modules.facebook_remote._release").start()
-        patch("modules.facebook_remote.asyncio.sleep", new_callable=AsyncMock).start()
+        self.sleep = patch("modules.facebook_remote.asyncio.sleep", new_callable=AsyncMock).start()
         self.bb = MagicMock()
         self.bb.sessions.create = AsyncMock(return_value=SimpleNamespace(id="remote-session", connect_url="wss://private-key"))
         self.bb.sessions.debug = AsyncMock(return_value=SimpleNamespace(
@@ -106,6 +135,15 @@ class BrowserLifecycleTests(unittest.IsolatedAsyncioTestCase):
         self.browser = MagicMock(contexts=[self.context], close=AsyncMock())
         self.playwright = MagicMock()
         self.playwright.chromium.connect_over_cdp = AsyncMock(return_value=self.browser)
+
+    def login_page(self):
+        page = MagicMock(goto=AsyncMock(), is_closed=MagicMock(return_value=False))
+        self.context.pages = [page]
+        self.context.browser = self.browser
+        self.browser.is_connected.return_value = True
+        sdk = MagicMock(__aenter__=AsyncMock(return_value=self.playwright), __aexit__=AsyncMock(return_value=False))
+        patch("playwright.async_api.async_playwright", return_value=sdk).start()
+        return page
 
     async def test_saved_profile_records_no_login_video_or_logs_and_always_releases(self):
         urls = []
@@ -140,6 +178,100 @@ class BrowserLifecycleTests(unittest.IsolatedAsyncioTestCase):
                     self.fail("Logged-out Facebook pages must not be collected")
         self.release.assert_called_once_with("editor@example.com", "lease", FacebookSession())
         self.browser.close.assert_awaited_once()
+
+    async def test_signed_in_viewer_stays_open_until_save_and_uses_that_page_for_verification(self):
+        page = self.login_page()
+        job = remote.LoginJob()
+        identity = FacebookSession("connected", "123", "Alex")
+        waiting_ticks = 0
+        with patch("modules.facebook_remote._profile_session", AsyncMock(return_value=identity)) as inspect:
+            async def tick(seconds):
+                nonlocal waiting_ticks
+                if seconds == 0.5:
+                    waiting_ticks += 1
+                    self.assertEqual(job.status, "waiting")
+                    self.assertTrue(job.live_url)
+                    self.browser.close.assert_not_awaited()
+                    inspect.assert_not_awaited()
+                    if waiting_ticks == 3:
+                        job.finish.set()
+            self.sleep.side_effect = tick
+            await remote._login("editor@example.com", job, False)
+            self.assertEqual(inspect.await_count, 2)
+            inspect.assert_awaited_with(page, self.context, navigate=False)
+        self.assertEqual(waiting_ticks, 3)
+        self.assertEqual(job.status, "saving")
+        self.assertEqual(job.live_url, "")
+        self.context.new_page.assert_not_awaited()
+        self.release.assert_called_once_with("editor@example.com", "lease", identity)
+        self.browser.close.assert_awaited_once()
+
+    async def test_unfinished_verification_does_not_close_the_viewer_and_save_can_be_retried(self):
+        self.login_page()
+        job = remote.LoginJob()
+        job.finish.set()
+        identity = FacebookSession("connected", "123", "Alex")
+        async def tick(seconds):
+            if seconds == 0.5:
+                self.assertEqual(job.status, "waiting")
+                self.assertIn("Finish any verification", job.notice)
+                self.assertTrue(job.live_url)
+                self.browser.close.assert_not_awaited()
+                job.finish.set()
+        self.sleep.side_effect = tick
+        with patch("modules.facebook_remote._profile_session", AsyncMock(side_effect=[FacebookSession(), identity, identity])):
+            await remote._login("editor@example.com", job, False)
+        self.release.assert_called_once_with("editor@example.com", "lease", identity)
+
+    async def test_switching_accounts_must_settle_before_saving(self):
+        self.login_page()
+        job = remote.LoginJob()
+        job.finish.set()
+        first = FacebookSession("connected", "123", "Alex")
+        second = FacebookSession("connected", "456", "Sam")
+        async def tick(seconds):
+            if seconds == 0.5:
+                self.browser.close.assert_not_awaited()
+                self.assertEqual(job.status, "waiting")
+                job.finish.set()
+        self.sleep.side_effect = tick
+        with patch("modules.facebook_remote._profile_session", AsyncMock(side_effect=[first, second, second, second])):
+            await remote._login("editor@example.com", job, False)
+        self.release.assert_called_once_with("editor@example.com", "lease", second)
+
+    async def test_cancel_releases_browser_without_saving_an_unverified_login(self):
+        self.login_page()
+        job = remote.LoginJob()
+        job.cancel.set()
+        with self.assertRaisesRegex(FacebookLoginError, "cancelled"):
+            await remote._login("editor@example.com", job, False)
+        self.browser.close.assert_awaited_once()
+        self.bb.sessions.update.assert_awaited_once()
+        self.release.assert_called_once_with("editor@example.com", "lease", None)
+
+    async def test_disconnected_browser_reports_recovery_and_releases_profile(self):
+        self.login_page()
+        self.browser.is_connected.return_value = False
+        with self.assertRaisesRegex(FacebookLoginError, "disconnected. Open it again"):
+            await remote._login("editor@example.com", remote.LoginJob(), False)
+        self.release.assert_called_once_with("editor@example.com", "lease", None)
+
+    async def test_login_timeout_releases_browser_and_explains_expiry(self):
+        self.login_page()
+        with patch("modules.facebook_remote.LOGIN_SECONDS", 0), self.assertRaisesRegex(FacebookLoginError, "expired"):
+            await remote._login("editor@example.com", remote.LoginJob(), False)
+        self.browser.close.assert_awaited_once()
+        self.bb.sessions.update.assert_awaited_once()
+        self.release.assert_called_once_with("editor@example.com", "lease", None)
+
+    async def test_saved_connection_is_checked_once_without_opening_an_interactive_viewer(self):
+        self.login_page()
+        identity = FacebookSession("connected", "123", "Alex")
+        with patch("modules.facebook_remote._profile_session", AsyncMock(return_value=identity)) as inspect:
+            await remote._login("editor@example.com", remote.LoginJob(), True)
+            inspect.assert_awaited_once()
+        self.bb.sessions.debug.assert_not_awaited()
+        self.release.assert_called_once_with("editor@example.com", "lease", identity)
 
 
 if __name__ == "__main__":

@@ -337,8 +337,10 @@ Only run this project's infrastructure plan against the dedicated SenseMaker pro
 Hosted Facebook login uses Browserbase. Set `BROWSERBASE_API_KEY` and
 `BROWSERBASE_PROJECT_ID` explicitly in Railway Variables; Marketplace-provided
 settings from the previous host are not copied automatically. **Log in to Facebook** opens an interactive browser in
-the app; finish Facebook's sign-in and any verification there. The login saves
-automatically. Each approved Google account has its own persistent Browserbase
+the app; finish Facebook's sign-in and any verification there, then click
+**Save Facebook login**. The viewer stays open if verification is incomplete.
+After saving, the viewer closes and the app confirms that login is saved.
+Each approved Google account has its own persistent Browserbase
 profile; Firestore stores only the profile ID and connection metadata in
 `sensemaker_facebook_profiles/{owner_hash}`. Browser recordings and session logs
 are disabled. Login windows close after about three minutes or on cancellation.
