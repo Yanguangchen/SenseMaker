@@ -169,6 +169,7 @@ class ProviderUITests(unittest.TestCase):
              patch("modules.openai.urlopen", return_value=response(completed(result_text()))) as request, \
              patch("modules.processor._generate_content") as gemini:
             app = AppTest.from_file(str(Path(__file__).resolve().parents[1] / "dashboard.py"), default_timeout=30)
+            app.run()
             app.session_state["firestore_rows"] = [{"_id": "a", "raw_text": "Hello", "status": "pending"}]
             app.run()
             app.selectbox(key="ai_provider").select("openai").run()

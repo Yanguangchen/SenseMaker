@@ -1,11 +1,13 @@
 // Firebase Authentication only. All database access stays on the Python server.
 const button = document.getElementById("sign-in");
 const message = document.getElementById("message");
+button.textContent = "Connecting to SenseMaker…";
 // This component is served by the app itself. Never send Firebase tokens to a
 // different origin that happens to embed its URL.
 const parentOrigin = new URL(location.href).origin;
 const send = (type, extra = {}) => parent.postMessage(
-  { isStreamlitMessage: true, type, ...extra }, parentOrigin,
+  { isStreamlitMessage: true, type, ...extra },
+  type === "streamlit:setComponentValue" ? parentOrigin : "*",
 );
 const resize = () => send("streamlit:setFrameHeight", { height: document.body.scrollHeight + 4 });
 const publish = (value) => send("streamlit:setComponentValue", {
@@ -15,6 +17,7 @@ let initializing = false;
 let firebaseAuth;
 let lastToken;
 let popupPending = false;
+let readyTimer;
 
 async function initialize(config, clearSession) {
   if (initializing) return;
@@ -120,9 +123,14 @@ async function initialize(config, clearSession) {
 window.addEventListener("message", (event) => {
   if (event.source !== parent || event.origin !== parentOrigin) return;
   if (event.data?.type === "streamlit:render") {
+    clearInterval(readyTimer);
     initialize(event.data.args.config, event.data.args.clear_session);
   }
 });
 window.addEventListener("resize", resize);
-send("streamlit:componentReady", { apiVersion: 1 });
+// Cached assets can execute before Streamlit attaches the iframe's message
+// listener. Retry the handshake until the first render acknowledges readiness.
+const announceReady = () => send("streamlit:componentReady", { apiVersion: 1 });
+announceReady();
+readyTimer = setInterval(announceReady, 500);
 resize();

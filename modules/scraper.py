@@ -6,6 +6,7 @@ import asyncio
 import hashlib
 import os
 import random
+from contextlib import AsyncExitStack
 from datetime import datetime, timezone
 from typing import Any, Awaitable, Callable, Dict, List, Optional
 from urllib.parse import parse_qs, urljoin, urlparse
@@ -409,6 +410,7 @@ async def scrape_group(
     scroll_max: int = 10,
     reddit_limit: int = 50,
     reddit_comments: int = 20,
+    facebook_owner: str | None = None,
 ) -> List[PostData]:
     """Route Reddit to its API; use browser collection for existing web sources."""
     if is_reddit_url(target_url):
@@ -428,8 +430,16 @@ async def scrape_group(
     seen_urls: set[str] = set()
     host = (urlparse(target_url).hostname or "").lower()
     is_facebook = host in {"facebook.com", "fb.com"} or host.endswith(".facebook.com")
-    async with async_playwright() as p:
-        if is_facebook:
+    remote = is_facebook and bool(facebook_owner)
+    if is_facebook and os.getenv("SENSEMAKER_HOSTED") == "1" and not remote:
+        from modules.facebook_session import FacebookLoginError
+        raise FacebookLoginError("Sign in to SenseMaker and connect Facebook before collecting posts.")
+    async with async_playwright() as p, AsyncExitStack() as resources:
+        if remote:
+            from modules.facebook_remote import remote_facebook_context
+            context = await resources.enter_async_context(
+                remote_facebook_context(p, facebook_owner, check_before_use=True))
+        elif is_facebook:
             browser = await launch_facebook_browser(p, headless=headless)
             storage_state = facebook_storage_path()
             revision = facebook_state_revision(storage_state)
@@ -439,7 +449,8 @@ async def scrape_group(
             context_kwargs = {"user_agent": random.choice(USER_AGENTS)}
             if os.getenv("PLAYWRIGHT_STORAGE_STATE"):
                 context_kwargs["storage_state"] = os.environ["PLAYWRIGHT_STORAGE_STATE"]
-        context = await browser.new_context(**context_kwargs)
+        if not remote:
+            context = await browser.new_context(**context_kwargs)
         page = await context.new_page()
 
         try:
@@ -519,7 +530,7 @@ async def scrape_group(
                 collected.append(_build_emergency_fallback(target_url, reason=str(exc)))
         finally:
             try:
-                if is_facebook:
+                if is_facebook and not remote:
                     # Facebook renews its cookies during use; keep that renewal
                     # for the next run instead of going back to the login snapshot.
                     await save_facebook_session(context, storage_state, revision,
@@ -529,8 +540,9 @@ async def scrape_group(
                 # or discard collection results that are already available.
                 print("[scraper] Could not update the saved Facebook session; the previous session was kept.")
             finally:
-                await context.close()
-                await browser.close()
+                if not remote:
+                    await context.close()
+                    await browser.close()
 
     if not collected:
         collected.append(_build_emergency_fallback(target_url))

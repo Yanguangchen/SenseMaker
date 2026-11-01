@@ -41,13 +41,18 @@ class DashboardAccessTests(unittest.TestCase):
             verify.assert_called_once_with("signed-token", {"editor@example.com"})
 
     @patch.dict(os.environ, {"SENSEMAKER_HOSTED": "1"})
-    def test_hosted_deployment_keeps_browsers_headless_and_disables_interactive_login(self):
+    def test_hosted_deployment_enables_configured_remote_login_and_keeps_collection_headless(self):
         self.component.return_value = lambda **kwargs: {"id_token": "signed-token", "event_id": "login"}
-        with patch("modules.auth.verify_access", return_value="editor@example.com"):
+        from modules.facebook_session import FacebookSession
+        with patch("modules.auth.verify_access", return_value="editor@example.com"), \
+             patch("dashboard.IS_CLOUD", True), \
+             patch("modules.facebook_remote.remote_facebook_configured", return_value=True), \
+             patch("modules.facebook_remote.remote_facebook_session", return_value=FacebookSession()):
             app = self.run_dashboard()
             self.assertTrue(app.checkbox[0].value)
             self.assertTrue(app.checkbox[0].disabled)
-            self.assertTrue(app.button(key="capture_fb_session_btn").disabled)
+            self.assertFalse(app.button(key="capture_fb_session_btn").disabled)
+            self.assertTrue(app.button(key="collect_facebook_posts").disabled)
 
     def test_denied_identity_loses_loaded_records_and_sees_no_tabs(self):
         # A new component instance after denial must not replay the rejected token.

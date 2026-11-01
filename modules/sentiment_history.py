@@ -77,6 +77,13 @@ def persist_analysis_run(
         run_id=uuid4().hex, completed_at=completed_at, selected_count=len(posts),
         provider=provider, targets=targets,
     )
+    if snapshot:
+        # Preserve source provenance at the time of analysis. Old run summaries
+        # without this metadata remain available in the full research library.
+        snapshot["record_sources"] = [
+            {field: post.get(field, "") for field in ("url", "target_url", "source_type")}
+            for post in posts if analyses_by_id.get(post["_id"])
+        ]
     batch = db.batch()
     collection = db.collection(_get_collection_name())
     for key in ids:

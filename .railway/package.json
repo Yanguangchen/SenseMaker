@@ -1,0 +1,8 @@
+{
+  "name": "sensemaker-infrastructure",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "railway": "3.16.0"
+  }
+}

@@ -1,6 +1,6 @@
 # SenseMaker (Project Sentinel MVP)
 
-Social listening prototype for monitoring migrant worker well-being content from social platforms.
+Social listening workspace for monitoring Thailand-related discussion, border tensions and boycott signals.
 
 The dashboard requires Google sign-in. Access is limited to verified accounts in
 `FAQ_EDITOR_EMAILS`, using the same Firebase project and approved-user list as OYOSHI.
@@ -31,7 +31,7 @@ server environment variables take precedence over both files. Empty environment
 values are filled from these files on rerun. Restart the app when changing an
 already-loaded key or other setting.
 
-For hosted deployments, set the same variables in Vercel environment settings or
+For hosted deployments, set the same variables in Railway Variables or
 top-level Streamlit Secrets. Keys stay on the server and are never populated into
 page widgets. Both providers use the same batching, evidence validation and retry
 logic; saved analyses include `provider` and `model`.
@@ -148,6 +148,20 @@ SenseMaker/
 
 ## Thailand tensions and boycott watch
 
+Sentiment Analysis defaults to **Current sources**: the signed-in account's saved
+Facebook sources, r/cambodia and articles saved from Online News. Records load newest
+first, with source filtering applied before the load limit. **All saved records
+(including older sources)** explicitly includes the earlier research library.
+Changing sources clears loaded records, selections and previous results. The old
+records remain in Firestore; they are not deleted or reclassified by language.
+The sentiment timeline uses the same source selection. New analysis runs record
+their source links; older runs without that metadata and mixed-source runs remain
+available under all saved records, rather than contributing to current-source averages.
+
+If the current sources have no saved records yet, collect and save their posts (or
+save Online News articles) before loading Sentiment Analysis. Saving source links
+alone does not collect any posts.
+
 The **Sentiment Analysis** tab now assesses Thailand-related discussion in English,
 Khmer and Thai. Enter Thai-linked project, company or brand names and their aliases
 (one per line), or leave the watchlist empty for Thailand generally. Each analysis
@@ -203,7 +217,7 @@ Recollecting edited text resets its analysis to pending. Records not encountered
 are not automatically refreshed or checked for deletion; this is not a retention service.
 
 Live access requires an approved Reddit app. Configure these server settings in
-`.env`, Streamlit Secrets or Vercel production Secrets:
+`.env`, Streamlit Secrets or Railway Variables:
 
 ```env
 REDDIT_CLIENT_ID=...
@@ -261,38 +275,103 @@ point, and red rings mark searches and analysis runs that found border-tension o
 the terms when needed. Google's feed is intended for personal, non-commercial use; check its
 terms for your use case.
 
-## Deploy to Vercel
+## Deploy to Railway
 
-The production app is [sensemaker-psi.vercel.app](https://sensemaker-psi.vercel.app).
-The Vercel project is `sensemaker` in `yanguangchens-projects`. It uses Vercel's
-[Container Runtime](https://vercel.com/docs/functions/runtimes/container) (beta)
-to run the existing Streamlit server on port 80. `Dockerfile.vercel` installs the
-tested Python versions from `requirements-vercel.txt` and Chromium for headless
-web collection. Local credentials, virtual environments and Facebook sessions
-are excluded from the upload and container image.
+Production: **https://sensemaker-production.up.railway.app/**
 
-Configure the top-level Firebase settings from `.streamlit/secrets.toml.example`
-as production Vercel environment variables, with `FIREBASE_CLIENT_EMAIL` and
-`FIREBASE_PRIVATE_KEY` instead of the `[firebase]` table. Store credentials as
-Secret variables. Add the production hostname to Firebase Authentication's
-authorized domains. Configure `GEMINI_KEY` and `OPENAI_API_KEY` on the server to
-enable both providers; users do not enter keys in the UI.
+Railway is the container host for SenseMaker. The root `Dockerfile` installs the
+tested Python versions from `requirements-hosted.txt` and Chromium for headless
+collection. `hosted.py` runs Streamlit on `0.0.0.0:$PORT` (8080 locally) and registers
+Google sign-in assets before accepting requests. `.railway/railway.ts` selects the Dockerfile
+builder, checks `/_stcore/health`, restarts failed processes, and keeps one replica awake
+for Streamlit's WebSocket sessions. Local credentials, virtual environments and Facebook
+sessions are excluded by `.railwayignore`, `.dockerignore` and explicit Dockerfile copies.
+
+1. Create or select a Railway project and a service named `sensemaker`.
+2. In the service's **Variables**, configure the top-level values from `.env.example`.
+   Keep the existing Firebase project, collection and `FAQ_EDITOR_EMAILS` allowlist.
+   Use `FIREBASE_CLIENT_EMAIL` and `FIREBASE_PRIVATE_KEY` for server credentials;
+   leave `FIREBASE_CREDENTIALS` unset because local credential files are not uploaded.
+   The private key accepts real newlines or literal `\n` escapes.
+3. Set `GEMINI_KEY`, `OPENAI_API_KEY`, any configured Reddit credentials, and both
+   Browserbase variables. These are runtime variables, not Docker build arguments.
+4. Install the infrastructure SDK, link the CLI to the project, review and apply the
+   infrastructure plan using the commands below. Railway builds `Yanguangchen/SenseMaker`
+   from `main`, with the repository root as its source directory. Commit and push the
+   root `Dockerfile`, `hosted.py`, hosted requirements and application changes before deploying.
+5. Generate a Railway domain under **Settings → Networking**. Add its hostname
+   (without `https://` or a path) to Firebase Authentication's **Authorized domains**.
+   Keep `FIREBASE_AUTH_DOMAIN` pointing at the existing Firebase auth domain.
+6. Verify the health endpoint, Google sign-in with an approved account, and collection.
 
 ```sh
-vercel link --project sensemaker --scope yanguangchens-projects
-vercel --prod
+npx @railway/cli login
+npm ci --prefix .railway
+npx @railway/cli link --project 3559f5bf-b605-4dc5-bc1f-e5cdbdc79b4e --environment production
+npx @railway/cli config plan
+npx @railway/cli config apply
+npx @railway/cli domain --service sensemaker
 ```
 
-Hosted collection runs headlessly. Interactive Facebook login is available only
-when running SenseMaker on your own computer. Vercel's function duration and
-scale-to-zero limits also apply to WebSocket sessions: reconnects restore Google
-login from the browser, and long collections must fit within the hosting limits.
-Saved links and collected posts persist in Firestore when a container restarts.
+For a local container smoke check with Docker installed:
+
+```sh
+docker build -t sensemaker .
+docker run --rm -p 8080:8080 -e PORT=8080 sensemaker
+curl --fail http://localhost:8080/_stcore/health
+```
+
+The local smoke check needs no credentials; configure runtime variables to use the app.
+Production runs in the [SenseMaker Railway project](https://railway.com/project/3559f5bf-b605-4dc5-bc1f-e5cdbdc79b4e),
+on the `sensemaker` service in `production`. Pushing to GitHub's `main` branch triggers
+a Railway deployment. The Git archive contains application source only; local virtual
+environments are ignored and are not tracked. A manual `railway up --service sensemaker
+--environment production` upload does not commit files to GitHub, so it cannot fix a
+missing-file error in a subsequent GitHub build.
+Railway settings use [Infrastructure as Code](https://docs.railway.com/infrastructure-as-code),
+applied explicitly through the CLI; Railway does not apply `.railway/` during an app upload.
+New services cannot use the retired `railway.json`/`railway.toml` format.
+Credentials remain managed in Railway Variables and are preserved by infrastructure changes.
+Only run this project's infrastructure plan against the dedicated SenseMaker project.
+
+Hosted Facebook login uses Browserbase. Set `BROWSERBASE_API_KEY` and
+`BROWSERBASE_PROJECT_ID` explicitly in Railway Variables; Marketplace-provided
+settings from the previous host are not copied automatically. **Log in to Facebook** opens an interactive browser in
+the app; finish Facebook's sign-in and any verification there. The login saves
+automatically. Each approved Google account has its own persistent Browserbase
+profile; Firestore stores only the profile ID and connection metadata in
+`sensemaker_facebook_profiles/{owner_hash}`. Browser recordings and session logs
+are disabled. Login windows close after about three minutes or on cancellation.
+Facebook tasks using the same profile run one at a time. Provider free-plan
+usage limits apply. Local Facebook login continues to open Chrome on your computer.
+
+Saved links, collected posts and Browserbase profile metadata remain in Firestore;
+no database migration or Railway volume is needed. Container restarts can interrupt
+in-progress work. Browser sign-in is restored on reconnect, while unsaved Streamlit
+session state can be lost. Collection and analysis retain their existing time budgets.
+
+### Vercel retirement
+
+Do not deploy this application to Vercel. `vercel.json` remains only to
+[disable automatic Git deployments](https://vercel.com/docs/project-configuration/git-configuration)
+on every branch. The Vercel Dockerfile and dependency file have been replaced.
+The old Vercel project's Git connection has been disconnected, so older branches
+cannot trigger deployments. Railway is deployed, but the old Vercel project still
+needs to be paused: Vercel's CLI requires a person to type the project name in an
+interactive terminal and refuses automated confirmation. Run:
+
+```sh
+vercel project pause sensemaker --scope yanguangchens-projects
+```
+
+Type `sensemaker` when prompted. Pausing stops production traffic and function usage;
+it retains the old deployments. The old `sensemaker-psi.vercel.app` hostname belongs
+to Vercel and does not become the Railway URL. Use the Railway production link above.
 
 ## Deploy to Streamlit Community Cloud
 
-This alternative deployment supports Firestore and Gemini/ChatGPT processing. Collection
-and interactive Facebook login run locally.
+This alternative deployment supports Firestore and Gemini/ChatGPT processing.
+Hosted Facebook login and collection require the Browserbase settings described above.
 
 ### 1) Push to GitHub
 

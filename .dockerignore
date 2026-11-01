@@ -3,6 +3,10 @@
 .firebase
 .venv
 .venv-mac
+.venv*
+.pytest_cache
+.DS_Store
+**/node_modules
 .env
 .env.*
 .streamlit/secrets.toml

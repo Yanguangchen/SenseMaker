@@ -14,6 +14,7 @@ async function mount(storage = {}, clearSession = false, renderOrigin = "https:/
   const button = { disabled: true, textContent: "" };
   const message = { textContent: "" };
   const events = [];
+  const readyMessages = [];
   const listeners = {};
   const timers = [];
   const auth = { currentUser: null };
@@ -50,6 +51,7 @@ async function mount(storage = {}, clearSession = false, renderOrigin = "https:/
   };
   const parent = { postMessage: (data) => {
     if (data.type === "streamlit:setComponentValue") events.push(data.value);
+    if (data.type === "streamlit:componentReady") readyMessages.push(data);
   } };
   let id = 0;
   const context = vm.createContext({
@@ -61,7 +63,12 @@ async function mount(storage = {}, clearSession = false, renderOrigin = "https:/
       addEventListener: (name, callback) => { listeners[name] = callback; },
     },
     window: { addEventListener: (name, callback) => { listeners[name] = callback; } },
-    setInterval: (callback, delay) => { timers.push({ callback, delay }); },
+    setInterval: (callback, delay) => {
+      const timer = { callback, delay, cleared: false };
+      timers.push(timer);
+      return timer;
+    },
+    clearInterval: timer => { if (timer) timer.cleared = true; },
   });
   const modules = {};
   const script = new vm.Script(source, {
@@ -84,7 +91,8 @@ async function mount(storage = {}, clearSession = false, renderOrigin = "https:/
   });
   render(renderOrigin);
   await settle();
-  return { auth, sdk, button, message, events, listeners, timers, render,
+  return { auth, sdk, button, message, events, readyMessages, listeners, render,
+    get timers() { return timers.filter(timer => !timer.cleared); },
     popupCount: () => popupCount, persistence: () => persistence,
     notify: () => observer(auth.currentUser) };
 }
@@ -216,7 +224,20 @@ test("double clicks cannot open competing Google popups", async () => {
 test("a foreign embedding page cannot initialize authentication", async () => {
   const component = await mount({ user: user() }, false, "https://untrusted.example");
   assert.equal(component.events.length, 0);
-  assert.equal(component.timers.length, 0);
+  assert.equal(component.timers.length, 1);
+  assert.equal(component.timers[0].delay, 500);
   assert.equal(component.popupCount(), 0);
   assert.equal(component.button.disabled, true);
+});
+
+test("a missed ready message is retried until Streamlit acknowledges with a render", async () => {
+  const component = await mount({}, false, "https://untrusted.example");
+  assert.equal(component.readyMessages.length, 1);
+  component.timers[0].callback();
+  assert.equal(component.readyMessages.length, 2);
+  component.render();
+  await settle();
+  assert.equal(component.button.disabled, false);
+  assert.equal(component.timers.length, 1);
+  assert.equal(component.timers[0].delay, 300000);
 });

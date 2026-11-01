@@ -137,6 +137,7 @@ class GeminiSettingsTests(unittest.TestCase):
              patch("modules.database.init_db"), patch("modules.sentiment_history.persist_analysis_run") as save, \
              patch("modules.processor.resolve_model", side_effect=GeminiError("Gemini HTTP 404: Model unavailable.")):
             app = AppTest.from_file(str(Path(__file__).resolve().parents[1] / "dashboard.py"))
+            app.run()
             app.session_state["firestore_rows"] = [{"_id": "a", "raw_text": "A Thai project", "status": "processed"}]
             app.run()
             self.assertFalse(any("API key" in e.label for e in app.text_input))

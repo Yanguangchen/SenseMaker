@@ -233,12 +233,15 @@ class TimelineUITests(unittest.TestCase):
                                      "PLAYWRIGHT_STORAGE_STATE": "/tmp/sensemaker-no-session-for-chart-test.json"}), \
                 patch("modules.config.load_environment"), \
                 patch("modules.auth.require_access", return_value="editor@example.com"), \
+                patch("modules.saved_links.load_saved_links", return_value=[]), \
                 patch("modules.database.init_db", return_value=db), \
                 patch("modules.processor.analyze_posts", side_effect=[
                     {"a": {"sentiment": "Anger"}}, {"a": {"sentiment": "Joy"}},
                 ]):
             app = AppTest.from_file(path)
-            app.session_state["firestore_rows"] = [{"_id": "a", "raw_text": "Example"}]
+            app.run()
+            app.session_state["firestore_rows"] = [{"_id": "a", "raw_text": "Example",
+                                                   "url": "https://www.reddit.com/r/cambodia/comments/a/"}]
             app.run()
             for expected_count in (1, 2):
                 app.button(key="run_analysis_selected_btn").click().run()

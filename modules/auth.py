@@ -11,6 +11,7 @@ from typing import Any
 from firebase_admin import auth
 
 from modules.config import get_setting
+from modules.component_assets import sign_in_component_path
 from modules.database import init_firebase
 
 _SIGN_IN_INTRO = """
@@ -74,15 +75,15 @@ def _clear_session(message: str = "") -> None:
     st.session_state["auth_reset_browser"] = True
 
 
-def require_access() -> str:
-    """Stop every dashboard rerun until the current account is authorized."""
+def require_access() -> str | None:
+    """Return an approved identity, or None while the sign-in UI initializes."""
     import streamlit as st
     import streamlit.components.v1 as components
 
     config = web_config()
     emails = allowed_emails()
     sign_in = components.declare_component(
-        "sensemaker_google_sign_in", path=str(Path(__file__).parent / "google_sign_in")
+        "sensemaker_google_sign_in", path=sign_in_component_path()
     )
     # Firebase keeps its initial API key for the lifetime of the iframe. Remount
     # when public settings change, including replacing a setup placeholder.
@@ -95,7 +96,7 @@ def require_access() -> str:
         if not all(config.values()) or not emails:
             _show_sign_in_screen()
             st.error("Sign-in is not configured. Ask the app administrator to finish setup.")
-            st.stop()
+            return None
         event: Any = sign_in(
             config=config,
             clear_session=st.session_state.get("auth_reset_browser", False),
@@ -122,7 +123,7 @@ def require_access() -> str:
         with gateway:
             if st.session_state.get("auth_message"):
                 st.error(st.session_state["auth_message"])
-        st.stop()
+        return None
 
     try:
         email = verify_access(token, emails)
@@ -146,7 +147,7 @@ def require_access() -> str:
             st.error("Sign-in verification is temporarily unavailable. Please retry.")
             if st.button("Retry sign-in verification"):
                 st.rerun()
-        st.stop()
+        return None
 
     previous_email = st.session_state.get("auth_email")
     if previous_email and previous_email != email:

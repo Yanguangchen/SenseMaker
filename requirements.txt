@@ -3,3 +3,4 @@ playwright
 firebase-admin
 streamlit
 certifi
+browserbase==1.23.0

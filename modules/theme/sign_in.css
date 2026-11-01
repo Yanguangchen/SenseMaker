@@ -20,6 +20,12 @@
   margin: 0 0 16px; padding: 0; background: none; -webkit-text-fill-color: initial; }
 .st-key-auth_gateway .sm-login-description { color: #b5b9d1; font-size: 16px; line-height: 1.65; margin: 0 0 20px; }
 .st-key-auth_gateway [data-testid="stCaptionContainer"] { color: #9ca4c7; text-align: center; font-size: 12px; }
+/* Some browsers defer hidden iframes. Keep the signed-out component visible
+   while it initializes so Streamlit can receive its readiness handshake. */
+.st-key-auth_gateway iframe[data-testid="stCustomComponentV1"] {
+  display: block !important;
+  min-height: 70px;
+}
 @media (max-width: 480px) {
   [data-testid="stMainBlockContainer"] { padding-inline: 16px !important; padding-top: 44px !important; }
   .sm-login-brand { margin-bottom: 32px; }

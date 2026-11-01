@@ -17,6 +17,7 @@ import pandas as pd
 import streamlit as st
 
 from modules.auth import require_access
+from modules.analysis_library import select_history, select_records, source_key
 from modules.navigation import dashboard_views
 from modules.ai_errors import AIError, redact
 from modules.config import AI_PROVIDERS, get_ai_key, get_ai_model, get_ai_provider, get_setting, load_environment
@@ -29,6 +30,9 @@ from modules.facebook_session import (
     check_facebook_session,
     facebook_storage_path,
     saved_facebook_session,
+)
+from modules.facebook_remote import (
+    forget_login, login_job, remote_facebook_configured, remote_facebook_session, start_login,
 )
 from modules.processor import analyze_posts
 from modules.gemini import AUTO_MODEL, GeminiError, list_text_models, normalize_model_name
@@ -82,18 +86,53 @@ def _write_results_to_firestore(posts: List[Dict[str, Any]], custom_title: str) 
     return {"inserted": inserted, "skipped": skipped}
 
 
-def _fetch_firestore_posts(status_filter: str, limit: int) -> List[Dict[str, Any]]:
+def _fetch_firestore_posts(
+    status_filter: str, limit: int, source_urls: list[str] | None = None,
+) -> List[Dict[str, Any]]:
     db = init_db()
-    query = db.collection(get_setting("FIREBASE_COLLECTION", "raw_posts")).limit(limit)
+    query = db.collection(get_setting("FIREBASE_COLLECTION", "raw_posts"))
     if status_filter != "all":
         query = query.where("status", "==", status_filter)
-    docs = query.stream()
+    docs = query.stream(timeout=30)
     rows: List[Dict[str, Any]] = []
     for doc in docs:
         item = doc.to_dict() or {}
         item["_id"] = doc.id
         rows.append(item)
-    return rows
+    return select_records(rows, source_urls=source_urls, limit=limit)
+
+
+def _render_analysis_sources(user_email: str) -> tuple[list[str] | None, bool]:
+    scope = st.selectbox("Record sources", ["Current sources", "All saved records (including older sources)"],
+                         key="analysis_source_scope")
+    sources: list[str] | None = None
+    ready = True
+    if scope == "Current sources":
+        library = st.session_state.get(f"saved_links_{library_owner_id(user_email)}_facebook", {})
+        ready = bool(library) and not library.get("error", False)
+        sources = sorted(set([CAMBODIA_URL] + library.get("urls", []))) if ready else []
+        st.caption("Uses your saved Facebook sources, r/cambodia and saved Online News articles. "
+                   "Older groups appear only when you choose all saved records. Newest collected records load first.")
+        if not ready:
+            st.warning("Your source library could not be loaded. Refresh saved links in Scrape Data → Facebook, "
+                       "then try again.")
+        elif sources:
+            with st.expander("Current analysis sources"):
+                st.code("\n".join(sources))
+                st.caption("Plus articles you save from Online News.")
+    else:
+        st.warning("This includes previous research from sources outside your current saved list.")
+    context = (get_setting("FIREBASE_COLLECTION", "raw_posts"), scope, ready,
+               tuple(sorted(source_key(url) for url in (sources or []))))
+    if st.session_state.get("analysis_library_context") != context:
+        # Includes sessions created before source selection existed. No stale rows
+        # or prior AI results can survive a change of source library.
+        for key in ("firestore_rows", "processed_rows", "analysis_last_results", "gemini_last_results",
+                    "firestore_load_error", "firestore_last_load_count", "analysis_record_selection",
+                    "processed_delete_selection", "processed_delete_pending", "processed_delete_notice"):
+            st.session_state.pop(key, None)
+        st.session_state["analysis_library_context"] = context
+    return sources, ready
 
 
 def _process_selected_firestore_posts(
@@ -154,7 +193,7 @@ def _load_sentiment_history() -> list[dict[str, Any]]:
     return load_history(init_db())
 
 
-def _render_sentiment_history() -> None:
+def _render_sentiment_history(source_urls: list[str] | None = None) -> None:
     with st.container(border=True, key="sentiment_history"):
         st.subheader("Sentiment over time")
         st.caption("One point per AI analysis and per Online News search · Higher is more positive · "
@@ -167,6 +206,11 @@ def _render_sentiment_history() -> None:
         except Exception:
             st.warning("Sentiment history could not be loaded. Refresh the timeline to try again.")
             return
+        visible_analysis = select_history(analysis_rows, source_urls)
+        if len(visible_analysis) < len(analysis_rows):
+            st.caption("Previous runs from other or unrecorded sources are hidden. "
+                       "Choose all saved records in Sentiment Analysis to view the full history.")
+        analysis_rows = visible_analysis
         try:
             news_rows = news_sentiment_rows(_load_news_history())
         except Exception:
@@ -279,12 +323,14 @@ def _run_multi_scrape_sync(
     concurrency: int = 3,
     on_progress: Optional[Callable[[int, int, str], None]] = None,
     reddit_limit: int = 50, reddit_comments: int = 20,
+    facebook_owner: str | None = None,
 ) -> List[Dict[str, Any]]:
     if sys.platform.startswith("win") and hasattr(asyncio, "WindowsProactorEventLoopPolicy"):
         asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
 
     async def _runner() -> List[Dict[str, Any]]:
-        semaphore = asyncio.Semaphore(max(1, concurrency))
+        # Persistent remote profiles must not be opened concurrently.
+        semaphore = asyncio.Semaphore(1 if facebook_owner else max(1, concurrency))
         completed = 0
 
         async def scrape_one(url: str) -> List[Dict[str, Any]]:
@@ -295,6 +341,7 @@ def _run_multi_scrape_sync(
                     scroll_min=scroll_times,
                     scroll_max=scroll_times,
                     reddit_limit=reddit_limit, reddit_comments=reddit_comments,
+                    **({"facebook_owner": facebook_owner} if facebook_owner else {}),
                 )
                 # Preserve which input URL produced each row.
                 for row in rows:
@@ -355,7 +402,74 @@ def _facebook_storage_path() -> str:
     return facebook_storage_path()
 
 
-def _render_facebook_connection(session: Optional[FacebookSession] = None) -> FacebookSession:
+@st.fragment(run_every=2)
+def _render_remote_facebook_progress(email: str, job_id: str) -> None:
+    # Fragment reruns bypass main(), so recheck the signed-in identity here too.
+    from modules.auth import allowed_emails, verify_access
+    try:
+        if verify_access(st.session_state.get("auth_token", ""), allowed_emails()) != email:
+            raise PermissionError()
+    except Exception:
+        job = login_job(email, job_id)
+        if job:
+            job.cancel.set()
+        st.rerun(scope="app")
+    job = login_job(email, job_id)
+    if job is None or job.status in {"complete", "error"}:
+        st.session_state.pop("facebook_login_job", None)
+        if job and job.error:
+            st.session_state["facebook_login_error"] = job.error
+        forget_login(email, job_id)
+        st.rerun(scope="app")
+    if job.status == "saving":
+        st.info("Saving your Facebook login…")
+    elif job.live_url:
+        import streamlit.components.v1 as components
+        st.info("Sign in to Facebook below and complete any verification. Your login will save automatically.")
+        components.iframe(job.live_url, height=650, scrolling=True)
+        st.link_button("Open login in a new tab", job.live_url)
+    else:
+        st.info("Opening your Facebook login window…")
+    if st.button("Cancel Facebook login", key="cancel_remote_facebook_login"):
+        job.cancel.set()
+
+
+def _render_remote_facebook_connection(email: str, session: FacebookSession) -> FacebookSession:
+    if st.session_state.get("facebook_login_error"):
+        st.error(st.session_state.pop("facebook_login_error"))
+    job_id = st.session_state.get("facebook_login_job")
+    if job_id:
+        _render_remote_facebook_progress(email, job_id)
+        return session
+    if session.status == "connected":
+        return session
+
+    def begin(check_only: bool = False):
+        from modules.auth import allowed_emails, verify_access
+        try:
+            if verify_access(st.session_state.get("auth_token", ""), allowed_emails()) != email:
+                return
+        except Exception:
+            return  # main() will rerun the authorization gate before rendering.
+        st.session_state["facebook_login_job"] = start_login(email, check_only=check_only)
+
+    with st.container(border=True, key="facebook_connection"):
+        if session.status == "saved":
+            st.info("Your Facebook login is saved. Check the connection before collecting again.")
+            st.button("Check Facebook connection", key="check_fb_session_btn", on_click=begin, args=(True,))
+        else:
+            st.subheader("Connect your Facebook account")
+            st.caption("Sign in through the interactive browser. Your saved login is private to your SenseMaker account.")
+            st.button("Log in to Facebook", key="capture_fb_session_btn", type="primary",
+                      use_container_width=True, disabled=not remote_facebook_configured(), on_click=begin)
+        if not remote_facebook_configured():
+            st.caption("The administrator needs to finish configuring the remote Facebook browser.")
+    return session
+
+
+def _render_facebook_connection(session: Optional[FacebookSession] = None, user_email: str = "") -> FacebookSession:
+    if IS_CLOUD:
+        return _render_remote_facebook_connection(user_email, session or remote_facebook_session(user_email))
     path = _facebook_storage_path()
     if session is None:
         session = _get_facebook_session(path)
@@ -365,7 +479,7 @@ def _render_facebook_connection(session: Optional[FacebookSession] = None) -> Fa
             with st.container(border=True, key="facebook_connection"):
                 st.info("Your Facebook login is saved on this device and will be reused when collecting posts.")
                 st.caption("The connection could not be confirmed right now. Your saved session has been kept.")
-                if st.button("Check Facebook connection", key="check_fb_session_btn", disabled=IS_CLOUD):
+                if st.button("Check Facebook connection", key="check_fb_session_btn"):
                     _check_facebook_session.clear()
                     st.rerun()
             return session
@@ -381,7 +495,7 @@ def _render_facebook_connection(session: Optional[FacebookSession] = None) -> Fa
         )
         if action.button(
             "Log in to Facebook", key="capture_fb_session_btn", type="primary",
-            use_container_width=True, disabled=IS_CLOUD,
+            use_container_width=True,
         ):
             with st.spinner("Finish logging in in the browser window…"):
                 try:
@@ -395,9 +509,7 @@ def _render_facebook_connection(session: Optional[FacebookSession] = None) -> Fa
                     logging.getLogger(__name__).exception("Facebook login failed")
                     st.error("Facebook login could not start or be saved. Please try again. "
                              "The error details have been recorded in the SenseMaker server log.")
-        if IS_CLOUD:
-            st.caption("Log in from SenseMaker on your computer to collect Facebook posts.")
-        elif session.status == "unavailable":
+        if session.status == "unavailable":
             st.caption("We couldn’t confirm your saved session. Log in again to reconnect.")
     return session
 
@@ -962,7 +1074,7 @@ def _render_collection_workspace(
     platform: str, user_email: str, facebook_session: FacebookSession,
 ) -> None:
     if platform == "facebook":
-        _render_facebook_connection(facebook_session)
+        _render_facebook_connection(facebook_session, user_email=user_email)
         reddit_limit, reddit_comments = 50, 20
         target_urls, links_valid = _render_link_workspace(user_email, platform=platform)
     else:
@@ -982,7 +1094,11 @@ def _render_collection_workspace(
     result_key = "last_scrape" if platform == "facebook" else "last_reddit_scrape"
     title_key = "custom_title_value" if platform == "facebook" else "reddit_custom_title_value"
     save_key = "save_last_results_btn" if platform == "facebook" else "save_reddit_results_btn"
-    if st.button("Collect posts", key=f"collect_{platform}_posts", type="primary", use_container_width=True):
+    if st.button(
+        "Collect posts", key=f"collect_{platform}_posts", type="primary", use_container_width=True,
+        disabled=platform == "facebook" and IS_CLOUD and (
+            facebook_session.status != "connected" or bool(st.session_state.get("facebook_login_job"))),
+    ):
         if not links_valid:
             st.error("Correct the invalid links above before collecting posts.")
         elif not target_urls:
@@ -998,6 +1114,7 @@ def _render_collection_workspace(
                         headless=use_headless,
                         scroll_times=scroll_times,
                         reddit_limit=int(reddit_limit), reddit_comments=int(reddit_comments),
+                        facebook_owner=user_email if platform == "facebook" and IS_CLOUD else None,
                         on_progress=lambda done, total, _url: progress.progress(
                             done / total, text=f"Processed {done} of {total} links"
                         ),
@@ -1226,7 +1343,15 @@ def main() -> None:
     st.set_page_config(page_title="SenseMaker", layout="wide")
     _apply_ui_theme()
     user_email = require_access()
-    facebook_session = _get_facebook_session(_facebook_storage_path())
+    if user_email is None:
+        # Finish the script normally so Streamlit mounts the sign-in iframe.
+        # st.stop() here can leave new component frames at about:blank.
+        return
+    try:
+        facebook_session = (remote_facebook_session(user_email) if IS_CLOUD else
+                            _get_facebook_session(_facebook_storage_path()))
+    except Exception:
+        facebook_session = FacebookSession()
     scrape_tab, analysis_tab, trends_tab, gencite_tab = dashboard_views(user_email, facebook_session)
 
     with scrape_tab:
@@ -1241,6 +1366,7 @@ def main() -> None:
     with analysis_tab:
         st.subheader("Sentiment Analysis")
         st.caption("Detect Thailand-related criticism, tensions and boycott calls, with source evidence.")
+        analysis_sources, sources_ready = _render_analysis_sources(user_email)
         st.text_area("Thai projects, companies and brands to watch (one name or alias per line)",
                      value=get_setting("THAILAND_WATCH_TERMS"), key="thailand_watch_terms",
                      help="Leave blank for Thailand generally. Add the names and local-language aliases of your Thai-linked targets.")
@@ -1253,10 +1379,12 @@ def main() -> None:
         provider_label = AI_PROVIDERS[provider]
 
         # --- Load records ---
-        if st.button("Load records from Firestore", key="load_firestore_records_btn"):
+        if st.button("Load records from Firestore", key="load_firestore_records_btn", disabled=not sources_ready):
             try:
-                rows = _fetch_firestore_posts(status_filter=status_filter, limit=load_limit)
+                rows = _fetch_firestore_posts(status_filter=status_filter, limit=load_limit,
+                                             source_urls=analysis_sources)
                 st.session_state["firestore_rows"] = rows
+                st.session_state.pop("analysis_record_selection", None)
                 st.session_state["firestore_load_error"] = ""
                 st.session_state["firestore_last_load_count"] = len(rows)
             except Exception as exc:
@@ -1272,8 +1400,9 @@ def main() -> None:
         elif firestore_last_load_count is not None:
             if firestore_last_load_count == 0:
                 st.info(
-                    "No records found for this filter. "
-                    "Scrape and save data first, or switch status filter to 'all'."
+                    "No saved records match these sources and status. "
+                    "Collect posts from your current Facebook sources or r/cambodia and save the results, "
+                    "or search Online News and save its articles. Then load records here."
                 )
             else:
                 st.success(f"Loaded {firestore_last_load_count} records from Firestore.")
@@ -1298,6 +1427,7 @@ def main() -> None:
                 "Select records to process",
                 options=id_options,
                 default=id_options,
+                key="analysis_record_selection",
             )
 
             if st.button(f"Run {provider_label} on selected records", key="run_analysis_selected_btn",
@@ -1366,9 +1496,10 @@ def main() -> None:
         st.divider()
         st.subheader("View processed records")
         st.caption("Load records with status 'processed' to see their saved analysis.")
-        if st.button("Load processed records", key="load_processed_records_btn"):
+        if st.button("Load processed records", key="load_processed_records_btn", disabled=not sources_ready):
             try:
-                processed_rows = _fetch_firestore_posts(status_filter="processed", limit=load_limit)
+                processed_rows = _fetch_firestore_posts(status_filter="processed", limit=load_limit,
+                                                       source_urls=analysis_sources)
                 st.session_state["processed_rows"] = processed_rows
             except Exception as exc:
                 st.error(f"Failed to load: {str(exc).strip() or repr(exc)}")
@@ -1381,7 +1512,7 @@ def main() -> None:
 
     # Render after processing so the trends page includes the latest saved run.
     with trends_tab:
-        _render_sentiment_history()
+        _render_sentiment_history(source_urls=analysis_sources)
         _render_news_risk_history()
 
     with gencite_tab:

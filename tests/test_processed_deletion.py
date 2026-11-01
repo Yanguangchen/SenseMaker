@@ -47,7 +47,7 @@ class DeleteProcessedPostsTests(unittest.TestCase):
         from dashboard import _fetch_firestore_posts
         db = MagicMock()
         doc = SimpleNamespace(id="real-id", to_dict=lambda: {"_id": "wrong-id", "status": "processed"})
-        db.collection.return_value.limit.return_value.stream.return_value = [doc]
+        db.collection.return_value.stream.return_value = [doc]
         with patch("dashboard.init_db", return_value=db):
             self.assertEqual(_fetch_firestore_posts("all", 50)[0]["_id"], "real-id")
 
