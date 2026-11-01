@@ -40,11 +40,23 @@ def api_error(exc: HTTPError, api_key: str) -> OpenAIError:
     return OpenAIError(message, status_code=exc.code)
 
 
-def generate_content(prompt: str, api_key: str, model_name: str, timeout: float = 90) -> str:
+def generate_content(prompt: str, api_key: str, model_name: str, timeout: float = 90, *,
+                     schema: dict | None = None, temperature: float | None = None,
+                     max_output_tokens: int | None = None) -> str:
+    """Return the model's JSON text.
+
+    Without ``schema`` the response is free-form JSON mode. With ``schema`` it uses
+    strict Structured Outputs, so the object root, required fields and enums hold.
+    """
     if not api_key.strip():
         raise OpenAIError("ChatGPT is not configured. Contact the app administrator.")
-    body = {"model": model_name, "input": prompt, "store": False,
-            "text": {"format": {"type": "json_object"}}}
+    text_format = ({"type": "json_schema", "name": "sensemaker_response", "schema": schema, "strict": True}
+                   if schema is not None else {"type": "json_object"})
+    body = {"model": model_name, "input": prompt, "store": False, "text": {"format": text_format}}
+    if temperature is not None:
+        body["temperature"] = temperature
+    if max_output_tokens is not None:
+        body["max_output_tokens"] = max_output_tokens
     request = Request(API_URL, data=json.dumps(body).encode(), headers={
         "Content-Type": "application/json", "Authorization": f"Bearer {api_key}",
     })

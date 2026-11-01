@@ -21,6 +21,7 @@ from modules.navigation import dashboard_views
 from modules.ai_errors import AIError, redact
 from modules.config import AI_PROVIDERS, get_ai_key, get_ai_model, get_ai_provider, get_setting, load_environment
 from modules.database import delete_processed_posts, init_db, upsert_post
+from modules.gencite_ui import render_gencite_workspace
 from modules.facebook_session import (
     FacebookLoginError,
     FacebookSession,
@@ -1226,7 +1227,7 @@ def main() -> None:
     _apply_ui_theme()
     user_email = require_access()
     facebook_session = _get_facebook_session(_facebook_storage_path())
-    scrape_tab, analysis_tab, trends_tab = dashboard_views(user_email, facebook_session)
+    scrape_tab, analysis_tab, trends_tab, gencite_tab = dashboard_views(user_email, facebook_session)
 
     with scrape_tab:
         facebook_tab, reddit_tab, news_tab = st.tabs(["Facebook", "Reddit", "Online news"])
@@ -1382,6 +1383,9 @@ def main() -> None:
     with trends_tab:
         _render_sentiment_history()
         _render_news_risk_history()
+
+    with gencite_tab:
+        render_gencite_workspace(user_email)
 
 
 if __name__ == "__main__":

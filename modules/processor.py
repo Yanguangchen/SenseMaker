@@ -33,13 +33,18 @@ DEFAULT_MODEL = AUTO_MODEL
 BATCH_SIZE = 8
 
 
-def _generate_content(prompt: str, api_key: str, model_name: str, timeout: float = 90) -> str:
-    """Send server credentials only to Google's API in a request header."""
+def _generate_content(prompt: str, api_key: str, model_name: str, timeout: float = 90,
+                      generation_config: Optional[Dict[str, Any]] = None) -> str:
+    """Send server credentials only to Google's API in a request header.
+
+    ``generation_config`` adds options such as a response JSON schema, temperature
+    or output budget on top of the JSON response type every caller needs.
+    """
     model_name = normalize_model_name(model_name)
     if model_name == AUTO_MODEL:
         raise GeminiError("Resolve an available model before generating an analysis.")
     body = {"contents": [{"role": "user", "parts": [{"text": prompt}]}],
-            "generationConfig": {"responseMimeType": "application/json"}}
+            "generationConfig": {**(generation_config or {}), "responseMimeType": "application/json"}}
     request = Request(
         f"https://generativelanguage.googleapis.com/v1beta/{model_name}:generateContent",
         data=json.dumps(body).encode(),
