@@ -31,6 +31,7 @@ def dashboard_views(email: str, facebook_session: FacebookSession | None = None)
     panel = _icon('<rect x="3" y="4" width="18" height="16" rx="3"/><path d="M9 4v16"/>')
     chart = _icon('<path d="M4 4v16h16M8 14l4-5 4 3 4-7"/>')
     trend = _icon('<path d="m3 17 6-6 4 4 8-12M15 3h6v6"/>')
+    voice = _icon('<path d="M21 12a8 8 0 0 1-11.6 7.1L4 20l1-4.6A8 8 0 1 1 21 12z"/><path d="M9 10h6M9 14h4"/>')
     collect = _icon('<ellipse cx="12" cy="5" rx="8" ry="3"/><path d="M4 5v7c0 1.7 3.6 3 8 3M4 12v6c0 1.7 3.6 3 8 3M20 5v5M16 16l3 3 3-3M19 12v7"/>')
     logout = _icon('<path d="M9 4H5a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h4M10 12h11M17 8l4 4-4 4"/>')
     chevron = _icon('<path d="m14 8-4 4 4 4"/>')
@@ -68,7 +69,11 @@ def dashboard_views(email: str, facebook_session: FacebookSession | None = None)
             '<button class="sm-rail-button" type="button" data-sm-view="Sentiment Trends" '
             'aria-label="Sentiment Trends" title="Sentiment Trends">'
             f'<span class="sm-rail-icon">{trend}</span>'
-            '<span class="sm-rail-label">Sentiment Trends</span></button></nav>'
+            '<span class="sm-rail-label">Sentiment Trends</span></button>'
+            '<button class="sm-rail-button" type="button" data-sm-view="GenCite" '
+            'aria-label="GenCite: AI share of voice" title="GenCite: AI share of voice">'
+            f'<span class="sm-rail-icon">{voice}</span>'
+            '<span class="sm-rail-label">GenCite</span></button></nav>'
             '<div class="sm-sidebar-footer">'
             f'{facebook_account}'
             f'<div class="sm-rail-account" title="Signed in as {safe_email}">'
@@ -84,7 +89,7 @@ def dashboard_views(email: str, facebook_session: FacebookSession | None = None)
 
     st.html(THEME_DIR / "sidebar.css")
     with st.container(key="sm_views"):
-        views = st.tabs(["Scrap data", "Sentiment Analysis", "Sentiment Trends"])
+        views = st.tabs(["Scrap data", "Sentiment Analysis", "Sentiment Trends", "GenCite"])
 
     script = (THEME_DIR / "sidebar.js").read_text(encoding="utf-8")
     version = hashlib.sha256(script.encode()).hexdigest()[:12]

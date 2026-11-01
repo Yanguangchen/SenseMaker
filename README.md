@@ -7,6 +7,9 @@ The dashboard requires Google sign-in. Access is limited to verified accounts in
 
 **Core pipeline:** Scrape social media posts -> Store in Firestore -> Analyse with Gemini or ChatGPT -> Review sentiment, risk scores & translations in a visual dashboard.
 
+**GenCite:** Measure how often Gemini and ChatGPT mention a brand when answering customer questions,
+then close the gaps with content and keyword recommendations. See [GenCite: AI share of voice](#gencite-ai-share-of-voice).
+
 ## AI provider setup
 
 Configure credentials once on the server in `.env.local` or `.env`; dashboard users choose **Gemini**
@@ -33,11 +36,70 @@ top-level Streamlit Secrets. Keys stay on the server and are never populated int
 page widgets. Both providers use the same batching, evidence validation and retry
 logic; saved analyses include `provider` and `model`.
 
+### One set of keys for every AI feature
+
+Sentiment Analysis and GenCite read the same two server credentials. GenCite needs no keys
+of its own, so a deployment that already runs Sentiment Analysis can use GenCite without changes.
+
+| Setting | Used by | Notes |
+|---|---|---|
+| `GEMINI_KEY` (or `GEMINI_API_KEY`) | Sentiment Analysis, GenCite | `GEMINI_API_KEY` is the GenCite web app's name; either works. |
+| `OPENAI_API_KEY` | Sentiment Analysis, GenCite | Shown as ChatGPT. |
+| `AI_PROVIDER` | Sentiment Analysis | Initial dropdown selection and `main.py` provider. GenCite runs every configured provider side by side. |
+| `GEMINI_MODEL` | Sentiment Analysis | Default `auto`. |
+| `OPENAI_MODEL` | Sentiment Analysis | Default `gpt-5.4-mini`. |
+| `GENCITE_GEMINI_MODEL` | GenCite | Optional. Default `gemini-2.5-flash`; `auto` is also accepted. |
+| `GENCITE_OPENAI_MODEL` | GenCite | Optional. Default `gpt-4.1-mini`. |
+
+GenCite's model defaults match the GenCite web app, so share of voice measured in either app
+uses the same models and stays comparable. Sentiment Analysis keeps its own model settings
+because classification favors different models (for example Flash-Lite). If only one key is
+configured, GenCite measures with that provider and generates ideas with it; with neither,
+analysis is disabled and query variations fall back to built-in templates.
+
 ChatGPT uses the [OpenAI Responses API](https://developers.openai.com/api/docs/guides/text)
 with [JSON output](https://developers.openai.com/api/docs/guides/structured-outputs?api-mode=responses)
 and response storage disabled. `OPENAI_MODEL` defaults to
 [`gpt-5.4-mini`](https://developers.openai.com/api/docs/models/gpt-5.4-mini)
 and can be changed to a Responses-compatible text model with JSON mode support.
+
+## GenCite: AI share of voice
+
+Open **GenCite** from the left toolbar (the speech-bubble icon). It brings the
+[GenCite](https://github.com/Yanguangchen/gencite) web app's functionality into SenseMaker. It runs on
+SenseMaker's server with SenseMaker's Google sign-in, approved-user list and provider keys. The
+GenCite web app itself is unchanged and can keep running separately.
+
+**Analyze**
+
+1. **Topic**: enter a query or topic and click **Generate query variations**. Gemini (or ChatGPT when
+   only it is configured) writes 50 queries across ten search intents: direct, comparative,
+   alternatives, evaluative, ranked list, discovery, pricing, use case, problem-solving and
+   audience-specific. If generation fails, 50 template variations are used and the cause is shown.
+2. **Queries to test**: tick, edit or add queries (up to 50).
+3. **Brand**: enter the brand, optional aliases and competitors (up to five each), and optional
+   market and region. Choose the providers and click **Run analysis**.
+
+Each selected provider answers every query five times, in batches of ten queries with up to three
+parallel requests per provider. An answer counts when it mentions the brand or an alias
+(case-insensitive). Competitor mentions are counted the same way. Results show the overall share of
+voice, each provider's rate, a per-query chart and table. **Run again** adds another round of answers
+to the totals instead of replacing them, and shows the change. If one provider or batch fails, the
+other answers still count and the failure is shown. Analysis has a 180-second budget.
+
+**Recommendations** turns the measured per-query gaps (brand rate versus the strongest competitor)
+into five content briefs and eight new keywords to test. They are ranked with GenCite's formulas:
+briefs by 35% gap, 25% relevance, 20% cross-provider consistency and 10% freshness; keywords by
+35% opportunity, 25% relevance, 25% novelty versus tested queries and 15% coverage type. Queue
+keywords and click **Test queued keywords** to measure them. Mark briefs as published to remember
+what you shipped, then run again later to see whether mentions change.
+
+**Saved analyses** are private to each account and available on any device, unlike the web app's
+browser storage. Open, rename or delete them; an opened analysis can be run again and saved as a new copy.
+
+Counts are text mentions in sampled model answers, not source citations or measurements of live
+consumer chat products, and they vary between runs. Recommendations can use every tested query
+(the web app sends only the first ten).
 
 ## Current Project Structure
 
@@ -60,7 +122,10 @@ SenseMaker/
     ├── google_news.py         # Google News searches and boycott/border-tension keyword scan
     ├── news_risk.py           # Saved news scans and border-tension risk charts
     ├── openai.py              # OpenAI Responses API transport
-    └── processor.py           # Shared Gemini/ChatGPT analysis with retry & backoff
+    ├── processor.py           # Shared Gemini/ChatGPT analysis with retry & backoff
+    ├── gencite.py             # GenCite share of voice, aggregation and recommendations
+    ├── gencite_store.py       # Per-user saved GenCite analyses in Firestore
+    └── gencite_ui.py          # GenCite workspace
 ```
 
 ---
@@ -344,6 +409,8 @@ PLAYWRIGHT_STORAGE_STATE=path/to/storage_state.json
 AI_PROVIDER=gemini
 GEMINI_MODEL=auto
 OPENAI_MODEL=gpt-5.4-mini
+GENCITE_GEMINI_MODEL=gemini-2.5-flash
+GENCITE_OPENAI_MODEL=gpt-4.1-mini
 ```
 
 Notes:
@@ -363,7 +430,7 @@ Notes:
 .\.venv\Scripts\python -m streamlit run dashboard.py
 ```
 
-The dashboard has **three pages**, accessible from the left toolbar:
+The dashboard has **four pages**, accessible from the left toolbar:
 
 ### Tab 1 — Scrap data
 
@@ -408,6 +475,11 @@ teal **Online News** line beside the blue **AI analysis** line. Its score is
 `100 × (positive − negative headlines) / headlines`, from the keyword tone scan, so
 earlier saved searches appear automatically. Both kinds of point count equally in
 the average, and red rings mark points with border-tension or boycott flags.
+
+### Tab 4 — GenCite
+
+Measure a brand's share of voice in Gemini and ChatGPT answers, get content and keyword
+recommendations, and keep saved analyses. See [GenCite: AI share of voice](#gencite-ai-share-of-voice).
 
 ## Validated Facebook Workflow
 
@@ -537,7 +609,9 @@ The owner is derived from the email returned by the server's authentication chec
 users see and manage only their own library. Each URL is a separate document, so
 large libraries do not share one document's size limit. Writes use batches of up
 to 400 documents; retrying a partially completed save does not create duplicates.
-Removing saved links leaves collected posts intact. OYOSHI's `faq/oyoshi` document
+Removing saved links leaves collected posts intact. Saved GenCite analyses use
+`sensemaker_gencite/{owner_hash}/analyses/{analysis_id}` and recommendations marked as published
+use `sensemaker_gencite/{owner_hash}/published/{title_hash}`, with the same owner hash. OYOSHI's `faq/oyoshi` document
 is not used. This separation is enforced by the app's queries, not by the shared
 service account's IAM permissions. Firestore rules remain unchanged.
 
