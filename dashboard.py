@@ -8,6 +8,7 @@ import hashlib
 import logging
 import os
 import sys
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
@@ -45,6 +46,7 @@ from modules.collection_jobs import active_collection, cancel_collection, collec
 from modules.processor import analyze_posts
 from modules.gemini import AUTO_MODEL, GeminiError, list_text_models, normalize_model_name
 from modules.reddit import CAMBODIA_URL, is_reddit_url, reddit_configured
+from modules.x import READ_PRICE_USD, X_SEARCHES, XClient, XError, collect_x, estimate_reads, x_configured
 from modules.signals import NON_CONTENT_TYPES, SIGNAL_LABELS, is_analyzable, is_flagged, watch_terms
 from modules.saved_links import library_owner_id, load_saved_links, parse_links, remove_saved_links, save_links
 from modules.sentiment_history import (
@@ -119,7 +121,7 @@ def _render_analysis_sources(user_email: str) -> tuple[list[str] | None, bool]:
         library = st.session_state.get(f"saved_links_{library_owner_id(user_email)}_facebook", {})
         ready = bool(library) and not library.get("error", False)
         sources = sorted(set([CAMBODIA_URL] + library.get("urls", []))) if ready else []
-        st.caption("Uses your saved Facebook sources, r/cambodia and saved Online News articles. "
+        st.caption("Uses your saved Facebook sources, r/cambodia, saved Online News articles and posts collected from X. "
                    "Older groups appear only when you choose all saved records. Newest collected records load first.")
         if not ready:
             st.warning("Your source library could not be loaded. Refresh saved links in Scrape Data → Facebook, "
@@ -1507,6 +1509,76 @@ def _render_news_risk_history() -> None:
             } for row in reversed(rows)]), use_container_width=True, hide_index=True)
 
 
+def _render_x_workspace() -> None:
+    st.subheader("X · recent posts")
+    st.caption("Collects recent public posts from X for each watch through the official read API. "
+               "Recent search covers about the last 7 days. Reposts are skipped.")
+    with st.container(border=True, key="x_settings"):
+        if x_configured():
+            st.caption("Bearer token configured. Access and post-read credit are checked when collecting.")
+        else:
+            st.info("X is not connected yet. An administrator needs to set X_BEARER_TOKEN on the server.")
+        searches: Dict[str, str] = {}
+        for key, category in X_SEARCHES.items():
+            toggle, terms = st.columns([2, 3], vertical_alignment="center")
+            enabled = toggle.checkbox(category["label"], value=True, key=f"x_enabled_{key}")
+            query = terms.text_input(f"{category['label']} search terms", value=category["query"],
+                                     key=f"x_query_{key}", label_visibility="collapsed", disabled=not enabled)
+            if enabled and query.strip():
+                searches[key] = query.strip()
+        limit_col, reply_col = st.columns(2)
+        limit = limit_col.number_input("Posts per search", min_value=10, max_value=100, value=10, step=10,
+                                       key="x_post_limit")
+        replies = reply_col.number_input("Replies per post", min_value=0, max_value=10, value=0, step=1,
+                                         key="x_reply_limit")
+        reads = estimate_reads(len(searches), int(limit), int(replies))
+        st.caption(f"This run can read up to {reads:,} posts, about ${reads * READ_PRICE_USD:,.2f} "
+                   f"at ${READ_PRICE_USD:.3f} per post returned. Replies are a separate capped sample "
+                   "and are off by default. A reply page asks for at least 10 posts even when fewer are kept.")
+
+    if st.button("Collect posts", key="collect_x_posts", type="primary", use_container_width=True,
+                 disabled=not x_configured()):
+        if not searches:
+            st.error("Choose at least one X search.")
+        else:
+            progress = st.progress(0, text="Starting X collection…")
+            with st.spinner("Collecting recent posts…"):
+                try:
+                    client = XClient(time.monotonic() + 180)
+                    rows = collect_x(searches, max_posts=int(limit), replies_per_post=int(replies), client=client,
+                                     on_progress=lambda done, total, label: progress.progress(
+                                         done / total, text=f"Searched {done} of {total}: {label}"))
+                    st.session_state["x_collection"] = {"rows": rows, "reads": client.reads, "error": ""}
+                except XError as exc:
+                    st.session_state["x_collection"] = {"rows": [], "reads": 0, "error": str(exc)}
+                except Exception as exc:
+                    logging.getLogger(__name__).exception("X collection failed")
+                    st.session_state["x_collection"] = {
+                        "rows": [], "reads": 0, "error": str(exc).strip() or "X collection failed.",
+                    }
+
+    collection = st.session_state.get("x_collection")
+    if not collection:
+        return
+    if collection.get("error"):
+        st.error(collection["error"])
+    reads = int(collection.get("reads") or 0)
+    if reads:
+        st.caption(f"X returned {reads:,} posts for this run, about ${reads * READ_PRICE_USD:,.2f}.")
+    rows = collection.get("rows") or []
+    for issue in (row for row in rows if row.get("source_type") in NON_CONTENT_TYPES):
+        st.warning(f"{issue.get('target_url', 'Search')}: {issue.get('raw_text', 'Collection incomplete')}")
+    posts = [row for row in rows if row.get("source_type") not in NON_CONTENT_TYPES]
+    st.write(f"**Records collected:** {len(posts)}")
+    if not posts:
+        st.info("No X posts were collected. Check any connection notices above, or broaden the search.")
+        return
+    _render_cloud_save(posts, "x_custom_title_value", "save_x_results_btn")
+    st.dataframe(pd.DataFrame(posts), use_container_width=True, hide_index=True)
+    with st.expander("Raw JSON Output"):
+        st.json(posts)
+
+
 def main() -> None:
     load_environment()
     _bridge_secrets_to_env()
@@ -1526,13 +1598,15 @@ def main() -> None:
     scrape_tab, analysis_tab, trends_tab, gencite_tab = dashboard_views(user_email, facebook_session)
 
     with scrape_tab:
-        facebook_tab, reddit_tab, news_tab = st.tabs(["Facebook", "Reddit", "Online news"])
+        facebook_tab, reddit_tab, news_tab, x_tab = st.tabs(["Facebook", "Reddit", "Online news", "X"])
         with facebook_tab:
             _render_collection_workspace("facebook", user_email, facebook_session)
         with reddit_tab:
             _render_collection_workspace("reddit", user_email, facebook_session)
         with news_tab:
             _render_news_workspace()
+        with x_tab:
+            _render_x_workspace()
 
     with analysis_tab:
         st.subheader("Sentiment Analysis")
@@ -1572,7 +1646,7 @@ def main() -> None:
             if firestore_last_load_count == 0:
                 st.info(
                     "No saved records match these sources and status. "
-                    "Collect posts from your current Facebook sources or r/cambodia and save the results, "
+                    "Collect posts from your current Facebook sources, r/cambodia or X and save the results, "
                     "or search Online News and save its articles. Then load records here."
                 )
             else:

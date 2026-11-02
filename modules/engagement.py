@@ -13,7 +13,7 @@ from typing import Any
 
 STORED_CHECKS = 20
 # Comments and news articles have no engagement to follow between collections.
-UNTRACKED_TYPES = {"news_article", "reddit_comment"}
+UNTRACKED_TYPES = {"news_article", "reddit_comment", "x_reply"}
 
 _NUMBER = r"\d[\d.,]*(?:\s?[KkMm])?"
 _COUNT_PAIR = re.compile(rf"({_NUMBER})\s+(comments?|shares?|views?|plays?)\b", re.I)

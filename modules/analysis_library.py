@@ -18,21 +18,27 @@ def source_key(url: str) -> str:
             host = "facebook.com"
         elif host == "reddit.com" or host.endswith(".reddit.com"):
             host = "reddit.com"
+        elif host in {"x.com", "twitter.com"} or host.endswith(".x.com") or host.endswith(".twitter.com"):
+            host = "x.com"
         path = parts.path.rstrip("/")
         # Reddit collection currently covers the r/cambodia feed and its threads.
         if host == "reddit.com" and path.lower().startswith("/r/cambodia"):
             segments = path.split("/")
             if len(segments) > 2 and segments[2].lower() == "cambodia":
                 path = "/r/cambodia"
-        query = "" if host in {"facebook.com", "reddit.com"} else parts.query
+        if host == "x.com":
+            segments = [segment for segment in path.split("/") if segment]
+            if len(segments) >= 2 and segments[-2].lower() == "status" and segments[-1].isdigit():
+                path = "/i/status/" + segments[-1]
+        query = "" if host in {"facebook.com", "reddit.com"} or path.startswith("/i/status/") else parts.query
         return host + path + ("?" + query if query else "")
     except ValueError:
         return ""
 
 
 def matches_sources(post: dict[str, Any], keys: set[str]) -> bool:
-    # Saved news articles come from the app's current Online News searches.
-    if post.get("source_type") == "news_article":
+    # Saved news articles and X searches are the app's current watches, not a personal link library.
+    if post.get("source_type") in {"news_article", "x_post", "x_reply"}:
         return True
     for url in (post.get("target_url", ""), post.get("url", "")):
         key = source_key(url)
