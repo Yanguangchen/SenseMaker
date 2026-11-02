@@ -144,6 +144,8 @@ def platform_label(record: dict[str, Any]) -> str:
 def content_type(record: dict[str, Any]) -> str:
     if record.get("source_type") == "reddit_comment":
         return "Comment"
+    if record.get("source_type") == "x_reply":
+        return "Reply"
     if record.get("source_type") == "news_article":
         return "News article"
     url = _url(record).lower()
@@ -239,12 +241,12 @@ def sentiment_view(records: list[dict[str, Any]]) -> dict[str, Any]:
                    else "All classifications are AI assessments awaiting human review.")
 
     types = Counter(r.get("source_type") for r in records)
-    posts = [r for r in records if r.get("source_type") not in {"reddit_comment", "news_article"}]
+    posts = [r for r in records if r.get("source_type") not in {"reddit_comment", "x_reply", "news_article"}]
     confidence = Counter(r["monitor"].get("confidence") for r in records if r["monitor"])
     with_comments = [r for r in posts if (_int(r.get("comment_count")) or 0) > 0]
     evidenced = sum(bool(r["monitor"].get("evidence")) for r in records)
     engagement = [
-        f"{len(records)} records: {len(posts)} posts · {types['reddit_comment']} comments · "
+        f"{len(records)} records: {len(posts)} posts · {types['reddit_comment'] + types['x_reply']} comments · "
         f"{types['news_article']} news articles.",
         f"{len(with_comments)} of {len(posts)} posts include collected comments"
         + (f" (avg {sum(_int(r.get('comment_count')) or 0 for r in with_comments) / len(with_comments):.1f})."

@@ -92,8 +92,10 @@ def upsert_post(db: firestore.Client, post_data: PostData) -> str:
     observed = str(post_data.get("scraped_at") or _now_iso())
     checks = add_check(previous, post_data, observed) if is_tracked(post_data) else None
 
-    is_reddit = post_data.get("source_type") in {"reddit_post", "reddit_comment"}
-    if existing.exists and not is_reddit:
+    source_type = str(post_data.get("source_type", "")).strip()
+    is_reddit = source_type in {"reddit_post", "reddit_comment"}
+    is_x = source_type in {"x_post", "x_reply"}
+    if existing.exists and not is_reddit and not is_x:
         # Saved posts keep their original text and analysis; only engagement is followed.
         if checks:
             doc_ref.set({"checks": checks}, merge=True)
@@ -125,9 +127,13 @@ def upsert_post(db: firestore.Client, post_data: PostData) -> str:
             if key in post_data:
                 payload[key] = post_data[key]
 
-    if is_reddit:
-        for key in ("platform", "subreddit", "reddit_id", "created_at", "parent_url", "parent_text",
-                    "thread_id", "comment_sample_limit", "content_removed", "reported_comment_count"):
+    if is_reddit or is_x:
+        fields = ("platform", "x_id", "created_at", "conversation_id", "lang", "x_query", "x_category",
+                  "x_categories", "parent_url", "parent_text", "reply_sample_limit", "content_removed",
+                  "reported_comment_count") if is_x else (
+            "platform", "subreddit", "reddit_id", "created_at", "parent_url", "parent_text",
+            "thread_id", "comment_sample_limit", "content_removed", "reported_comment_count")
+        for key in fields:
             if key in post_data:
                 payload[key] = post_data[key]
         changed = any(previous.get(k, "") != payload.get(k, "")

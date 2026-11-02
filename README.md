@@ -138,6 +138,8 @@ SenseMaker/
     ├── engagement.py          # Engagement counts and per-collection velocity checks
     ├── report_pdf.py          # PDF export of the client report through Chromium
     ├── scraper.py             # Playwright web scraper
+    ├── reddit.py              # r/cambodia collection through Reddit's Data API
+    ├── x.py                   # X recent-search collector
     ├── google_news.py         # Google News searches and boycott/border-tension keyword scan
     ├── news_risk.py           # Saved news scans and border-tension risk charts
     ├── openai.py              # OpenAI Responses API transport
@@ -152,7 +154,7 @@ SenseMaker/
 ## Thailand tensions and boycott watch
 
 Sentiment Analysis defaults to **Current sources**: the signed-in account's saved
-Facebook sources, r/cambodia and articles saved from Online News. Records load newest
+Facebook sources, r/cambodia, articles saved from Online News, and posts collected from X. Records load newest
 first, with source filtering applied before the load limit. **All saved records
 (including older sources)** explicitly includes the earlier research library.
 Changing sources clears loaded records, selections and previous results. The old
@@ -163,7 +165,8 @@ available under all saved records, rather than contributing to current-source av
 
 If the current sources have no saved records yet, collect and save their posts (or
 save Online News articles) before loading Sentiment Analysis. Saving source links
-alone does not collect any posts.
+alone does not collect any posts. X posts collected from **Scrape Data → X** are
+included with the current watches.
 
 The **Sentiment Analysis** tab now assesses Thailand-related discussion in English,
 Khmer and Thai. Enter Thai-linked project, company or brand names and their aliases
@@ -237,6 +240,37 @@ this repository. See [Reddit's access policy](https://support.reddithelp.com/hc/
 [Data API documentation](https://www.reddit.com/dev/api/) and
 [OAuth application credentials](https://github.com/reddit-archive/reddit/wiki/OAuth2#application-only-oauth).
 
+## X collection: recent public posts
+
+1. Open **Scrape Data → X**. The same three watches as Online News are filled in and can be edited.
+2. Choose up to **100 posts per search**. Leave **Replies per post** at 0 unless you want a small reply sample.
+3. Click **Collect posts**, inspect the results and save them to Firestore.
+4. Select saved records in **Sentiment Analysis**, set your watchlist and run analysis.
+
+The connector uses X's official recent-search API (`GET /2/tweets/search/recent`), which covers about
+the last 7 days. It does not drive a browser. Reposts are skipped, and the main search also skips
+replies unless you ask for a reply sample. Each post and reply has its own canonical
+`https://x.com/i/status/…` record, so the author name is not stored. Replies carry the post they
+answer as context; context-only text cannot count as the reply's own boycott advocacy. A withheld
+post with no text is saved as a tombstone. Recollecting edited text resets its analysis to pending.
+X's reply count is stored for velocity tracking; view counts are not stored.
+
+X bills about **$0.005 per post returned**. The tab shows the maximum reads and estimated cost
+before collection. The default is 10 posts for each of the three searches and no replies, about
+$0.15 if every search fills its cap. A failed or rate-limited search is shown as a notice and does
+not discard posts already collected. Collection stops at a 180-second budget. It is on demand, not
+a background monitor, and it runs on hosted deployments because it never launches Playwright.
+
+Set the app's bearer token on the server, in `.env`, Streamlit Secrets or Railway Variables:
+
+```env
+X_BEARER_TOKEN=...
+```
+
+Missing credentials, a denied token or exhausted post-read credit produce a connection notice.
+There is no unauthenticated scraping fallback. No X token is included in this repository.
+See [X API recent search](https://docs.x.com/x-api/posts/search/quickstart/recent-search).
+
 ## Google News monitoring: OYOSHI, border tension and boycotts
 
 Open **Scrape Data → Online news** and click **Search Google News**. CrisisRadar runs the same
@@ -296,7 +330,7 @@ sessions are excluded by `.railwayignore`, `.dockerignore` and explicit Dockerfi
    Use `FIREBASE_CLIENT_EMAIL` and `FIREBASE_PRIVATE_KEY` for server credentials;
    leave `FIREBASE_CREDENTIALS` unset because local credential files are not uploaded.
    The private key accepts real newlines or literal `\n` escapes.
-3. Set `GEMINI_KEY`, `OPENAI_API_KEY`, any configured Reddit credentials, and both
+3. Set `GEMINI_KEY`, `OPENAI_API_KEY`, any configured Reddit credentials, `X_BEARER_TOKEN`, and both
    Browserbase variables. These are runtime variables, not Docker build arguments.
 4. Install the infrastructure SDK, link the CLI to the project, review and apply the
    infrastructure plan using the commands below. Railway builds `Yanguangchen/SenseMaker`
@@ -534,7 +568,7 @@ The dashboard has **four pages**, accessible from the left toolbar:
 
 ### Tab 1 — Scrap data
 
-- Source tabs: **Facebook**, **Reddit**, and **Online news** (Google News monitoring).
+- Source tabs: **Facebook**, **Reddit**, **Online news** (Google News monitoring), and **X**.
 - Facebook and Reddit each keep their own source selections, collection settings and results.
 - Facebook auth session capture (opens Chrome for manual login)
 - Save a personal library of links, available on future visits and other devices
@@ -760,7 +794,7 @@ Collection: `raw_posts`
   "status": "pending|processed|error",
   "comments": ["comment one", "comment two"],
   "comment_count": 2,
-  "source_type": "container_post|reddit_post|reddit_comment",
+  "source_type": "container_post|reddit_post|reddit_comment|x_post|x_reply",
   "custom_title": "User-provided title",
   "saved_at": "ISO_TIMESTAMP",
   "target_url": "https://original-input-url.com/...",

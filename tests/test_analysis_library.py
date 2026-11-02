@@ -41,6 +41,14 @@ class SelectionTests(unittest.TestCase):
         self.assertEqual(len(select_records(rows, source_urls=[GROUP, CAMBODIA_URL], limit=50)), 3)
         self.assertNotEqual(source_key("https://reddit.com/r/cambodiafake/"), source_key(CAMBODIA_URL))
 
+    def test_x_status_links_match_across_hosts_and_current_sources_include_x_posts(self):
+        self.assertEqual(source_key("https://twitter.com/someone/status/123?s=20"), "x.com/i/status/123")
+        self.assertEqual(source_key("https://x.com/i/web/status/123"), "x.com/i/status/123")
+        rows = [post("x", source_type="x_post", url="https://x.com/i/status/9", target_url="https://x.com/search?q=OYOSHI"),
+                post("reply", source_type="x_reply", url="https://x.com/i/status/10"),
+                post("legacy", OLD_GROUP)]
+        self.assertEqual([r["_id"] for r in select_records(rows, source_urls=[GROUP], limit=50)], ["x", "reply"])
+
     def test_full_library_is_explicit_and_empty_sources_do_not_restore_legacy_posts(self):
         rows = [post("legacy", OLD_GROUP)]
         self.assertEqual(select_records(rows, source_urls=[], limit=50), [])
