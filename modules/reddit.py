@@ -177,6 +177,10 @@ def _record(data: dict, kind: str, parent: dict | None = None) -> dict | None:
     if parent and not removed:
         record.update(parent_url=parent["url"], parent_text=parent["raw_text"],
                       thread_id=parent["reddit_id"])
+    total = data.get("num_comments")
+    if kind == "t3" and isinstance(total, int) and not isinstance(total, bool) and total >= 0:
+        # Reddit's own thread total; comment_count is only the sample collected.
+        record["reported_comment_count"] = total
     return record
 
 

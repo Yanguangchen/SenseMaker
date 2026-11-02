@@ -134,6 +134,8 @@ SenseMaker/
 └── modules/
     ├── __init__.py
     ├── database.py            # Firestore helpers (upsert, query, mark processed)
+    ├── client_report.py       # Client report templates (sentiment, velocity, negative post reports)
+    ├── engagement.py          # Engagement counts and per-collection velocity checks
     ├── scraper.py             # Playwright web scraper
     ├── google_news.py         # Google News searches and boycott/border-tension keyword scan
     ├── news_risk.py           # Saved news scans and border-tension risk charts
@@ -552,6 +554,33 @@ The dashboard has **four pages**, accessible from the left toolbar:
   - English translation, topics, original text preview, source link
 - **Processed/Error metric counters**
 - **View processed records** section to review previously analysed data from Firestore
+- Results and processed records open in the **client report templates** (see below);
+  the evidence cards above are under **Evidence by record**
+
+#### Client report templates
+
+Analysis results use the layout of the client's appendix templates, auto-filled from the records:
+
+| Tab | Filled from |
+|---|---|
+| **Comment Sentiment Analysis** | Negative (Anger + Anxiety), Neutral and Positive (Joy) shares; tone from the dominant emotion and topics; key insight, engagement quality, and threat level (High: review priority 8+ or an explicit boycott call; Medium: any Thailand signal or priority 5+) with the main risk |
+| **Velocity Tracker** | Negative Facebook and Reddit posts with comment counts at up to 7 checks, % change, ▲/▼ velocity and Live / Slowing / Dead status, plus totals |
+| **Negative Post Reports** | One NPR per negative or flagged record (`NPR-` + the first 6 characters of its record ID): text capture, comments and views vs the prior check, sentiment across the post and its analysed comments, word cloud, and classification |
+
+**Download report (HTML)** saves all three templates, with every Negative Post Report, as one page to share or print.
+
+**Checks.** Every time a collection is saved to the cloud, each Facebook or Reddit post gets a check: the
+platform's comment total (Reddit's thread total, or the count shown on the captured Facebook post), views,
+reactions and shares when the page shows them, and the number of comments collected. Saving a post that is
+already stored adds a check without changing its text or analysis. To follow velocity, collect and save the
+same sources every 6h (high impact) or 24h (low impact). Records saved before checks existed start with their
+original collection as Check 1. When no platform total is shown, the tracker falls back to collected comments,
+a capped sample (12 per Facebook post), and labels it.
+
+Left blank for the analyst, as on the paper template: reach (not public on these platforms), the poster's
+account (not collected), time reported to the Core Team, crisis type, issue source, actions taken and the
+tracker decision. Impact (High at priority 8+ or an explicit boycott call), check cadence and velocity are
+pre-filled and marked as AI-derived.
 
 ### Tab 3 — Sentiment Trends
 
@@ -727,6 +756,10 @@ Collection: `raw_posts`
   "custom_title": "User-provided title",
   "saved_at": "ISO_TIMESTAMP",
   "target_url": "https://original-input-url.com/...",
+  "reported_comment_count": 57,
+  "checks": [
+    {"at": "ISO_TIMESTAMP", "collected_comments": 12, "comments": 240, "views": 9600, "reactions": 1200, "shares": 48}
+  ],
   "processed_at": "ISO_TIMESTAMP",
   "analysis": {
     "translation": "English translation",
