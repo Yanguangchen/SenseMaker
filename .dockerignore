@@ -17,3 +17,5 @@
 **/*firebase-adminsdk*.json
 firebase-debug.log*
 tests
+# The standalone Reddit starter is separate from the CrisisRadar service.
+msasensemaker/

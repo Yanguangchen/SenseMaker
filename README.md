@@ -261,7 +261,21 @@ $0.15 if every search fills its cap. A failed or rate-limited search is shown as
 not discard posts already collected. Collection stops at a 180-second budget. It is on demand, not
 a background monitor, and it runs on hosted deployments because it never launches Playwright.
 
-Set the app's bearer token on the server, in `.env`, Streamlit Secrets or Railway Variables:
+To connect X:
+
+1. Sign in to the [X Developer Console](https://console.x.com/) and open your app under **Apps**.
+2. Copy the app-only **Bearer Token** from its credentials page. The collector uses this token
+   for read-only public search; it does not need an API key/secret, user access token or OAuth callback.
+3. Confirm that the account has API credits and access to recent search.
+4. For local runs, set `X_BEARER_TOKEN` in `.env.local` (or `.env`). For production, set it in
+   **Railway → SenseMaker → sensemaker → Variables**, then deploy/restart the service.
+   Streamlit Secrets also works. Keep the value out of `.env.example`, which is a template and
+   is not loaded as runtime configuration.
+5. Open **Scrape Data → X**, select one watch, keep **Posts per search** at 10 and **Replies per post**
+   at 0, then **Collect posts** to verify access with a small request. Successful results can be saved
+   to Firestore and analyzed alongside the other sources.
+
+The only X environment variable read by the app is:
 
 ```env
 X_BEARER_TOKEN=...
@@ -269,7 +283,8 @@ X_BEARER_TOKEN=...
 
 Missing credentials, a denied token or exhausted post-read credit produce a connection notice.
 There is no unauthenticated scraping fallback. No X token is included in this repository.
-See [X API recent search](https://docs.x.com/x-api/posts/search/quickstart/recent-search).
+See [X API recent search](https://docs.x.com/x-api/posts/search/quickstart/recent-search)
+and [X developer access and credentials](https://docs.x.com/x-api/getting-started/getting-access).
 
 ## Google News monitoring: OYOSHI, border tension and boycotts
 
