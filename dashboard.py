@@ -24,6 +24,11 @@ from modules.ai_errors import AIError, redact
 from modules.config import AI_PROVIDERS, get_ai_key, get_ai_model, get_ai_provider, get_setting, load_environment
 from modules.database import delete_processed_posts, init_db, upsert_post
 from modules.gencite_ui import render_gencite_workspace
+from modules.client_report import (
+    CSS_PATH as REPORT_CSS, content_type, negative_records, npr_sheet, platform_label, report_document,
+    report_number, report_record, sentiment_sheet, velocity_sheet,
+)
+from modules.engagement import checks_for
 from modules.facebook_session import (
     FacebookLoginError,
     FacebookSession,
@@ -159,6 +164,7 @@ def _process_selected_firestore_posts(
     )
     snapshot = persist_analysis_run(db, selected_posts, analysis_by_id, provider=provider, targets=targets)
     _load_sentiment_history.clear()
+    completed_at = (snapshot or {}).get("completed_at") or _now_iso()
     processed = 0
     errored = 0
     analyses: List[Dict[str, Any]] = []
@@ -183,6 +189,14 @@ def _process_selected_firestore_posts(
                 "sentiment": analysis.get("sentiment", ""),
                 "risk_score": analysis.get("risk_score", ""),
                 "topics": ", ".join(analysis.get("topics", [])) if isinstance(analysis.get("topics"), list) else str(analysis.get("topics", "")),
+                # Fields for the client report templates.
+                "raw_text": str(post.get("raw_text", ""))[:2000],
+                "title": post.get("title", ""),
+                "publisher": post.get("publisher", ""),
+                "scraped_at": post.get("scraped_at", ""),
+                "comment_count": post.get("comment_count", 0),
+                "checks": checks_for(post),
+                "processed_at": completed_at,
             })
         else:
             errored += 1
@@ -792,6 +806,40 @@ def _render_signal_overview(analyses: List[Dict[str, Any]], key: str) -> List[Di
     return visible
 
 
+def _render_client_report(items: List[Dict[str, Any]], key: str, report_date: str,
+                          render_evidence: Callable[[], None]) -> None:
+    """Show results in the client's appendix templates, with the record evidence alongside."""
+    records = [report_record(item) for item in items]
+    negatives = negative_records(records)
+    st.html(REPORT_CSS)
+    st.download_button(
+        "Download report (HTML)", report_document(records, report_date).encode("utf-8"),
+        f"crisisradar-report-{report_date[:10] or 'undated'}.html", "text/html", key=f"{key}_download",
+        help="All three templates with every Negative Post Report, ready to share or print.",
+    )
+    sentiment_tab, velocity_tab, reports_tab, evidence_tab = st.tabs([
+        "Comment Sentiment Analysis", "Velocity Tracker", f"Negative Post Reports ({len(negatives)})",
+        "Evidence by record",
+    ])
+    with sentiment_tab:
+        st.html(sentiment_sheet(records, report_date))
+    with velocity_tab:
+        st.html(velocity_sheet(records, report_date))
+    with reports_tab:
+        if not negatives:
+            st.info("No negative or flagged records in this set, so there are no Negative Post Reports.")
+        else:
+            choice = st.selectbox(
+                "Report", list(range(len(negatives))), key=f"{key}_npr",
+                format_func=lambda i: (f"{report_number(negatives[i])} · {platform_label(negatives[i])} "
+                                       f"{content_type(negatives[i]).lower()} · priority "
+                                       f"{negatives[i].get('risk_score', '?')}/10"),
+            )
+            st.html(npr_sheet(negatives[choice], records, report_date))
+    with evidence_tab:
+        render_evidence()
+
+
 def _render_processed_deletion(rows: List[Dict[str, Any]]) -> None:
     selection_key = "processed_delete_selection"
     pending_key = "processed_delete_pending"
@@ -870,6 +918,14 @@ def _render_processed_records(rows: List[Dict[str, Any]]) -> None:
         st.info("No records have analysis data yet.")
         return
 
+    def evidence() -> None:
+        _render_processed_evidence(has_analysis)
+
+    report_date = max((str(r.get("processed_at") or "") for r in has_analysis), default="") or _now_iso()
+    _render_client_report(has_analysis, "saved_report", report_date, evidence)
+
+
+def _render_processed_evidence(has_analysis: List[Dict[str, Any]]) -> None:
     summary_rows = []
     for r in has_analysis:
         a = r.get("analysis", {})
@@ -1574,10 +1630,14 @@ def main() -> None:
                 st.error(message)
             analyses = analysis_results.get("analyses", [])
             if analyses:
-                visible = _render_signal_overview(analyses, "latest_signals_filter")
-                _render_analysis_cards(visible)
-                with st.expander("Raw analysis JSON"):
-                    st.json(analyses)
+                def evidence() -> None:
+                    visible = _render_signal_overview(analyses, "latest_signals_filter")
+                    _render_analysis_cards(visible)
+                    with st.expander("Raw analysis JSON"):
+                        st.json(analyses)
+
+                report_date = max((str(a.get("processed_at") or "") for a in analyses), default="") or _now_iso()
+                _render_client_report(analyses, "latest_report", report_date, evidence)
             elif analysis_results.get("error", 0) > 0:
                 st.warning("No records were analyzed. Resolve the error above and retry."
                            if analysis_results.get("errors") else

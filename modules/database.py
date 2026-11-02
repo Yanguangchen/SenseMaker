@@ -17,6 +17,7 @@ import firebase_admin
 from firebase_admin import credentials, firestore
 
 from modules.config import firebase_credentials, get_setting
+from modules.engagement import add_check, is_tracked
 from modules.signals import NON_CONTENT_TYPES
 
 PostData = Dict[str, Any]
@@ -86,9 +87,16 @@ def upsert_post(db: firestore.Client, post_data: PostData) -> str:
     doc_id = get_post_id(url)
     doc_ref = db.collection(_get_collection_name()).document(doc_id)
     existing = doc_ref.get()
+    previous = (existing.to_dict() or {}) if existing.exists else {}
+    # Each collection is a velocity check; saving the same collection again replaces it.
+    observed = str(post_data.get("scraped_at") or _now_iso())
+    checks = add_check(previous, post_data, observed) if is_tracked(post_data) else None
 
     is_reddit = post_data.get("source_type") in {"reddit_post", "reddit_comment"}
     if existing.exists and not is_reddit:
+        # Saved posts keep their original text and analysis; only engagement is followed.
+        if checks:
+            doc_ref.set({"checks": checks}, merge=True)
         return doc_id
 
     payload: PostData = {
@@ -110,6 +118,8 @@ def upsert_post(db: firestore.Client, post_data: PostData) -> str:
         payload["saved_at"] = str(post_data.get("saved_at", "")).strip()
     if "target_url" in post_data:
         payload["target_url"] = str(post_data.get("target_url", "")).strip()
+    if checks:
+        payload["checks"] = checks
     if post_data.get("source_type") == "news_article":
         for key in NEWS_FIELDS:
             if key in post_data:
@@ -117,10 +127,9 @@ def upsert_post(db: firestore.Client, post_data: PostData) -> str:
 
     if is_reddit:
         for key in ("platform", "subreddit", "reddit_id", "created_at", "parent_url", "parent_text",
-                    "thread_id", "comment_sample_limit", "content_removed"):
+                    "thread_id", "comment_sample_limit", "content_removed", "reported_comment_count"):
             if key in post_data:
                 payload[key] = post_data[key]
-        previous = (existing.to_dict() or {}) if existing.exists else {}
         changed = any(previous.get(k, "") != payload.get(k, "")
                       for k in ("raw_text", "parent_text", "content_removed"))
         if existing.exists and not changed:
