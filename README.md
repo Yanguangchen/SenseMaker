@@ -136,6 +136,7 @@ SenseMaker/
     ├── database.py            # Firestore helpers (upsert, query, mark processed)
     ├── client_report.py       # Client report templates (sentiment, velocity, negative post reports)
     ├── engagement.py          # Engagement counts and per-collection velocity checks
+    ├── report_pdf.py          # PDF export of the client report through Chromium
     ├── scraper.py             # Playwright web scraper
     ├── google_news.py         # Google News searches and boycott/border-tension keyword scan
     ├── news_risk.py           # Saved news scans and border-tension risk charts
@@ -568,6 +569,13 @@ Analysis results use the layout of the client's appendix templates, auto-filled 
 | **Negative Post Reports** | One NPR per negative or flagged record (`NPR-` + the first 6 characters of its record ID): text capture, comments and views vs the prior check, sentiment across the post and its analysed comments, word cloud, and classification |
 
 **Download report (HTML)** saves all three templates, with every Negative Post Report, as one page to share or print.
+**Create PDF** prints the same report on A4 landscape with the server's Chromium (the browser Playwright already
+uses for collection), then shows **Download PDF**. Comment Sentiment Analysis and each Negative Post Report fit
+one page each; a long Velocity Tracker continues onto more pages with its header row repeated. Pages are numbered.
+The PDF is kept for the session until the report changes. While printing, the page may load only Google Fonts
+(Inter, plus Noto Sans Khmer and Noto Sans Thai for original-language quotes); every other request is blocked.
+Without Chromium (`python -m playwright install chromium`), or an installed Google Chrome, the app explains
+this and the HTML report can be printed to PDF from a browser instead.
 
 **Checks.** Every time a collection is saved to the cloud, each Facebook or Reddit post gets a check: the
 platform's comment total (Reddit's thread total, or the count shown on the captured Facebook post), views,

@@ -26,7 +26,7 @@
   background: #fff;
   color: var(--crt-ink);
   box-shadow: 0 30px 60px -30px rgb(0 0 0 / 0.8), 0 2px 12px -6px rgb(0 0 0 / 0.5);
-  font-family: Inter, "Helvetica Neue", Arial, sans-serif;
+  font-family: Inter, "Noto Sans Khmer", "Noto Sans Thai", "Khmer OS", "Helvetica Neue", Arial, sans-serif;
   font-size: 15px;
   line-height: 1.45;
   overflow-wrap: anywhere;
@@ -35,7 +35,7 @@
 /* The app sets its own font on text elements; the sheet keeps the template's. */
 .stApp .crt-sheet,
 .stApp .crt-sheet * {
-  font-family: Inter, "Helvetica Neue", Arial, sans-serif;
+  font-family: Inter, "Noto Sans Khmer", "Noto Sans Thai", "Khmer OS", "Helvetica Neue", Arial, sans-serif;
 }
 
 .crt-sheet a { color: var(--crt-green); font-weight: 600; }
@@ -314,6 +314,10 @@
 .crt-capture q { display: block; quotes: none; font-style: italic; }
 .crt-capture q + p { margin-top: 10px; }
 .crt-metric { display: grid; gap: 14px; font-size: 15px; }
+.crt-split { display: flex; flex-wrap: wrap; gap: 6px 14px; }
+.crt-split > span { white-space: nowrap; }
+.crt-split .crt-fill { min-width: 2em; }
+.crt-tone .crt-fill { text-align: left; }
 .crt-up { color: var(--crt-red); }
 .crt-down { color: var(--crt-green); }
 
@@ -403,6 +407,23 @@
   .crt-sheet { border-radius: 14px; }
 }
 
+/* Printing (and the PDF export): one template per page, colours kept. */
 @media print {
-  .crt-sheet { margin: 0; border-radius: 0; box-shadow: none; break-after: page; }
+  .crt-sheet {
+    margin: 0;
+    padding: 28px 34px;
+    border-radius: 0;
+    box-shadow: none;
+    break-after: page;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  .crt-sheet:last-child { break-after: auto; }
+  .crt-box,
+  .crt-table tr,
+  .crt-tracker-foot { break-inside: avoid; }
+  .crt-table-wrap { overflow: visible; }
+  .crt-table th:first-child,
+  .crt-table td:first-child { position: static; }
 }
