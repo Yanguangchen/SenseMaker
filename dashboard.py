@@ -21,6 +21,7 @@ from modules.auth import require_access
 from modules.ui import apply_brand
 from modules.analysis_library import select_history, select_records, source_key
 from modules.navigation import dashboard_views
+from modules.content_recommendations_ui import render_content_workspace
 from modules.ai_errors import AIError, redact
 from modules.config import AI_PROVIDERS, get_ai_key, get_ai_model, get_ai_provider, get_setting, load_environment
 from modules.database import delete_processed_posts, init_db, upsert_post
@@ -1595,7 +1596,7 @@ def main() -> None:
                             _get_facebook_session(_facebook_storage_path()))
     except Exception:
         facebook_session = FacebookSession()
-    scrape_tab, analysis_tab, trends_tab, gencite_tab = dashboard_views(user_email, facebook_session)
+    scrape_tab, analysis_tab, trends_tab, content_tab, gencite_tab = dashboard_views(user_email, facebook_session)
 
     with scrape_tab:
         facebook_tab, reddit_tab, news_tab, x_tab = st.tabs(["Facebook", "Reddit", "Online news", "X"])
@@ -1763,6 +1764,9 @@ def main() -> None:
     with trends_tab:
         _render_sentiment_history(source_urls=analysis_sources)
         _render_news_risk_history()
+
+    with content_tab:
+        render_content_workspace()
 
     with gencite_tab:
         render_gencite_workspace(user_email)

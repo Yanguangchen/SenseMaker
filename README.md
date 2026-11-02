@@ -193,6 +193,38 @@ nationalities or political affiliations are inferred. Counts refer to sampled re
 not unique people or population sentiment. Live classification quality still needs
 evaluation with your configured provider and representative, human-labeled data.
 
+## Content recommendations: keywords and sentiment
+
+Open **Content plan** in the left toolbar after running Sentiment Analysis
+or loading processed records. Select **Latest analysis** or **Loaded processed records**,
+then choose up to 30 relevant records, a brand/topic, a communication goal and an optional
+focus concern. Choose English, Khmer or Thai and **Gemini** or **ChatGPT**, then click
+**Generate content plan**.
+
+The workspace reuses the server credentials and model settings from Sentiment Analysis:
+`GEMINI_KEY` (or `GEMINI_API_KEY`) with `GEMINI_MODEL`, and `OPENAI_API_KEY` with
+`OPENAI_MODEL`. No additional key or package is needed. Selecting a provider with no key
+disables generation. Generation sends the selected text excerpts to that provider only,
+with bounded retries for temporary failures; it never publishes content automatically.
+
+Each plan contains up to five briefs with a specific primary keyword, supporting phrases,
+search intent, the concern addressed, content format, title, outline, draft, facts to verify
+and a measurement suggestion. Every brief must cite existing record IDs and verbatim
+quotes from their text or comment excerpts; unsupported quotes reject the response.
+Quotes establish source presence, not factual truth or interpretation accuracy. Drafts
+should retain verification placeholders until the relevant facts are checked.
+
+Plans show the sentiment baseline of the selected records and rank briefs by the number
+of cited Anger/Anxiety records, then total cited records. These are sample counts, not
+predictions of sentiment improvement, search volume or keyword difficulty. Compare later
+sentiment using the same sources and a comparable time window in **Sentiment Trends**;
+other events and sampling changes can also move sentiment.
+
+Long records are limited to 1,200 characters plus the first two comment excerpts (300
+characters each). Removed content, collection errors and unanalyzed records are excluded.
+Changing selected data, inputs, provider or model clears the displayed plan. Plans remain
+in the current session; download the keyword CSV and full JSON plan to keep a copy.
+
 ## Delete processed records
 
 In **Sentiment Analysis**, load processed records, open **Delete processed records**,
