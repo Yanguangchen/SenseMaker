@@ -29,6 +29,7 @@ from modules.client_report import (
     report_number, report_record, sentiment_sheet, velocity_sheet,
 )
 from modules.engagement import checks_for
+from modules.report_pdf import PDFExportError, render_pdf
 from modules.facebook_session import (
     FacebookLoginError,
     FacebookSession,
@@ -812,11 +813,7 @@ def _render_client_report(items: List[Dict[str, Any]], key: str, report_date: st
     records = [report_record(item) for item in items]
     negatives = negative_records(records)
     st.html(REPORT_CSS)
-    st.download_button(
-        "Download report (HTML)", report_document(records, report_date).encode("utf-8"),
-        f"crisisradar-report-{report_date[:10] or 'undated'}.html", "text/html", key=f"{key}_download",
-        help="All three templates with every Negative Post Report, ready to share or print.",
-    )
+    _render_report_downloads(records, key, report_date)
     sentiment_tab, velocity_tab, reports_tab, evidence_tab = st.tabs([
         "Comment Sentiment Analysis", "Velocity Tracker", f"Negative Post Reports ({len(negatives)})",
         "Evidence by record",
@@ -838,6 +835,33 @@ def _render_client_report(items: List[Dict[str, Any]], key: str, report_date: st
             st.html(npr_sheet(negatives[choice], records, report_date))
     with evidence_tab:
         render_evidence()
+
+
+def _render_report_downloads(records: List[Dict[str, Any]], key: str, report_date: str) -> None:
+    """HTML is ready at once; a PDF is printed on request and kept until the report changes."""
+    document = report_document(records, report_date)
+    digest = hashlib.sha256(document.encode("utf-8")).hexdigest()
+    name = f"crisisradar-report-{report_date[:10] or 'undated'}"
+    pdf_key = f"{key}_pdf"
+    with st.container(horizontal=True, key=f"{key}_downloads"):
+        st.download_button(
+            "Download report (HTML)", document.encode("utf-8"), f"{name}.html", "text/html", key=f"{key}_download",
+            help="All three templates with every Negative Post Report, ready to share or print.",
+        )
+        stored = st.session_state.get(pdf_key)
+        if stored and stored[0] == digest:
+            st.download_button("Download PDF", stored[1], f"{name}.pdf", "application/pdf",
+                               key=f"{key}_pdf_download", type="primary")
+        elif st.button("Create PDF", key=f"{key}_pdf_create",
+                       help="A4 landscape: one page per template and per Negative Post Report."):
+            try:
+                with st.spinner("Creating PDF…"):
+                    pdf = render_pdf(document, f"CrisisRadar report · {report_date[:10] or 'undated'}")
+            except PDFExportError as exc:
+                st.error(str(exc))
+            else:
+                st.session_state[pdf_key] = (digest, pdf)
+                st.rerun()
 
 
 def _render_processed_deletion(rows: List[Dict[str, Any]]) -> None:

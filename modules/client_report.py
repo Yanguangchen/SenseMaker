@@ -556,8 +556,10 @@ def npr_sheet(record: dict[str, Any], records: list[dict[str, Any]], report_date
     )
     sentiment = (
         '<div class="crt-box crt-box--card crt-npr__sentiment"><div class="crt-label">Sentiment</div>'
-        f'<div class="crt-metric"><p>Neg {_fill(shares["Negative"])}% Neu {_fill(shares["Neutral"])}% '
-        f'Pos {_fill(shares["Positive"])}%</p><p>Tone: {_fill(view["tone"] or None)}</p>'
+        '<div class="crt-metric"><p class="crt-split">'
+        + "".join(f'<span>{label} {_fill(shares[bucket])}%</span>'
+                  for label, bucket in (("Neg", "Negative"), ("Neu", "Neutral"), ("Pos", "Positive")))
+        + f'</p><p class="crt-tone">Tone: {_fill(view["tone"] or None)}</p>'
         f'<p class="crt-muted crt-small">{_text(view["sentiment_basis"])}</p></div></div>'
     )
     words = "".join(f'<span class="crt-w crt-w--{weight}">{_text(word)}</span>' for word, weight in view["cloud"])
@@ -565,7 +567,8 @@ def npr_sheet(record: dict[str, Any], records: list[dict[str, Any]], report_date
         '<div class="crt-box crt-box--card crt-npr__cloud"><div class="crt-label">Word cloud</div>'
         f'<div class="crt-cloud" role="img" aria-label="Most frequent words in the English translation">'
         f'{words or "<span class=crt-muted>No translated text to summarise.</span>"}</div>'
-        f'<p style="margin-top:12px">Dominant themes: {_fill(", ".join(view["themes"]) or None)}</p></div>'
+        f'<p class="crt-tone" style="margin-top:12px">Dominant themes: {_fill(", ".join(view["themes"]) or None)}</p>'
+        "</div>"
     )
     velocity_choice = {"up": "▲ Up", "down": "▼ Down"}.get(view["direction"] or "")
     classification = (
@@ -606,9 +609,11 @@ def report_document(records: list[dict[str, Any]], report_date: str) -> str:
         '<meta name=viewport content="width=device-width, initial-scale=1">'
         f"<title>{_text(title)}</title>"
         '<link rel=preconnect href="https://fonts.googleapis.com">'
-        '<link rel=stylesheet href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap">'
+        '<link rel=stylesheet href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800'
+        '&family=Noto+Sans+Khmer:wght@400;700&family=Noto+Sans+Thai:wght@400;700&display=swap">'
         f"<style>{stylesheet()}"
         "body{margin:0;padding:24px;background:#e8eae5}"
+        "@page{size:A4 landscape;margin:8mm 8mm 12mm}"
         "@media print{body{padding:0;background:#fff}}</style></head><body>"
         + sentiment_sheet(records, report_date) + velocity_sheet(records, report_date) + reports
         + "</body></html>"
