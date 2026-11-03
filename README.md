@@ -232,7 +232,27 @@ characters each). Removed content, collection errors and unanalyzed records are 
 Changing selected data, inputs, provider or model clears the displayed plan. Plans remain
 in the current session; download the keyword CSV and full JSON plan to keep a copy.
 
-## Delete processed records
+## Manage and delete records
+
+Open **Manage records** in the sidebar and click **Load / refresh records**. Filter the shared
+library by dataset (saved Custom title), source or status, and search by dataset, page title,
+URL or record ID. Pending, processed, error, removed and legacy records are supported.
+
+Select individual **Records to delete**, or **Select all records on this page**, then click
+**Review deletion of … record(s)**. Check the preview before **Permanently delete … record(s)**,
+or use **Cancel deletion**. Nothing starts selected. Each deletion covers at most 200 records;
+for a larger dataset, filter by its title and repeat on the remaining pages. Changing a filter,
+page, search or selection invalidates the deletion preview.
+
+Deletion removes the source record and its saved analysis for all approved users. The server
+rechecks each record's Firestore update version in a transaction and keeps records changed
+since loading; refresh to review those again. Timeline summaries, saved source links,
+GenCite analyses and exported files remain. Deleted records are removed from the current
+session's analysis and collection copies. Collecting and saving a URL again can create it anew;
+an analysis already in flight cannot recreate a deleted source record.
+
+The management catalog loads metadata only, on request, and does not require an AI API key.
+It uses the same approved-user access as the other workspaces; the cloud library is shared.
 
 In **Sentiment Analysis**, load processed records, open **Delete processed records**,
 select records, and confirm their permanent deletion. This removes the selected records

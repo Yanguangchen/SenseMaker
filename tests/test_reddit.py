@@ -143,7 +143,8 @@ class RedditPersistenceTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             upsert_post(db, {"url": CAMBODIA_URL, "source_type": "batch_warning"})
         mark_post_processed(db, "a", None, "error")
-        self.assertEqual(ref.set.call_args.args[0]["analysis"], firestore.DELETE_FIELD)
+        self.assertEqual(ref.update.call_args.args[0]["analysis"], firestore.DELETE_FIELD)
+        ref.set.assert_not_called()
 
 
 if __name__ == "__main__":

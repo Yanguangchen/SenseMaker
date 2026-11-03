@@ -88,11 +88,13 @@ def persist_analysis_run(
     collection = db.collection(_get_collection_name())
     for key in ids:
         analysis = analyses_by_id.get(key)
-        batch.set(collection.document(key), {
+        # Update requires an existing source: a concurrent deletion must not be
+        # undone by an AI request that started while the record still existed.
+        batch.update(collection.document(key), {
             "status": "processed" if analysis else "error",
             "processed_at": completed_at,
             "analysis": analysis if analysis else firestore.DELETE_FIELD,
-        }, merge=True)
+        })
     if snapshot:
         batch.set(db.collection(history_collection()).document(snapshot["run_id"]), snapshot)
     batch.commit(timeout=30)

@@ -30,6 +30,7 @@ Use the Google account approved by your administrator. A Google login grants acc
 | Sentiment Trends | Compare saved analysis runs and news scans over time. |
 | Content plan | Turn analyzed concerns into keywords, content briefs and drafts. |
 | GenCite | Measure brand mentions in sampled AI answers and explore visibility gaps. |
+| Manage records | Find saved records, filter a dataset and delete selected records with a preview. |
 | Tutorial | Look up a workflow, search for a control or download this guide. |
 
 Click the CrisisRadar heading to collapse or expand the sidebar. On small screens it may start collapsed; the icons still open each workspace. Keyboard users can Tab to a workspace, use Up/Down or Home/End to move among navigation buttons, and press Enter to open one. Escape collapses the sidebar.
@@ -210,7 +211,19 @@ In **Recommendations**, generate content recommendations or keyword ideas based 
 
 Approved users share the cloud source-record library. A **Custom title** labels a record; it does not create a private project or restrict access. Facebook source-link libraries and saved GenCite analyses are account-specific.
 
-To delete saved processed records, open **Sentiment Analysis**, click **Load processed records**, expand **Delete processed records**, select records and click **Delete selected records**. Review the confirmation before clicking **Permanently delete … record(s)**. This removes those records and their saved analyses from the shared library for all users. Timeline summaries remain, and downloaded exports remain unchanged.
+To manage or delete saved records:
+
+1. Open **Manage records** in the sidebar and click **Load / refresh records**.
+2. Choose a **Dataset**, **Source** and/or **Status**, or use **Search records** to find a saved title, page title, URL or record ID. All analysis statuses are available, including pending and error records.
+3. Review the table. Choose individual **Records to delete**, or click **Select all records on this page**. Nothing is selected automatically. The displayed count tells you exactly how many records are included.
+4. Click **Review deletion of … record(s)** and check the preview. Click **Permanently delete … record(s)** to proceed, or **Cancel deletion** to keep them. Deletion cannot be undone and affects every user of the shared library.
+5. Read the result. Records changed by another operation after you loaded them are kept; refresh to review their current versions. If a deletion cannot be confirmed, reload the library before retrying.
+
+To clear a dataset, filter by its Custom title and select its records. You can delete up to 200 records per confirmation; use **Records per page** and repeat for larger datasets. Changing a filter, search, page or selection cancels the previous review, so confirm only the selection currently shown.
+
+Deleting a record removes its saved sentiment analysis too. Timeline summaries, saved source links, saved GenCite analyses and downloaded exports remain. The current session's collection copies and loaded results are cleared of deleted records. Collecting and saving a URL again can add it back to the library. An analysis already running cannot recreate a source that has been deleted.
+
+The earlier shortcut is also available: in **Sentiment Analysis**, load processed records, expand **Delete processed records**, select records, and review and confirm deletion. This shortcut handles processed records only; **Manage records** covers all statuses.
 
 Removing Facebook source links is different from deleting source records. Sign-out clears the current session's loaded data; saved cloud records remain available subject to access permissions. Save or export work before leaving a session.
 

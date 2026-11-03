@@ -21,6 +21,8 @@ from modules.auth import require_access
 from modules.ui import apply_brand
 from modules.analysis_library import dataset_key, dataset_options, select_history, select_records, source_key
 from modules.recent_collection import collection_snapshot
+from modules.record_management_ui import render_record_management
+from modules.record_state import purge_record_caches
 from modules.navigation import dashboard_views
 from modules.content_recommendations_ui import render_content_workspace
 from modules.tutorial_ui import render_tutorial_workspace
@@ -1002,21 +1004,7 @@ def _render_processed_deletion(rows: List[Dict[str, Any]]) -> None:
                 except Exception:
                     st.error("Deletion could not be confirmed. Reload processed records to check their status before retrying.")
                 else:
-                    # Drop stale copies, including records another session already removed or changed.
-                    stale = set(result["deleted"] + result["missing"] + result["skipped"])
-                    for key in ("processed_rows", "firestore_rows"):
-                        if key in st.session_state:
-                            st.session_state[key] = [row for row in st.session_state[key]
-                                                     if str(row.get("_id", "")) not in stale]
-                    if "firestore_rows" in st.session_state:
-                        st.session_state["firestore_last_load_count"] = len(st.session_state["firestore_rows"])
-                    for key in ("analysis_last_results", "gemini_last_results"):
-                        if key in st.session_state:
-                            summary = dict(st.session_state[key])
-                            summary["analyses"] = [row for row in summary.get("analyses", [])
-                                                   if str(row.get("_id", "")) not in stale]
-                            summary["processed"] = len(summary["analyses"])
-                            st.session_state[key] = summary
+                    purge_record_caches(st.session_state, result)
                     st.session_state.pop(pending_key, None)
                     st.session_state["processed_delete_reset"] = True
                     st.session_state["processed_delete_notice"] = result
@@ -1735,7 +1723,7 @@ def main() -> None:
                             _get_facebook_session(_facebook_storage_path()))
     except Exception:
         facebook_session = FacebookSession()
-    scrape_tab, analysis_tab, trends_tab, content_tab, gencite_tab, tutorial_tab = dashboard_views(user_email, facebook_session)
+    scrape_tab, analysis_tab, trends_tab, content_tab, gencite_tab, records_tab, tutorial_tab = dashboard_views(user_email, facebook_session)
 
     with scrape_tab:
         facebook_tab, reddit_tab, news_tab, x_tab, website_tab = st.tabs(["Facebook", "Reddit", "Online news", "X", "Custom website"])
@@ -1773,7 +1761,7 @@ def main() -> None:
                 st.write(f"**{recent['title']}**")
                 st.caption(f"Source: {recent['source']} · {len(recent_ids)} analyzable records")
                 if not recent_ids:
-                    st.info("The last collection returned no analyzable records. Collect again or choose a saved dataset manually.")
+                    st.info("No analyzable records remain in the last collection. Collect again or choose a saved dataset manually.")
                 elif not recent.get("saved"):
                     st.caption("Save and load adds new records to your cloud library under the title above. "
                                "Existing URLs follow the platform's usual save rules. Review the loaded text before analysis.")
@@ -1976,6 +1964,9 @@ def main() -> None:
 
     with gencite_tab:
         render_gencite_workspace(user_email)
+
+    with records_tab:
+        render_record_management()
 
     with tutorial_tab:
         render_tutorial_workspace()
