@@ -240,9 +240,16 @@ URL or record ID. Pending, processed, error, removed and legacy records are supp
 
 Select individual **Records to delete**, or **Select all records on this page**, then click
 **Review deletion of … record(s)**. Check the preview before **Permanently delete … record(s)**,
-or use **Cancel deletion**. Nothing starts selected. Each deletion covers at most 200 records;
-for a larger dataset, filter by its title and repeat on the remaining pages. Changing a filter,
+or use **Cancel deletion**. Nothing starts selected. Each individual-record deletion covers at most 200 records.
+Changing a filter,
 page, search or selection invalidates the deletion preview.
+
+To remove a whole dataset, choose its title under **Dataset**, click **Review dataset deletion**,
+check the preview, then **Permanently delete dataset**. This includes all reviewed records under
+that title across pages, sources and statuses, regardless of the table's other filters. Large
+datasets are deleted in batches under one confirmation. Records changed or added since loading
+are kept. The library refreshes afterward, and an empty dataset disappears from the list. If a
+later batch fails, the result reports confirmed deletions and asks you to refresh before retrying.
 
 Deletion removes the source record and its saved analysis for all approved users. The server
 rechecks each record's Firestore update version in a transaction and keeps records changed

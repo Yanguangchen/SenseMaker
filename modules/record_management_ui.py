@@ -5,10 +5,10 @@ from math import ceil
 import pandas as pd
 import streamlit as st
 
-from modules.analysis_library import dataset_options, select_records
+from modules.analysis_library import dataset_key, dataset_options, select_records
 from modules.client_report import platform_label
 from modules.config import get_setting
-from modules.database import delete_records, init_db, load_record_catalog
+from modules.database import delete_dataset_records, delete_records, init_db, load_record_catalog
 from modules.record_state import purge_record_caches
 
 
@@ -50,6 +50,57 @@ def _clear_selection() -> None:
     # clears server state and can leave the old selection visibly selected.
     st.session_state["record_manager_selection"] = []
     st.session_state.pop("record_manager_pending", None)
+    st.session_state.pop("dataset_delete_pending", None)
+
+
+def _render_dataset_deletion(rows: list[dict], dataset: str | None) -> None:
+    records = [row for row in rows if dataset is not None and dataset_key(row) == dataset]
+    versions = {row["_id"]: row["_version"] for row in records}
+    review = {"dataset": dataset, "versions": versions}
+    if st.session_state.get("dataset_delete_pending") != review:
+        st.session_state.pop("dataset_delete_pending", None)
+    with st.container(border=True):
+        st.markdown("**Delete an entire dataset**")
+        if dataset is None:
+            st.caption("Choose a single Dataset above to delete it in full.")
+        else:
+            st.caption(f"{len(records)} records across all pages, sources and statuses. "
+                       "Source, status and search filters do not limit this action.")
+        if st.button("Review dataset deletion", key="dataset_delete_review", disabled=not versions):
+            _clear_selection()
+            st.session_state["dataset_delete_pending"] = review
+        if st.session_state.get("dataset_delete_pending") == review and versions:
+            title = str(records[0].get("custom_title") or "").strip() or "Untitled (older records)"
+            st.warning(f'Permanently delete dataset "{title}" and all {len(records)} reviewed records and their saved analyses? '
+                       "This affects all users and cannot be undone. Changed records and newly added records are kept.")
+            st.dataframe(_table(records), hide_index=True, width="stretch")
+            confirm, cancel = st.columns(2)
+            if confirm.button("Permanently delete dataset", key="dataset_delete_confirm", type="primary"):
+                progress = st.progress(0, text="Deleting dataset…")
+                try:
+                    db = init_db()
+                    result = delete_dataset_records(db, dataset, versions, on_progress=lambda done, total:
+                        progress.progress(done / total, text=f"Checked {done} of {total} reviewed records"))
+                except Exception:
+                    result = {"deleted": [], "skipped": [], "missing": [], "unconfirmed": list(versions)}
+                purge_record_caches(st.session_state, {**result, "skipped": result["skipped"] + result["unconfirmed"]})
+                st.session_state.pop("record_manager_rows", None)
+                complete = False
+                if not result["unconfirmed"]:
+                    try:
+                        fresh = load_record_catalog(db)
+                        st.session_state["record_manager_rows"] = fresh
+                        complete = not any(dataset_key(row) == dataset for row in fresh)
+                    except Exception:
+                        pass  # Deletion counts are known even if refreshing the catalog failed.
+                st.session_state["dataset_delete_notice"] = {"title": title, "result": result, "complete": complete}
+                if complete:
+                    st.session_state["record_manager_removed_dataset"] = dataset
+                st.session_state.pop("dataset_delete_pending", None)
+                st.rerun()
+            if cancel.button("Cancel dataset deletion", key="dataset_delete_cancel"):
+                st.session_state.pop("dataset_delete_pending", None)
+                st.rerun()
 
 
 def render_record_management() -> None:
@@ -80,6 +131,23 @@ def render_record_management() -> None:
             st.info(f"{len(notice['missing'])} record(s) had already been deleted.")
     if st.session_state.get("record_manager_error"):
         st.error(st.session_state["record_manager_error"])
+    dataset_notice = st.session_state.pop("dataset_delete_notice", None)
+    if dataset_notice:
+        result = dataset_notice["result"]
+        if dataset_notice["complete"]:
+            st.success(f'Dataset "{dataset_notice["title"]}" deleted. Removed {len(result["deleted"])} record(s).')
+        else:
+            st.warning(f'Deleted {len(result["deleted"])} record(s) from "{dataset_notice["title"]}". '
+                       "Dataset removal is incomplete or could not be verified. Refresh records before retrying.")
+        if result["skipped"]:
+            st.info(f'Kept {len(result["skipped"])} record(s) changed since loading or moved to another dataset.')
+        if result["unconfirmed"]:
+            st.error(f'Could not confirm deletion of {len(result["unconfirmed"])} remaining record(s). '
+                     "Earlier confirmed deletions are included in the count above.")
+    removed_dataset = st.session_state.pop("record_manager_removed_dataset", None)
+    if removed_dataset and st.session_state.get("record_manager_dataset") == removed_dataset:
+        st.session_state["record_manager_dataset"] = None
+        _clear_selection()
     if "record_manager_rows" not in st.session_state:
         st.caption("Load the library to browse records. Nothing is selected or deleted automatically.")
         return
@@ -135,6 +203,7 @@ def render_record_management() -> None:
         _clear_selection()
         st.session_state["record_manager_view"] = view
     st.caption(f"{len(rows)} saved records · {len(matching)} match your filters · {len(visible)} on this page")
+    _render_dataset_deletion(rows, dataset)
     if not visible:
         st.info("No records match. Try another dataset, source, status or search.")
         return
@@ -156,6 +225,7 @@ def render_record_management() -> None:
     if st.session_state.get("record_manager_pending") != versions:
         st.session_state.pop("record_manager_pending", None)
     if st.button(f"Review deletion of {len(versions)} record(s)", key="record_manager_review", disabled=not versions):
+        st.session_state.pop("dataset_delete_pending", None)
         st.session_state["record_manager_pending"] = versions.copy()
     pending = st.session_state.get("record_manager_pending")
     if pending:
