@@ -91,6 +91,7 @@ class CollectionProgressUITests(unittest.TestCase):
             app = AppTest.from_string(self.script)
             app.session_state["last_scrape_results"] = [{"source_type": "batch_error", "raw_text": "Old busy error"}]
             app.run()
+            app.button(key="open_facebook_steps").click().run()
             self.assertFalse(list(app.exception))
             self.assertTrue(app.button(key="collect_facebook_posts").disabled)
             self.assertFalse(app.button(key="cancel_facebook_collection").disabled)
@@ -109,6 +110,8 @@ class CollectionProgressUITests(unittest.TestCase):
             app = AppTest.from_string(self.script)
             app.session_state["last_scrape_results"] = [{"source_type": "batch_error", "raw_text": "Old busy error"}]
             app.run()
+            app.button(key="open_facebook_steps").click().run()
+            app.button(key="facebook_wizard_step_next").click().run()
             app.button(key="collect_facebook_posts").click().run()
             self.assertFalse(list(app.exception))
             launch.assert_called_once()

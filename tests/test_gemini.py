@@ -12,6 +12,7 @@ from streamlit.testing.v1 import AppTest
 
 from modules.gemini import GeminiError, api_error, list_text_models, normalize_model_name, resolve_model
 from modules.processor import _generate_content, analyze_posts_with_gemini
+from tests.analysis_steps import ui
 
 
 def response(payload):
@@ -104,6 +105,11 @@ class ModelTests(unittest.TestCase):
 
 
 class GeminiSettingsTests(unittest.TestCase):
+    def setUp(self):
+        access = patch("modules.auth.verify_access", return_value="editor@example.com")
+        access.start()
+        self.addCleanup(access.stop)
+
     script = "from dashboard import _render_gemini_settings\n_render_gemini_settings()\n"
 
     def test_refresh_replaces_unavailable_legacy_model_and_key_change_clears_catalogue(self):
@@ -138,15 +144,15 @@ class GeminiSettingsTests(unittest.TestCase):
              patch("modules.processor.resolve_model", side_effect=GeminiError("Gemini HTTP 404: Model unavailable.")):
             app = AppTest.from_file(str(Path(__file__).resolve().parents[1] / "dashboard.py"))
             app.run()
+            ui(app, "analysis_sources").select("source:other").run()
             app.session_state["analysis_dataset_catalog"] = {"rows": [{"key": "untitled:", "title": "Untitled", "count": 1, "pending": 0}], "error": False}
             app.run()
-            app.selectbox(key="analysis_dataset").select("untitled:").run()
+            ui(app, "analysis_datasets").select("untitled:").run()
             app.selectbox(key="analysis_record_status").select("all").run()
             app.session_state["firestore_rows"] = [{"_id": "a", "raw_text": "A Thai project", "status": "processed"}]
             app.run()
-            app.multiselect(key="analysis_record_selection").select("a").run()
             self.assertFalse(any("API key" in e.label for e in app.text_input))
-            app.button(key="run_analysis_selected_btn").click().run()
+            ui(app, "run_analysis_selected_btn").click().run()
             app.run()
             self.assertFalse(list(app.exception))
             self.assertTrue(any("HTTP 404" in e.value for e in app.error))

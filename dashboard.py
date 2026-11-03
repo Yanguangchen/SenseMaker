@@ -19,7 +19,11 @@ import streamlit as st
 
 from modules.auth import require_access
 from modules.ui import apply_brand
-from modules.analysis_library import dataset_key, dataset_options, select_history, select_records, source_key
+from modules.analysis_library import (
+    SOURCE_LABELS, dataset_date_label, dataset_key, dataset_options, matches_sources,
+    select_history, select_records,
+)
+from modules.analysis_dataset_ui import render_dataset_editor
 from modules.recent_collection import collection_snapshot
 from modules.record_management_ui import render_record_management
 from modules.record_state import purge_record_caches
@@ -53,6 +57,7 @@ from modules.gemini import AUTO_MODEL, GeminiError, list_text_models, normalize_
 from modules.reddit import CAMBODIA_URL, is_reddit_url, reddit_configured
 from modules.x import READ_PRICE_USD, X_SEARCHES, XClient, XError, collect_x, estimate_reads, x_configured
 from modules.websites import MAX_LINKS as MAX_WEBSITE_LINKS, WebsiteError, collect_websites, parse_website_links
+from modules.website_presets_ui import render_website_presets
 from modules.signals import NON_CONTENT_TYPES, SIGNAL_LABELS, is_analyzable, is_flagged, watch_terms
 from modules.saved_links import library_owner_id, load_saved_links, parse_links, remove_saved_links, save_links
 from modules.sentiment_history import (
@@ -110,7 +115,7 @@ def _write_results_to_firestore(posts: List[Dict[str, Any]], custom_title: str) 
             continue
         payload = dict(post)
         payload["custom_title"] = safe_title
-        payload["saved_at"] = _now_iso()
+        payload["saved_at"] = save_timestamp
         if not payload.get("scraped_at"):
             payload["scraped_at"] = save_timestamp
         upsert_post(db, payload)
@@ -131,7 +136,7 @@ def _write_results_to_firestore(posts: List[Dict[str, Any]], custom_title: str) 
     return {"inserted": inserted, "skipped": skipped}
 
 
-def _fetch_last_scrape_posts(recent: dict[str, Any], status_filter: str, limit: int) -> list[dict[str, Any]]:
+def _fetch_last_scrape_posts(recent: dict[str, Any], status_filter: str, limit: int | None) -> list[dict[str, Any]]:
     """Read only this scrape's IDs; reused titles and older saves cannot expand it."""
     db = init_db()
     collection = db.collection(get_setting("FIREBASE_COLLECTION", "raw_posts"))
@@ -144,11 +149,12 @@ def _fetch_last_scrape_posts(recent: dict[str, Any], status_filter: str, limit: 
                 row = {**(doc.to_dict() or {}), "_id": doc.id}
                 if status_filter == "all" or row.get("status") == status_filter:
                     rows.append(row)
-    return select_records(rows, source_urls=None, limit=limit)
+    return select_records(rows, source_urls=None, limit=len(rows) if limit is None else limit)
 
 
 def _fetch_firestore_posts(
-    status_filter: str, limit: int, source_urls: list[str] | None = None, dataset: str | None = None,
+    status_filter: str, limit: int | None, source_urls: list[str] | None = None,
+    dataset: str | list[str] | None = None,
 ) -> List[Dict[str, Any]]:
     db = init_db()
     query = db.collection(get_setting("FIREBASE_COLLECTION", "raw_posts"))
@@ -159,27 +165,31 @@ def _fetch_firestore_posts(
     for doc in docs:
         item = doc.to_dict() or {}
         item["_id"] = doc.id
+        item["record_created_at"] = getattr(doc, "create_time", None)
         rows.append(item)
-    return select_records(rows, source_urls=source_urls, limit=limit, dataset=dataset)
+    return select_records(rows, source_urls=source_urls, limit=len(rows) if limit is None else limit, dataset=dataset)
 
 
 def _clear_loaded_analysis() -> None:
+    st.session_state["analysis_editor_revision"] = st.session_state.get("analysis_editor_revision", 0) + 1
     for key in ("firestore_rows", "processed_rows", "analysis_last_results", "gemini_last_results",
                 "firestore_load_error", "firestore_last_load_count", "analysis_record_selection",
                 "processed_delete_selection", "processed_delete_pending", "processed_delete_notice",
-                "content_recommendation_plan", "content_records"):
+                "content_recommendation_plan", "content_records", "analysis_editor_key", "analysis_editor_frame", "analysis_edits_saved"):
         st.session_state.pop(key, None)
 
 
 def _fetch_analysis_datasets(source_urls: list[str] | None) -> list[dict[str, Any]]:
     # Only metadata is needed to choose a dataset; source text loads on request.
     query = init_db().collection(get_setting("FIREBASE_COLLECTION", "raw_posts")).select([
-        "custom_title", "source_type", "target_url", "url", "status", "scraped_at", "saved_at", "created_at",
+        "custom_title", "source_type", "platform", "target_url", "url", "status", "scraped_at", "saved_at",
     ])
-    return dataset_options([doc.to_dict() or {} for doc in query.stream(timeout=30)], source_urls)
+    rows = [{**(doc.to_dict() or {}), "record_created_at": getattr(doc, "create_time", None)}
+            for doc in query.stream(timeout=30)]
+    return dataset_options(rows, source_urls)
 
 
-def _render_analysis_datasets(source_urls: list[str] | None, ready: bool) -> str | None:
+def _render_analysis_datasets(source_urls: list[str] | None, ready: bool) -> list[str]:
     def refresh() -> None:
         st.session_state.pop("analysis_dataset_catalog", None)
         _clear_loaded_analysis()
@@ -196,54 +206,41 @@ def _render_analysis_datasets(source_urls: list[str] | None, ready: bool) -> str
     options = {row["key"]: row for row in catalog.get("rows", [])}
     def label(key: str) -> str:
         row = options[key]
-        return f"{row['title']} · {row['count']} record{'s' if row['count'] != 1 else ''} · {row['pending']} pending"
+        return (f"{row['title']} · {dataset_date_label(row)} · {', '.join(row.get('sources', []))} · "
+                f"{row['count']} record{'s' if row['count'] != 1 else ''} · {row['pending']} pending")
 
-    if st.session_state.get("analysis_dataset") not in options:
-        st.session_state.pop("analysis_dataset", None)
-    selected = st.selectbox("Dataset to analyze", list(options), index=None, key="analysis_dataset",
-                            placeholder="Choose a saved dataset", disabled=not ready or not options,
-                            format_func=label)
-    st.caption("Datasets are grouped by the title saved with each collection (Custom title or Dataset title). Reusing a title groups those records together. "
-               "Choose one dataset before loading or analyzing records.")
+    # Preserve a single choice from sessions opened before multiple selection existed.
+    legacy = st.session_state.pop("analysis_dataset", None)
+    current = st.session_state.get("analysis_datasets", [legacy] if legacy else [])
+    st.session_state["analysis_datasets"] = list(dict.fromkeys(key for key in current if key in options))
+    selected = st.multiselect("Datasets to analyze", list(options), key="analysis_datasets",
+                              placeholder="Choose one or more saved datasets", disabled=not ready or not options,
+                              format_func=label)
     if ready and not options and not catalog.get("error"):
         st.info("No saved datasets match these sources. Save a collection with a Custom title, then refresh datasets.")
     return selected
 
 
-def _sync_analysis_dataset(dataset: str | None, status: str, limit: int) -> None:
-    context = (dataset, status, limit)
+def _sync_analysis_datasets(datasets: list[str], status: str, limit: int | None = None) -> None:
+    context = (tuple(sorted(set(datasets))), status, limit)
     if st.session_state.get("analysis_dataset_context") != context:
         _clear_loaded_analysis()
         st.session_state["analysis_dataset_context"] = context
 
 
 def _render_analysis_sources(user_email: str) -> tuple[list[str] | None, bool]:
-    scope = st.selectbox("Record sources", ["Current sources", "All saved records (including older sources)"],
-                         index=1, key="analysis_source_scope")
-    sources: list[str] | None = None
-    ready = True
-    if scope == "Current sources":
-        library = st.session_state.get(f"saved_links_{library_owner_id(user_email)}_facebook", {})
-        ready = bool(library) and not library.get("error", False)
-        sources = sorted(set([CAMBODIA_URL] + library.get("urls", []))) if ready else []
-        st.caption("Uses your saved Facebook sources, r/cambodia, saved Online News articles, X posts and custom website pages. "
-                   "Older groups appear only when you choose all saved records. Newest collected records load first.")
-        if not ready:
-            st.warning("Your source library could not be loaded. Refresh saved links in Scrape Data → Facebook, "
-                       "then try again.")
-        elif sources:
-            with st.expander("Current analysis sources"):
-                st.code("\n".join(sources))
-                st.caption("Plus articles you save from Online News.")
-    else:
-        st.caption("Choose from all saved datasets, including sources outside your current saved link list.")
-    context = (get_setting("FIREBASE_COLLECTION", "raw_posts"), scope, ready,
-               tuple(sorted(source_key(url) for url in (sources or []))))
+    st.session_state.pop("analysis_source_scope", None)
+    sources = st.multiselect("Record sources", list(SOURCE_LABELS), key="analysis_sources",
+                             format_func=SOURCE_LABELS.get, placeholder="Choose the sources to analyze")
+    ready = bool(sources)
+    if not ready:
+        st.info("Choose at least one record source to see its saved datasets.")
+    context = (get_setting("FIREBASE_COLLECTION", "raw_posts"), "explicit-sources", tuple(sorted(sources)))
     if st.session_state.get("analysis_library_context") != context:
         # Includes sessions created before source selection existed. No stale rows
         # or prior AI results can survive a change of source library.
         _clear_loaded_analysis()
-        for key in ("analysis_dataset_catalog", "analysis_dataset", "analysis_dataset_context"):
+        for key in ("analysis_dataset_catalog", "analysis_dataset", "analysis_datasets", "analysis_dataset_context"):
             st.session_state.pop(key, None)
         st.session_state["analysis_library_context"] = context
     return sources, ready
@@ -261,7 +258,9 @@ def _process_selected_firestore_posts(
     db = init_db()
     model_name = (st.session_state.get("gemini_model_name", get_ai_model(provider))
                   if provider == "gemini" else get_ai_model(provider))
-    targets = watch_terms(st.session_state.get("thailand_watch_terms", ""))
+    # The watch-terms box lives on a step that may be hidden while the run starts.
+    targets = watch_terms(st.session_state.get("thailand_watch_terms")
+                          or st.session_state.get(ANALYSIS_WATCH_MEMO_KEY, ""))
     analysis_by_id = analyze_posts(
         selected_posts,
         provider=provider,
@@ -282,6 +281,7 @@ def _process_selected_firestore_posts(
             continue
         analysis = analysis_by_id.get(doc_id)
         if analysis:
+            post.update(status="processed", analysis=analysis, processed_at=completed_at)
             processed += 1
             analyses.append({
                 **analysis,
@@ -306,6 +306,7 @@ def _process_selected_firestore_posts(
                 "processed_at": completed_at,
             })
         else:
+            post["status"] = "error"
             errored += 1
     return {"processed": processed, "error": errored, "analyses": analyses,
             "errors": list(getattr(analysis_by_id, "errors", [])), "history_run": snapshot}
@@ -319,8 +320,6 @@ def _load_sentiment_history() -> list[dict[str, Any]]:
 def _render_sentiment_history(source_urls: list[str] | None = None) -> None:
     with st.container(border=True, key="sentiment_history"):
         st.subheader("Sentiment over time")
-        st.caption("One point per AI analysis and per Online News search · Higher is more positive · "
-                   "Dashed line is the average of all points · Red rings mark border tension or boycott signals")
         if st.button("Refresh timeline", key="refresh_sentiment_history"):
             _load_sentiment_history.clear()
             _load_news_history.clear()
@@ -330,12 +329,10 @@ def _render_sentiment_history(source_urls: list[str] | None = None) -> None:
             st.warning("Sentiment history could not be loaded. Refresh the timeline to try again.")
             return
         visible_analysis = select_history(analysis_rows, source_urls)
-        if len(visible_analysis) < len(analysis_rows):
-            st.caption("Previous runs from other or unrecorded sources are hidden. "
-                       "Choose all saved records in Sentiment Analysis to view the full history.")
         analysis_rows = visible_analysis
         try:
-            news_rows = news_sentiment_rows(_load_news_history())
+            news_rows = (news_sentiment_rows(_load_news_history())
+                         if source_urls is None or "source:news" in source_urls else [])
         except Exception:
             news_rows = []
             st.caption("Online News points couldn't be loaded. Refresh the timeline to try again.")
@@ -714,6 +711,10 @@ def _render_link_workspace(user_email: str, platform: str | None = None) -> tupl
     library = st.session_state[library_key]
     saved = list(dict.fromkeys(default_links + library["urls"]))
     saved_set = set(saved)
+    memo_key = f"links_selection_memo_{owner}"
+    if selection_key not in st.session_state and st.session_state.get(memo_key):
+        # Streamlit drops widget state while this step is hidden; restore the earlier choice.
+        st.session_state[selection_key] = list(st.session_state[memo_key])
     if not st.session_state.get(defaults_key):
         st.session_state[selection_key] = list(dict.fromkeys(
             st.session_state.get(selection_key, []) + default_links))
@@ -777,6 +778,7 @@ def _render_link_workspace(user_email: str, platform: str | None = None) -> tupl
             f"Sources ({len(saved)})", options=saved, key=selection_key,
             placeholder="Search and choose saved links", disabled=not saved,
         )
+        st.session_state[memo_key] = list(selected)
         select_action, clear_action, refresh_action = st.columns(3)
         select_action.button(
             "Select all", key=widget_key("select_all_links"), use_container_width=True,
@@ -1218,7 +1220,17 @@ button[data-testid="stExpandSidebarButton"], [data-testid="stSidebarCollapseButt
   .block-container { padding-inline: 20px; }
 }
 
+/* Step modals: darken and blur the workspace behind the dialog so one step holds attention. */
+div[data-testid="stDialog"] > div {
+  background-color: rgba(9, 13, 20, 0.58) !important;
+  backdrop-filter: blur(7px) saturate(85%);
+  -webkit-backdrop-filter: blur(7px) saturate(85%);
+}
+div[data-testid="stDialog"] div[role="dialog"] {
+  box-shadow: 0 26px 64px rgba(8, 12, 20, 0.45);
+}
 @media (prefers-reduced-motion: reduce) {
+  div[data-testid="stDialog"] > div { backdrop-filter: none; -webkit-backdrop-filter: none; }
   .stApp button,
   .stApp a,
   .stApp summary,
@@ -1322,7 +1334,8 @@ def _collection_save_pending(key: str) -> bool:
             and bool(_collection_record_keys(collection.get("rows", []))))
 
 
-def _render_autosave_status(collection: dict[str, Any], retry_key: str) -> None:
+def _render_autosave_status(collection: dict[str, Any], retry_key: str,
+                            on_saved: Callable[[], None] | None = None) -> None:
     if not _collection_record_keys(collection.get("rows", [])):
         return
     save = collection.get("cloud_save") or {}
@@ -1335,6 +1348,8 @@ def _render_autosave_status(collection: dict[str, Any], retry_key: str) -> None:
         st.caption(f"Dataset: {save['title']} · Retrying saves these results without scraping again.")
         if st.button("Retry saving collected records", key=retry_key):
             _autosave_collection(collection, source="")  # Reuses the frozen dataset title and collected rows.
+            if save.get("state") == "saved" and on_saved:
+                on_saved()
             st.rerun()
 
 
@@ -1369,26 +1384,188 @@ def _render_facebook_collection_progress(email: str, job_id: str) -> None:
         cancel_collection(email, job_id)
 
 
+FACEBOOK_STEP_KEY = "facebook_wizard_step"
+FACEBOOK_TARGETS_KEY = "facebook_wizard_targets"
+FACEBOOK_LINKS_VALID_KEY = "facebook_wizard_links_valid"
+
+
+def _facebook_ready(session: FacebookSession) -> bool:
+    """A hosted collection needs a confirmed connection; a local one reuses a saved session."""
+    return session.status == "connected" if IS_CLOUD else session.status in {"connected", "saved"}
+
+
+def _auto_check_facebook(user_email: str, session: FacebookSession) -> FacebookSession:
+    """Confirm a saved hosted login once per visit so a working connection stays out of the way."""
+    if not IS_CLOUD or session.status != "saved":
+        return session
+    if st.session_state.get("facebook_login_job") or st.session_state.get("facebook_auto_check_started"):
+        return session
+    st.session_state["facebook_auto_check_started"] = True
+    from modules.auth import allowed_emails, verify_access
+    try:
+        if verify_access(st.session_state.get("auth_token", ""), allowed_emails()) != user_email:
+            return session
+    except Exception:
+        return session  # main() will rerun the authorization gate before rendering.
+    try:
+        st.session_state["facebook_login_job"] = start_login(user_email, check_only=True)
+    except Exception:
+        logging.getLogger(__name__).exception("Automatic Facebook connection check could not start")
+    return session
+
+
+def _render_step_header(labels: List[str], index: int) -> None:
+    for column, (position, label) in zip(st.columns(len(labels)), enumerate(labels)):
+        if position < index:
+            column.caption(f"✓ {label}")
+        elif position == index:
+            column.markdown(f"**Step {position + 1} · {label}**")
+        else:
+            column.caption(f"{position + 1}. {label}")
+
+
+FOCUS_MODAL_KEY = "focus_workspace_modal"
+
+
+def _open_focus_modal(name: str) -> None:
+    st.session_state[FOCUS_MODAL_KEY] = name
+    st.session_state[f"{name}_wizard_visited"] = True
+    st.session_state["x_focus_open"] = False  # Streamlit allows one open dialog per run.
+
+
+def _close_focus_modal() -> None:
+    st.session_state.pop(FOCUS_MODAL_KEY, None)
+
+
+def _focus_modal_open(name: str) -> bool:
+    # Only one workspace shows its steps at a time; Streamlit allows one open dialog per run,
+    # so the X workspace's own dialog takes precedence over these.
+    if st.session_state.get("x_focus_open"):
+        return False
+    return st.session_state.get(FOCUS_MODAL_KEY) == name
+
+
+def _render_focus_trigger(name: str, labels: List[str], index: int, start_label: str) -> None:
+    started = bool(st.session_state.get(f"{name}_wizard_visited"))
+    label = (f"Continue · step {index + 1} of {len(labels)}: {labels[index]}" if started else start_label)
+    st.button(label, key=f"open_{name}_steps", type="primary", use_container_width=True,
+              help="Opens the guided steps in a focused window.",
+              on_click=_open_focus_modal, args=(name,))
+
+
+def _go_to_step(step_key: str, label: str) -> None:
+    st.session_state[step_key] = label
+
+
+def _render_step_nav(step_key: str, labels: List[str], index: int, can_continue: bool) -> None:
+    # A callback keeps the step change in one script run, so the hidden step leaves no stale widgets.
+    previous, following = st.columns(2)
+    previous.button("← Previous", key=f"{step_key}_previous", use_container_width=True,
+                    disabled=index == 0, on_click=_go_to_step,
+                    args=(step_key, labels[max(index - 1, 0)]))
+    following.button("Next →", key=f"{step_key}_next", use_container_width=True,
+                     disabled=index >= len(labels) - 1 or not can_continue, on_click=_go_to_step,
+                     args=(step_key, labels[min(index + 1, len(labels) - 1)]))
+
+
 def _render_collection_workspace(
     platform: str, user_email: str, facebook_session: FacebookSession,
 ) -> None:
     if platform == "facebook":
-        _render_facebook_connection(facebook_session, user_email=user_email)
-        reddit_limit, reddit_comments = 50, 20
-        target_urls, links_valid = _render_link_workspace(user_email, platform=platform)
-    else:
-        reddit_limit, reddit_comments = _render_reddit_settings()
-        target_urls, links_valid = [CAMBODIA_URL], True
+        _render_facebook_workspace(user_email, facebook_session)
+        return
+    reddit_limit, reddit_comments = _render_reddit_settings()
+    _render_collect_controls(
+        "reddit", user_email, [CAMBODIA_URL], True, facebook_session,
+        use_headless=True, scroll_times=10,
+        reddit_limit=reddit_limit, reddit_comments=reddit_comments,
+    )
 
-    if platform == "facebook":
-        if target_urls and facebook_session.status not in {"connected", "saved"}:
-            st.info("Connect your Facebook account above before collecting Facebook posts.")
-        tc1, tc2 = st.columns(2)
-        use_headless = tc1.checkbox("Headless Browser", value=True, disabled=IS_CLOUD, key="facebook_headless")
-        scroll_times = tc2.slider("Scroll Iterations", min_value=1, max_value=50, value=10, key="facebook_scroll_times")
-    else:
-        use_headless, scroll_times = True, 10
 
+def _render_facebook_workspace(user_email: str, session: FacebookSession) -> None:
+    """Open the guided steps in a focused modal: connect (only when needed), links, then collect."""
+    session = _auto_check_facebook(user_email, session)
+    labels = ([] if _facebook_ready(session) else ["Connect Facebook"]) + ["Your links", "Collect posts"]
+    active_job = active_collection(user_email) if IS_CLOUD else None
+    if active_job:
+        st.session_state["facebook_collection_job"] = active_job.id
+    # A running or just-finished hosted collection belongs to the final step.
+    collecting = IS_CLOUD and (bool(active_job) or bool(st.session_state.get("facebook_collection_job")))
+    current = st.session_state.get(FACEBOOK_STEP_KEY, labels[0])
+    if collecting or current not in labels:
+        current = labels[-1] if collecting else labels[0]
+    st.session_state[FACEBOOK_STEP_KEY] = current
+    index = labels.index(current)
+    if _focus_modal_open("facebook"):
+        _facebook_steps_modal(user_email, session, labels, index)
+        return
+    with st.container(border=True, key="facebook_overview"):
+        st.subheader("Facebook")
+        st.caption("Collect posts and comments from the Facebook groups and pages you choose.")
+        if _facebook_ready(session):
+            st.caption(f"Connection ready{' · ' + session.name if session.name else ''}.")
+        else:
+            st.caption("Not connected yet. The first step signs you in to Facebook.")
+        selected = st.session_state.get(FACEBOOK_TARGETS_KEY, [])
+        st.caption(f"{len(selected)} link{'s' if len(selected) != 1 else ''} selected.")
+        if collecting:
+            _render_facebook_collection_progress(user_email, st.session_state["facebook_collection_job"])
+        _render_focus_trigger("facebook", labels, index, "Start collecting Facebook posts")
+
+
+@st.dialog("Collect Facebook posts", width="large", on_dismiss=_close_focus_modal)
+def _facebook_steps_modal(user_email: str, session: FacebookSession,
+                          labels: List[str], index: int) -> None:
+    # Dialog widgets rerun independently of main(), including its sign-in gate.
+    if user_email:
+        from modules.auth import allowed_emails, verify_access
+        try:
+            if verify_access(st.session_state.get("auth_token", ""), allowed_emails()) != user_email:
+                raise PermissionError()
+        except Exception:
+            _close_focus_modal()
+            st.rerun()
+    current = labels[index]
+    _render_step_header(labels, index)
+
+    if current == "Connect Facebook":
+        session = _render_facebook_connection(session, user_email=user_email)
+        can_continue = _facebook_ready(session)
+        if can_continue:
+            st.success("Facebook is connected. Continue to choose your links.")
+    elif current == "Your links":
+        targets, links_valid = _render_link_workspace(user_email, platform="facebook")
+        st.session_state[FACEBOOK_TARGETS_KEY] = targets
+        st.session_state[FACEBOOK_LINKS_VALID_KEY] = links_valid
+        can_continue = links_valid and bool(targets)
+        if links_valid and not targets:
+            st.caption("Select a saved link or add one above to continue.")
+    else:
+        targets = list(st.session_state.get(FACEBOOK_TARGETS_KEY, []))
+        links_valid = bool(st.session_state.get(FACEBOOK_LINKS_VALID_KEY, True))
+        can_continue = False
+        st.caption(f"Collecting from {len(targets)} selected link{'s' if len(targets) != 1 else ''}. "
+                   "Go back to change them.")
+        if not _facebook_ready(session):
+            st.info("Your Facebook connection needs attention. Go back to the first step to reconnect.")
+        settings = st.columns(2)
+        use_headless = settings[0].checkbox("Headless Browser", value=True, disabled=IS_CLOUD,
+                                            key="facebook_headless")
+        scroll_times = settings[1].slider("Scroll Iterations", min_value=1, max_value=50, value=10,
+                                          key="facebook_scroll_times")
+        _render_collect_controls(
+            "facebook", user_email, targets, links_valid, session,
+            use_headless=use_headless, scroll_times=scroll_times,
+            reddit_limit=50, reddit_comments=20,
+        )
+    _render_step_nav(FACEBOOK_STEP_KEY, labels, index, can_continue)
+
+
+def _render_collect_controls(
+    platform: str, user_email: str, target_urls: List[str], links_valid: bool,
+    facebook_session: FacebookSession, *, use_headless: bool, scroll_times: int,
+    reddit_limit: int, reddit_comments: int,
+) -> None:
     # Keep each source's results and save controls independent when switching tabs.
     result_key = "last_scrape" if platform == "facebook" else "last_reddit_scrape"
     title_key = "custom_title_value" if platform == "facebook" else "reddit_custom_title_value"
@@ -1631,8 +1808,6 @@ def _render_news_workspace() -> None:
 def _render_news_risk_history() -> None:
     with st.container(border=True, key="news_risk_history"):
         st.subheader("Border tension risk over time")
-        st.caption("One point per Google News scan · Shaded bands mark Low, Elevated and High risk · "
-                   "▲ marks a rise of 10 or more points · Dashed purple line is the boycott index")
         if st.button("Refresh risk timeline", key="refresh_news_history"):
             _load_news_history.clear()
         try:
@@ -1667,59 +1842,181 @@ def _render_news_risk_history() -> None:
             } for row in reversed(rows)]), use_container_width=True, hide_index=True)
 
 
-def _render_x_workspace() -> None:
-    st.subheader("X · recent posts")
-    st.caption("Collects recent public posts from X for each watch through the official read API. "
-               "Recent search covers about the last 7 days. Reposts are skipped.")
-    with st.container(border=True, key="x_settings"):
-        if x_configured():
-            st.caption("Bearer token configured. Access and post-read credit are checked when collecting.")
-        else:
-            st.info("X is not connected yet. An administrator needs to set X_BEARER_TOKEN on the server.")
-        searches: Dict[str, str] = {}
-        for key, category in X_SEARCHES.items():
-            toggle, terms = st.columns([2, 3], vertical_alignment="center")
-            enabled = toggle.checkbox(category["label"], value=True, key=f"x_enabled_{key}")
-            query = terms.text_input(f"{category['label']} search terms", value=category["query"],
-                                     key=f"x_query_{key}", label_visibility="collapsed", disabled=not enabled)
-            if enabled and query.strip():
-                searches[key] = query.strip()
-        limit_col, reply_col = st.columns(2)
-        limit = limit_col.number_input("Posts per search", min_value=10, max_value=100, value=10, step=10,
-                                       key="x_post_limit")
-        replies = reply_col.number_input("Replies per post", min_value=0, max_value=10, value=0, step=1,
-                                         key="x_reply_limit")
-        reads = estimate_reads(len(searches), int(limit), int(replies))
-        st.caption(f"This run can read up to {reads:,} posts, about ${reads * READ_PRICE_USD:,.2f} "
-                   f"at ${READ_PRICE_USD:.3f} per post returned. Replies are a separate capped sample "
-                   "and are off by default. A reply page asks for at least 10 posts even when fewer are kept.")
+def _save_x_collection_draft() -> None:
+    """Keep inputs independently of the dialog's short-lived widgets."""
+    step = st.session_state.get("x_collection_step", 1)
+    if step == 1 and "x_custom_title_value" in st.session_state:
+        st.session_state["x_dataset_name"] = st.session_state["x_custom_title_value"].strip()
+    elif step == 2:
+        options = st.session_state.get("x_collection_options", {})
+        enabled = {key: st.session_state.get(f"x_enabled_{key}", options.get("enabled", {}).get(key, True))
+                   for key in X_SEARCHES}
+        queries = {key: st.session_state.get(f"x_query_{key}", options.get("queries", {}).get(key, category["query"]))
+                   for key, category in X_SEARCHES.items()}
+        searches = {key: query.strip() for key, query in queries.items() if enabled[key] and query.strip()}
+        st.session_state["x_collection_options"] = {
+            "searches": searches, "enabled": enabled, "queries": queries,
+            "limit": int(st.session_state.get("x_post_limit", options.get("limit", 10))),
+            "replies": int(st.session_state.get("x_reply_limit", options.get("replies", 0))),
+        }
 
-    custom_title = _render_auto_save_title("x_custom_title_value")
-    if st.button("Collect posts", key="collect_x_posts", type="primary", use_container_width=True,
-                 disabled=not x_configured() or _collection_save_pending("x_collection")) and not _collection_save_pending("x_collection"):
-        if not searches:
-            st.error("Choose at least one X search.")
-        else:
-            progress = st.progress(0, text="Starting X collection…")
-            with st.spinner("Collecting recent posts…"):
-                try:
-                    client = XClient(time.monotonic() + 180)
-                    rows = collect_x(searches, max_posts=int(limit), replies_per_post=int(replies), client=client,
-                                     on_progress=lambda done, total, label: progress.progress(
-                                         done / total, text=f"Searched {done} of {total}: {label}"))
-                    st.session_state["x_collection"] = {"rows": rows, "reads": client.reads, "error": ""}
-                    _remember_collection(rows, "X")
-                    _autosave_collection(st.session_state["x_collection"], "X", custom_title)
-                except XError as exc:
-                    st.session_state["x_collection"] = {"rows": [], "reads": 0, "error": str(exc)}
-                    _remember_collection([], "X")
-                except Exception as exc:
-                    logging.getLogger(__name__).exception("X collection failed")
-                    st.session_state["x_collection"] = {
-                        "rows": [], "reads": 0, "error": str(exc).strip() or "X collection failed.",
-                    }
-                    _remember_collection([], "X")
+
+def _set_x_collection_step(step: int) -> None:
+    _save_x_collection_draft()
+    if not st.session_state.get("x_dataset_name"):
+        return
+    if step == 3 and not st.session_state.get("x_collection_options", {}).get("searches"):
+        return
+    st.session_state["x_collection_step"] = step
+
+
+def _open_x_collection_dialog() -> None:
+    _close_focus_modal()
+    st.session_state["x_focus_open"] = True
+
+
+def _close_x_collection_dialog() -> None:
+    _save_x_collection_draft()
+    st.session_state["x_focus_open"] = False
+
+
+def _render_x_collection_setup() -> dict[str, Any] | None:
+    """Keep one setup step visible, preserving drafts when widgets are hidden."""
+    step = st.session_state.get("x_collection_step", 1)
+    title = st.session_state.get("x_dataset_name", "")
+    options = st.session_state.get("x_collection_options", {})
+    if step not in {1, 2, 3} or not title.strip():
+        step = 1
+    elif step == 3 and not options.get("searches"):
+        step = 2
+    st.session_state["x_collection_step"] = step
+    st.caption(f"Step {step} of 3 · Name your dataset → Choose options → Collect posts")
+
+    if step == 1:
+        with st.container(border=True, key="x_dataset_step"):
+            st.markdown("#### 1. Name your dataset")
+            name = st.text_input("Dataset name", value=title, key="x_custom_title_value", max_chars=160,
+                                 placeholder="e.g. Brand feedback — November",
+                                 help="Collected posts save automatically under this name, ready for analysis.")
+            _save_x_collection_draft()
+            st.caption("Choose a name you will recognize in Sentiment Analysis. Reusing a name groups records together.")
+            st.button("Continue to options", key="x_name_next", type="primary", disabled=not name.strip(),
+                      on_click=_set_x_collection_step, args=(2,))
+        return None
+
+    connected = x_configured()
+    if step == 2:
+        with st.container(border=True, key="x_settings"):
+            st.markdown("#### 2. Choose collection options")
+            st.write(f"Dataset: **{title}**")
+            st.caption("Choose the searches to include and edit their terms. "
+                       "X covers about the last 7 days. Reposts are skipped.")
+            if connected:
+                st.caption("X is connected. Access and available credit are checked when collecting.")
+            else:
+                st.info("X is not connected yet. Ask an administrator to connect X before collecting posts.")
+            searches: dict[str, str] = {}
+            enabled_searches, queries = {}, {}
+            for key, category in X_SEARCHES.items():
+                toggle, terms = st.columns([2, 3], vertical_alignment="center")
+                enabled_searches[key] = toggle.checkbox(category["label"],
+                    value=options.get("enabled", {}).get(key, True), key=f"x_enabled_{key}")
+                queries[key] = terms.text_input(f"{category['label']} search terms",
+                    value=options.get("queries", {}).get(key, category["query"]), key=f"x_query_{key}",
+                    label_visibility="collapsed", disabled=not enabled_searches[key])
+                if enabled_searches[key] and queries[key].strip():
+                    searches[key] = queries[key].strip()
+            limit_col, reply_col = st.columns(2)
+            limit = limit_col.number_input("Posts per search", min_value=10, max_value=100,
+                value=options.get("limit", 10), step=10, key="x_post_limit")
+            replies = reply_col.number_input("Replies per post", min_value=0, max_value=10,
+                value=options.get("replies", 0), step=1, key="x_reply_limit")
+            _save_x_collection_draft()
+            reads = estimate_reads(len(searches), int(limit), int(replies))
+            st.caption(f"Up to {reads:,} posts read · Estimated cost: ${reads * READ_PRICE_USD:,.2f}")
+            st.caption("Replies are a separate capped sample and are off by default. "
+                       "A reply page asks for at least 10 posts even when fewer are kept.")
+            if not searches:
+                st.info("Enable at least one search and enter its search terms to continue.")
+            back, next_step = st.columns(2)
+            back.button("Back to dataset name", key="x_options_back", on_click=_set_x_collection_step, args=(1,))
+            next_step.button("Continue to collect", key="x_options_next", type="primary", disabled=not searches,
+                             on_click=_set_x_collection_step, args=(3,))
+        return None
+
+    st.markdown("#### 3. Collect posts")
+    st.write(f"Dataset: **{title}**")
+    reads = estimate_reads(len(options["searches"]), options["limit"], options["replies"])
+    st.caption(f"{len(options['searches'])} searches · {options['limit']} posts per search · "
+               f"{options['replies']} replies per post")
+    st.caption(f"Up to {reads:,} posts read · Estimated cost: ${reads * READ_PRICE_USD:,.2f}. "
+               "Collected posts will save automatically to your dataset.")
+    st.button("Back to options", key="x_collect_back", on_click=_set_x_collection_step, args=(2,))
+    if not connected:
+        st.info("X is not connected yet. Ask an administrator to connect X before collecting posts.")
+    can_collect = connected and not _collection_save_pending("x_collection")
+    with st.container(border=True, key="x_collect_action"):
+        if st.button("Collect posts", key="collect_x_posts", type="primary", use_container_width=True,
+                     disabled=not can_collect) and can_collect:
+            return {**options, "title": title}
+    return None
+
+
+@st.dialog("Collect from X", width="medium", on_dismiss=_close_x_collection_dialog)
+def _render_x_collection_dialog(user_email: str = "") -> None:
+    # Dialog widgets rerun independently of main(), including its sign-in gate.
+    if user_email:
+        from modules.auth import allowed_emails, verify_access
+        try:
+            if verify_access(st.session_state.get("auth_token", ""), allowed_emails()) != user_email:
+                raise PermissionError()
+        except Exception:
+            _close_x_collection_dialog()
             st.rerun()
+    with st.container(key="x_focus_dialog"):
+        _render_x_collection_dialog_body()
+
+
+def _render_x_collection_dialog_body() -> None:
+    settings = _render_x_collection_setup()
+    if settings:
+        progress = st.progress(0, text="Starting X collection…")
+        with st.spinner("Collecting recent posts…"):
+            try:
+                client = XClient(time.monotonic() + 180)
+                rows = collect_x(settings["searches"], max_posts=settings["limit"],
+                                 replies_per_post=settings["replies"], client=client,
+                                 on_progress=lambda done, total, label: progress.progress(
+                                     done / total, text=f"Searched {done} of {total}: {label}"))
+                st.session_state["x_collection"] = {"rows": rows, "reads": client.reads, "error": ""}
+                _remember_collection(rows, "X")
+                _autosave_collection(st.session_state["x_collection"], "X", settings["title"])
+            except XError as exc:
+                st.session_state["x_collection"] = {"rows": [], "reads": 0, "error": str(exc)}
+                _remember_collection([], "X")
+            except Exception as exc:
+                logging.getLogger(__name__).exception("X collection failed")
+                st.session_state["x_collection"] = {
+                    "rows": [], "reads": 0, "error": str(exc).strip() or "X collection failed.",
+                }
+                _remember_collection([], "X")
+        st.session_state["x_focus_open"] = _collection_save_pending("x_collection")
+        st.rerun()
+
+    if _collection_save_pending("x_collection"):
+        _render_autosave_status(st.session_state["x_collection"], "retry_x_save_dialog",
+                                on_saved=_close_x_collection_dialog)
+
+
+def _render_x_workspace(user_email: str = "") -> None:
+    st.subheader("X · recent posts")
+    st.caption("Name your dataset, choose your searches, then collect recent X posts in a focused window.")
+    st.html(Path(__file__).parent / "modules" / "theme" / "x-focus.css")
+    label = "Resume X collection" if st.session_state.get("x_dataset_name") else "Start X collection"
+    st.button(label, key="open_x_collection", type="primary", use_container_width=True,
+              on_click=_open_x_collection_dialog)
+    if st.session_state.get("x_focus_open"):
+        _render_x_collection_dialog(user_email)
 
     collection = st.session_state.get("x_collection")
     if not collection:
@@ -1743,32 +2040,97 @@ def _render_x_workspace() -> None:
         st.json(posts)
 
 
-def _render_website_workspace() -> None:
-    st.subheader("Custom website")
-    st.caption("Paste public article, blog, company or other website links, one per line. "
-               "Collects the readable text of each page for sentiment analysis.")
+WEBSITE_STEP_KEY = "website_wizard_step"
+
+
+def _render_website_workspace(user_email: str = "") -> None:
+    """Open the guided steps in a focused modal: choose your links, then collect the pages."""
+    labels = ["Your links", "Collect pages"]
+    current = st.session_state.get(WEBSITE_STEP_KEY, labels[0])
+    if current not in labels:
+        current = labels[0]
+    st.session_state[WEBSITE_STEP_KEY] = current
+    index = labels.index(current)
+    if _focus_modal_open("website"):
+        _website_steps_modal(user_email, labels, index)
+        return
+    with st.container(border=True, key="website_overview"):
+        st.subheader("Custom website")
+        st.caption("Collect public article, blog, company or other website pages for sentiment analysis. "
+                   f"Up to {MAX_WEBSITE_LINKS} unique pages per run.")
+        urls = st.session_state.get("website_wizard_urls", [])
+        st.caption(f"{len(urls)} link{'s' if len(urls) != 1 else ''} ready to collect.")
+        collection = st.session_state.get("website_collection")
+        if collection:
+            pages = [row for row in collection["rows"] if row.get("source_type") not in NON_CONTENT_TYPES]
+            st.caption(f"Last collection: {len(pages)} page{'s' if len(pages) != 1 else ''}. "
+                       "Open the steps to review or save them.")
+        _render_focus_trigger("website", labels, index, "Start collecting website pages")
+
+
+@st.dialog("Collect website pages", width="large", on_dismiss=_close_focus_modal)
+def _website_steps_modal(user_email: str, labels: List[str], index: int) -> None:
+    # Dialog widgets rerun independently of main(), including its sign-in gate.
+    if user_email:
+        from modules.auth import allowed_emails, verify_access
+        try:
+            if verify_access(st.session_state.get("auth_token", ""), allowed_emails()) != user_email:
+                raise PermissionError()
+        except Exception:
+            _close_focus_modal()
+            st.rerun()
+    _render_step_header(labels, index)
+    if labels[index] == "Your links":
+        _render_website_links_step(user_email)
+        can_continue = bool(st.session_state.get("website_wizard_urls"))
+    else:
+        _render_website_collect_step()
+        can_continue = False
+    _render_step_nav(WEBSITE_STEP_KEY, labels, index, can_continue)
+
+
+def _render_website_links_step(user_email: str) -> None:
+    if "website_links" not in st.session_state:
+        # Streamlit drops widget state while this step is hidden; restore the earlier links.
+        st.session_state["website_links"] = st.session_state.get("website_links_memo", "")
     links = st.text_area("Website links (one per line)", key="website_links", height=160,
                          placeholder="https://example.com/article\nhttps://example.org/news/update",
                          help=f"Up to {MAX_WEBSITE_LINKS} unique pages per run. Only the links you enter are collected; linked pages are not crawled.")
-    st.caption("No API key or social media login is needed. Pages requiring JavaScript, sign-in or CAPTCHA verification "
-               "may be unavailable. HTML and plain text are supported; PDFs and media downloads are not.")
+    st.session_state["website_links_memo"] = links
+    if user_email:
+        render_website_presets(user_email)
+    try:
+        urls = parse_website_links(links)
+    except WebsiteError as exc:
+        st.session_state["website_wizard_urls"] = []
+        if links.strip():
+            st.error(str(exc))
+        return
+    st.session_state["website_wizard_urls"] = urls
+    if not urls:
+        st.caption("Add at least one website link to continue.")
+    else:
+        st.caption(f"{len(urls)} page{'s' if len(urls) != 1 else ''} ready to collect")
+
+
+def _render_website_collect_step() -> None:
+    urls = list(st.session_state.get("website_wizard_urls", []))
+    st.caption(f"Collecting {len(urls)} page{'s' if len(urls) != 1 else ''}. Go back to change the links.")
+    with st.expander(f"Links for this collection ({len(urls)})"):
+        st.code("\n".join(urls))
     custom_title = _render_auto_save_title("website_custom_title")
     if st.button("Collect website pages", key="collect_website_pages", type="primary",
-                 disabled=_collection_save_pending("website_collection")) and not _collection_save_pending("website_collection"):
-        try:
-            urls = parse_website_links(links)
-        except WebsiteError as exc:
-            st.error(str(exc))
-        else:
-            st.session_state["website_collection"] = {"urls": urls, "rows": []}
-            progress = st.progress(0, text="Starting website collection…")
-            with st.spinner("Reading website pages…"):
-                rows = collect_websites(urls, on_progress=lambda done, total, url:
-                                        progress.progress(done / total, text=f"Checked {done} of {total} pages"))
-                st.session_state["website_collection"]["rows"] = rows
-                _remember_collection(rows, "Custom website")
-                _autosave_collection(st.session_state["website_collection"], "Custom website", custom_title)
-            st.rerun()
+                 use_container_width=True,
+                 disabled=not urls or _collection_save_pending("website_collection")) and not _collection_save_pending("website_collection"):
+        st.session_state["website_collection"] = {"urls": urls, "rows": []}
+        progress = st.progress(0, text="Starting website collection…")
+        with st.spinner("Reading website pages…"):
+            rows = collect_websites(urls, on_progress=lambda done, total, url:
+                                    progress.progress(done / total, text=f"Checked {done} of {total} pages"))
+            st.session_state["website_collection"]["rows"] = rows
+            _remember_collection(rows, "Custom website")
+            _autosave_collection(st.session_state["website_collection"], "Custom website", custom_title)
+        st.rerun()
     collection = st.session_state.get("website_collection")
     if collection is None:
         return
@@ -1789,6 +2151,311 @@ def _render_website_workspace() -> None:
         with st.expander(page.get("title") or page["url"]):
             st.link_button("Open source page", page["url"])
             st.text(page["raw_text"])
+
+    st.caption("Save these pages using Dataset title above; leave it blank to keep the current title. "
+               "Changing the title moves these records to that dataset without creating copies.")
+    if st.button("Save dataset", key="save_website_dataset",
+                 disabled=_collection_save_pending("website_collection")) and not _collection_save_pending("website_collection"):
+        title = custom_title.strip() or (collection.get("cloud_save") or {}).get("title", "")
+        # An explicit save can change the title; retries must keep that chosen title.
+        collection.pop("cloud_save", None)
+        _autosave_collection(collection, "Custom website", title)
+        st.rerun()
+
+
+ANALYSIS_STEP_KEY = "analysis_wizard_step"
+ANALYSIS_MEMO_KEY = "analysis_selection_memo"
+ANALYSIS_WATCH_MEMO_KEY = "analysis_watch_terms_memo"
+ANALYSIS_STEPS = ["Choose and edit data", "Analyze"]
+
+
+def _analysis_selection() -> Dict[str, Any]:
+    """The chosen data, read from the step widgets while shown and from the memo while hidden."""
+    memo = st.session_state.get(ANALYSIS_MEMO_KEY, {})
+    mode = st.session_state.get("analysis_selection_mode") or memo.get("mode") or "Manual selection"
+    use_recent = mode == "Last scraped data"
+    recent = st.session_state.get("last_collected_dataset") if use_recent else None
+    recent_ids = {row["_id"] for row in recent["rows"]} if recent else set()
+    if use_recent:
+        return {"mode": mode, "use_recent": True, "recent": recent, "recent_ids": recent_ids,
+                "datasets": ["recent:" + recent["id"]] if recent else [], "sources": None,
+                "ready": bool(recent_ids)}
+    sources = list(st.session_state.get("analysis_sources", memo.get("sources") or []))
+    datasets = list(st.session_state.get("analysis_datasets", memo.get("datasets") or []))
+    return {"mode": mode, "use_recent": False, "recent": None, "recent_ids": set(),
+            "datasets": datasets, "sources": sources, "ready": bool(sources) and bool(datasets)}
+
+
+def _remember_analysis_selection(picked: Dict[str, Any]) -> None:
+    st.session_state[ANALYSIS_MEMO_KEY] = {"mode": picked["mode"], "sources": picked["sources"],
+                                           "datasets": picked["datasets"]}
+
+
+def _in_analysis_selection(row: Dict[str, Any], picked: Dict[str, Any]) -> bool:
+    if not picked["ready"]:
+        return False
+    if picked["use_recent"]:
+        return row.get("_id") in picked["recent_ids"]
+    return (dataset_key(row) in picked["datasets"]
+            and (picked["sources"] is None or matches_sources(row, set(picked["sources"]))))
+
+
+def _loaded_analysis_rows(picked: Dict[str, Any]) -> List[Dict[str, Any]]:
+    return [row for row in st.session_state.get("firestore_rows", []) if _in_analysis_selection(row, picked)]
+
+
+def _render_analysis_tab(user_email: str) -> list[str] | None:
+    """Settings stay on their own tab; the analysis itself runs as guided steps in a focused modal."""
+    st.subheader("Sentiment Analysis")
+    analysis_workspace, analysis_settings = st.tabs(["Analysis", "Settings"])
+    picked = _analysis_selection()
+
+    with analysis_settings:
+        st.subheader("Analysis settings")
+        status_filter = st.selectbox("Record status", options=["all", "pending", "processed", "error"], index=0,
+                                     key="analysis_recent_status" if picked["use_recent"] else "analysis_record_status")
+        load_limit = None
+        _sync_analysis_datasets(picked["datasets"], status_filter)
+        provider = _render_ai_settings()
+        provider_label = AI_PROVIDERS[provider]
+
+    with analysis_workspace:
+        current = st.session_state.get(ANALYSIS_STEP_KEY, ANALYSIS_STEPS[0])
+        if current not in ANALYSIS_STEPS:
+            current = ANALYSIS_STEPS[0]
+        st.session_state[ANALYSIS_STEP_KEY] = current
+        index = ANALYSIS_STEPS.index(current)
+        if _focus_modal_open("analysis"):
+            _analysis_steps_modal(user_email, picked, index, status_filter, load_limit, provider, provider_label)
+        else:
+            _render_analysis_overview(picked, index, provider_label)
+        _render_analysis_results()
+        picked = _analysis_selection()
+        _render_analysis_processed_section(picked, status_filter, load_limit)
+    return picked["sources"]
+
+
+def _render_analysis_overview(picked: Dict[str, Any], index: int, provider_label: str) -> None:
+    with st.container(border=True, key="analysis_overview"):
+        st.markdown("#### Guided analysis")
+        if picked["use_recent"]:
+            recent = picked["recent"]
+            st.caption(f"Data: last scraped · {recent['title']}" if recent else
+                       "Data: last scraped collection — nothing collected in this browser session yet.")
+        elif picked["ready"]:
+            st.caption(f"Data: {len(picked['datasets'])} saved dataset"
+                       f"{'s' if len(picked['datasets']) != 1 else ''} from "
+                       f"{len(picked['sources'])} source{'s' if len(picked['sources']) != 1 else ''}.")
+        else:
+            st.caption("Data: not chosen yet. The first step picks the records to analyze.")
+        loaded = _loaded_analysis_rows(picked)
+        st.caption(f"{len(loaded)} record{'s' if len(loaded) != 1 else ''} available · AI provider: {provider_label}")
+        _render_focus_trigger("analysis", ANALYSIS_STEPS, index, "Start sentiment analysis")
+
+
+@st.dialog("Run sentiment analysis", width="large", on_dismiss=_close_focus_modal)
+def _analysis_steps_modal(user_email: str, picked: Dict[str, Any], index: int, status_filter: str,
+                          load_limit: int | None, provider: str, provider_label: str) -> None:
+    # Dialog widgets rerun independently of main(), including its sign-in gate.
+    if user_email:
+        from modules.auth import allowed_emails, verify_access
+        try:
+            if verify_access(st.session_state.get("auth_token", ""), allowed_emails()) != user_email:
+                raise PermissionError()
+        except Exception:
+            _close_focus_modal()
+            st.rerun()
+    # Dialog reruns retain their original call arguments. Read the live step and
+    # selection so Next/Previous and dataset edits take effect immediately.
+    picked = _analysis_selection()
+    current = st.session_state.get(ANALYSIS_STEP_KEY, ANALYSIS_STEPS[0])
+    index = ANALYSIS_STEPS.index(current) if current in ANALYSIS_STEPS else 0
+    _render_step_header(ANALYSIS_STEPS, index)
+    current = ANALYSIS_STEPS[index]
+    if current == "Choose and edit data":
+        picked = _render_analysis_data_step(user_email, picked)
+        _sync_analysis_datasets(picked["datasets"], status_filter)
+        rows = _open_analysis_dataset(picked)
+        visible = [row for row in rows if status_filter == "all" or row.get("status") == status_filter]
+        if rows:
+            included, saved = render_dataset_editor(visible)
+            st.session_state["analysis_edits_saved"] = saved
+            can_continue = bool(included) and saved
+        else:
+            can_continue = False
+    else:
+        _render_analysis_run_step(picked, provider, provider_label, status_filter)
+        can_continue = False
+    _render_step_nav(ANALYSIS_STEP_KEY, ANALYSIS_STEPS, index, can_continue)
+
+
+def _render_analysis_data_step(user_email: str, picked: Dict[str, Any]) -> Dict[str, Any]:
+    # Streamlit drops widget state while a step is hidden; restore the earlier choice first.
+    st.session_state.setdefault("analysis_selection_mode", picked["mode"])
+    for key, value in (("analysis_sources", picked["sources"]), ("analysis_datasets", picked["datasets"])):
+        if key not in st.session_state and value:
+            st.session_state[key] = list(value)
+    selection_mode = st.radio("Data selection", ["Manual selection", "Last scraped data"],
+                              horizontal=True, key="analysis_selection_mode")
+    if st.session_state.get("analysis_previous_mode") != selection_mode:
+        _clear_loaded_analysis()
+        st.session_state.pop("analysis_dataset_context", None)
+        st.session_state["analysis_previous_mode"] = selection_mode
+    if selection_mode == "Last scraped data":
+        recent = st.session_state.get("last_collected_dataset")
+        st.caption("The most recently completed collection in this browser session, across all scraping options. "
+                   "Only records from that collection are included. After reopening the app, use Manual selection to find saved data.")
+        if recent:
+            st.write(f"**{recent['title']}**")
+            collected_at = dataset_date_label({"timestamp": datetime.fromtimestamp(recent["completed_at"], timezone.utc)})
+            analyzable = len({row["_id"] for row in recent["rows"]})
+            st.caption(f"Source: {recent['source']} · Collected {collected_at} · {analyzable} analyzable records")
+            if not analyzable:
+                st.info("No analyzable records remain in the last collection. Collect again or choose a saved dataset manually.")
+            elif not recent.get("saved"):
+                st.caption("Opening this collection saves it to your library. Review its records below before running analysis.")
+        else:
+            st.info("Collect data in Scrape Data first, then choose Last scraped data here. "
+                    "To analyze an earlier saved collection, choose Manual selection.")
+    else:
+        sources, sources_ready = _render_analysis_sources(user_email)
+        _render_analysis_datasets(sources, sources_ready)
+    picked = _analysis_selection()
+    _remember_analysis_selection(picked)
+    if not picked["ready"] and not picked["use_recent"]:
+        st.caption("Choose at least one source and one dataset to continue.")
+    return picked
+
+
+def _open_analysis_dataset(picked: Dict[str, Any]) -> List[Dict[str, Any]]:
+    if picked["ready"] and "firestore_rows" not in st.session_state:
+        try:
+            with st.spinner("Opening dataset…"):
+                if picked["use_recent"]:
+                    recent = picked["recent"]
+                    if not recent.get("saved"):
+                        _write_results_to_firestore(recent["rows"], custom_title=recent["title"])
+                        recent["saved"] = True
+                    rows = _fetch_last_scrape_posts(recent, status_filter="all", limit=None)
+                else:
+                    rows = _fetch_firestore_posts(status_filter="all", limit=None,
+                                                 source_urls=picked["sources"], dataset=picked["datasets"])
+            st.session_state["firestore_rows"] = rows
+            st.session_state["firestore_load_error"] = ""
+        except Exception:
+            st.session_state["firestore_rows"] = []
+            st.session_state["firestore_load_error"] = "The dataset could not be opened. Check the connection and try again."
+    rows = _loaded_analysis_rows(picked)
+    if st.session_state.get("firestore_load_error"):
+        st.error(st.session_state["firestore_load_error"])
+        if st.button("Retry opening dataset", key="retry_analysis_dataset"):
+            _clear_loaded_analysis()
+            st.rerun()
+    elif picked["ready"] and not rows:
+        st.info("This dataset has no available records. Refresh datasets or choose another dataset.")
+    return rows
+
+
+def _render_analysis_run_step(picked: Dict[str, Any], provider: str, provider_label: str,
+                              status_filter: str = "all") -> None:
+    firestore_rows = _loaded_analysis_rows(picked)
+    if not firestore_rows:
+        st.info("Choose a dataset in the previous step to see its records.")
+        return
+    if "thailand_watch_terms" not in st.session_state:
+        st.session_state["thailand_watch_terms"] = st.session_state.get(
+            ANALYSIS_WATCH_MEMO_KEY, get_setting("THAILAND_WATCH_TERMS"))
+    terms = st.text_area("Thai projects, companies and brands to watch (one name or alias per line)",
+                         key="thailand_watch_terms",
+                         help="Leave blank for Thailand generally. Add the names and local-language aliases of your Thai-linked targets.")
+    st.session_state[ANALYSIS_WATCH_MEMO_KEY] = terms
+    selected_posts = [row for row in firestore_rows if is_analyzable(row) and not row.get("analysis_excluded")
+                      and (status_filter == "all" or row.get("status") == status_filter)]
+    count = len(selected_posts)
+    st.caption(f"{count} included record{'s' if count != 1 else ''} ready for {provider_label}. "
+               "Go back to change which records are included.")
+    if st.button(f"Run {provider_label} on {count} included record{'s' if count != 1 else ''}",
+                 key="run_analysis_selected_btn",
+                 disabled=not get_ai_key(provider) or not count or not picked["ready"]
+                 or not st.session_state.get("analysis_edits_saved", True)):
+        status_container = st.status(
+            f"Running {provider_label} on {len(selected_posts)} record(s)...",
+            expanded=True,
+        )
+        try:
+            def _update_status(msg: str) -> None:
+                status_container.write(msg)
+
+            summary = _process_selected_firestore_posts(
+                selected_posts,
+                provider=provider,
+                status_callback=_update_status,
+            )
+            st.session_state["analysis_last_results"] = summary
+            st.session_state["analysis_editor_revision"] = st.session_state.get("analysis_editor_revision", 0) + 1
+            status_container.update(
+                label=(
+                    f"Done — {summary['processed']} processed, "
+                    f"{summary['error']} error(s)"
+                ),
+                state="error" if summary["error"] else "complete",
+            )
+        except Exception as exc:
+            error_text = (str(exc).strip() if isinstance(exc, (AIError, ValueError)) else
+                          "Analysis failed. Please try again or contact the app administrator.")
+            error_text = redact(error_text, get_ai_key(provider))
+            status_container.update(
+                label=f"Failed: {error_text}",
+                state="error",
+            )
+            st.session_state["analysis_last_results"] = {
+                "processed": 0, "error": len(selected_posts), "analyses": [], "errors": [error_text],
+            }
+        else:
+            # The finished run belongs on the page, where the report has room to be read.
+            _close_focus_modal()
+            st.rerun()
+
+
+def _render_analysis_results() -> None:
+    analysis_results = st.session_state.get("analysis_last_results")
+    if not analysis_results:
+        return
+    st.divider()
+    st.subheader("Analysis results")
+
+    res_c1, res_c2 = st.columns(2)
+    res_c1.metric("Processed", analysis_results.get("processed", 0))
+    res_c2.metric("Errors", analysis_results.get("error", 0))
+
+    for message in dict.fromkeys(analysis_results.get("errors", [])):
+        st.error(message)
+    analyses = analysis_results.get("analyses", [])
+    if analyses:
+        def evidence() -> None:
+            visible = _render_signal_overview(analyses, "latest_signals_filter")
+            _render_analysis_cards(visible)
+            with st.expander("Raw analysis JSON"):
+                st.json(analyses)
+
+        report_date = max((str(a.get("processed_at") or "") for a in analyses), default="") or _now_iso()
+        _render_client_report(analyses, "latest_report", report_date, evidence)
+    elif analysis_results.get("error", 0) > 0:
+        st.warning("No records were analyzed. Resolve the error above and retry."
+                   if analysis_results.get("errors") else
+                   "This result was created before detailed errors were available. Run analysis again to see the cause.")
+
+
+def _render_analysis_processed_section(picked: Dict[str, Any], status_filter: str, load_limit: int | None) -> None:
+    st.divider()
+    st.subheader("View processed records")
+    processed_rows = [row for row in _loaded_analysis_rows(picked) if row.get("status") == "processed"
+                      and not row.get("analysis_excluded")]
+    st.session_state["processed_rows"] = processed_rows
+    st.caption("Saved analyses for the included records in your selected datasets appear here automatically.")
+    _render_processed_deletion(processed_rows)
+    if processed_rows:
+        _render_processed_records(processed_rows)
 
 
 def main() -> None:
@@ -1818,230 +2485,12 @@ def main() -> None:
         with news_tab:
             _render_news_workspace()
         with x_tab:
-            _render_x_workspace()
+            _render_x_workspace(user_email)
         with website_tab:
-            _render_website_workspace()
+            _render_website_workspace(user_email)
 
     with analysis_tab:
-        st.subheader("Sentiment Analysis")
-        st.caption("Detect Thailand-related criticism, tensions and boycott calls, with source evidence.")
-        analysis_workspace, analysis_settings = st.tabs(["Analysis", "Settings"])
-        with analysis_workspace:
-            st.markdown("#### 1. Choose your data")
-            selection_mode = st.radio("Data selection", ["Manual selection", "Last scraped data"],
-                                      horizontal=True, key="analysis_selection_mode")
-            if st.session_state.get("analysis_previous_mode") != selection_mode:
-                _clear_loaded_analysis()
-                st.session_state.pop("analysis_dataset_context", None)
-                st.session_state["analysis_previous_mode"] = selection_mode
-            use_recent = selection_mode == "Last scraped data"
-            recent = st.session_state.get("last_collected_dataset") if use_recent else None
-            recent_ids = {row["_id"] for row in recent["rows"]} if recent else set()
-            analysis_sources = None
-            if use_recent:
-                selected_dataset = "recent:" + recent["id"] if recent else None
-                dataset_ready = bool(recent_ids)
-                st.caption("The most recently completed collection in this browser session, across all scraping options. "
-                           "Only records from that collection are included. After reopening the app, use Manual selection to find saved data.")
-                if recent:
-                    st.write(f"**{recent['title']}**")
-                    st.caption(f"Source: {recent['source']} · {len(recent_ids)} analyzable records")
-                    if not recent_ids:
-                        st.info("No analyzable records remain in the last collection. Collect again or choose a saved dataset manually.")
-                    elif not recent.get("saved"):
-                        st.caption("Save and load adds new records to your cloud library under the title above. "
-                                   "Existing URLs follow the platform's usual save rules. Review the loaded text before analysis.")
-                else:
-                    st.info("Collect data in Scrape Data first, then choose Last scraped data here. "
-                            "To analyze an earlier saved collection, choose Manual selection.")
-            else:
-                analysis_sources, sources_ready = _render_analysis_sources(user_email)
-                selected_dataset = _render_analysis_datasets(analysis_sources, sources_ready)
-                dataset_ready = sources_ready and selected_dataset is not None
-
-            def in_selected_dataset(row: dict[str, Any]) -> bool:
-                return dataset_ready and (row.get("_id") in recent_ids if use_recent
-                                          else dataset_key(row) == selected_dataset)
-
-            st.markdown("#### 2. Load and select records")
-            st.text_area("Thai projects, companies and brands to watch (one name or alias per line)",
-                         value=get_setting("THAILAND_WATCH_TERMS"), key="thailand_watch_terms",
-                         help="Leave blank for Thailand generally. Add the names and local-language aliases of your Thai-linked targets.")
-
-        with analysis_settings:
-            st.subheader("Analysis settings")
-            st.caption("Changing record status or load limit clears loaded records; return to Analysis to load them again.")
-            gc1, gc2 = st.columns([1, 1])
-            status_filter = gc1.selectbox("Record status", options=["all", "pending", "processed", "error"],
-                                          index=0 if use_recent else 1,
-                                          key="analysis_recent_status" if use_recent else "analysis_record_status")
-            load_limit = gc2.slider("Load limit", min_value=1, max_value=200, value=50, key="analysis_load_limit")
-            _sync_analysis_dataset(selected_dataset, status_filter, load_limit)
-            provider = _render_ai_settings()
-            provider_label = AI_PROVIDERS[provider]
-
-        with analysis_workspace:
-            # --- Load records ---
-            load_label = ("Load last scraped data" if recent and recent.get("saved") else "Save and load last scraped data"
-                          ) if use_recent else "Load records from Firestore"
-            if st.button(load_label, key="load_firestore_records_btn", disabled=not dataset_ready, type="primary"):
-                try:
-                    if use_recent:
-                        if not recent.get("saved"):
-                            _write_results_to_firestore(recent["rows"], custom_title=recent["title"])
-                        rows = _fetch_last_scrape_posts(recent, status_filter=status_filter, limit=load_limit)
-                    else:
-                        rows = _fetch_firestore_posts(status_filter=status_filter, limit=load_limit,
-                                                     source_urls=analysis_sources, dataset=selected_dataset)
-                    st.session_state["firestore_rows"] = rows
-                    st.session_state.pop("analysis_record_selection", None)
-                    st.session_state["firestore_load_error"] = ""
-                    st.session_state["firestore_last_load_count"] = len(rows)
-                except Exception as exc:
-                    st.session_state["firestore_rows"] = []
-                    st.session_state["firestore_load_error"] = str(exc).strip() or repr(exc)
-                    st.session_state["firestore_last_load_count"] = None
-
-            firestore_rows = [row for row in st.session_state.get("firestore_rows", [])
-                              if in_selected_dataset(row)]
-            firestore_load_error = st.session_state.get("firestore_load_error", "")
-            firestore_last_load_count = st.session_state.get("firestore_last_load_count", None)
-            if firestore_load_error:
-                st.error(f"Load failed: {firestore_load_error}")
-            elif firestore_last_load_count is not None:
-                if firestore_last_load_count == 0:
-                    st.info(
-                        "No records in this dataset match the selected status. Choose another status or dataset, "
-                        "or save more source records and refresh datasets."
-                    )
-                else:
-                    st.success(f"Loaded {firestore_last_load_count} record{'s' if firestore_last_load_count != 1 else ''} "
-                               "from the selected dataset. Choose which records to analyze below.")
-
-            if firestore_rows:
-                display_rows = []
-                for row in firestore_rows:
-                    display_rows.append(
-                        {
-                            "_id": row.get("_id", ""),
-                            "status": row.get("status", ""),
-                            "custom_title": row.get("custom_title", ""),
-                            "url": row.get("url", ""),
-                            "scraped_at": row.get("scraped_at", ""),
-                            "raw_text_preview": str(row.get("raw_text", ""))[:160],
-                        }
-                    )
-                st.dataframe(pd.DataFrame(display_rows), use_container_width=True, hide_index=True)
-
-                id_options = [str(r.get("_id", "")) for r in firestore_rows if r.get("_id") and is_analyzable(r)]
-                records_by_id = {str(row["_id"]): row for row in firestore_rows if row.get("_id")}
-                if "analysis_record_selection" in st.session_state:
-                    st.session_state["analysis_record_selection"] = [ident for ident in st.session_state["analysis_record_selection"]
-                                                                    if ident in id_options]
-                select, clear = st.columns(2)
-                select.button("Select all loaded records", key="analysis_select_all", disabled=not id_options,
-                              on_click=lambda: st.session_state.update(analysis_record_selection=id_options))
-                clear.button("Clear record selection", key="analysis_clear_selection",
-                             on_click=lambda: st.session_state.update(analysis_record_selection=[]))
-                selected_ids = st.multiselect(
-                    "Select records to process",
-                    options=id_options,
-                    default=[],
-                    key="analysis_record_selection",
-                    format_func=lambda ident: f"{' '.join(str(records_by_id[ident].get('title') or records_by_id[ident].get('raw_text') or ident).split())[:100]} "
-                        f"· {platform_label(records_by_id[ident])} · {ident[:8]}",
-                )
-                st.caption(f"{len(selected_ids)} of {len(id_options)} loaded, analyzable records selected from this dataset. "
-                           "Only selected records will be sent to the AI provider.")
-
-                if st.button(f"Run {provider_label} on {len(selected_ids)} selected record{'s' if len(selected_ids) != 1 else ''}",
-                             key="run_analysis_selected_btn",
-                             disabled=not get_ai_key(provider) or not selected_ids or not dataset_ready):
-                    if not selected_ids:
-                        st.error("Please select at least one record.")
-                    else:
-                        selected_posts = [r for r in firestore_rows if str(r.get("_id", "")) in set(selected_ids)]
-                        status_container = st.status(
-                            f"Running {provider_label} on {len(selected_posts)} record(s)...",
-                            expanded=True,
-                        )
-                        try:
-                            def _update_status(msg: str) -> None:
-                                status_container.write(msg)
-
-                            summary = _process_selected_firestore_posts(
-                                selected_posts,
-                                provider=provider,
-                                status_callback=_update_status,
-                            )
-                            st.session_state["analysis_last_results"] = summary
-                            status_container.update(
-                                label=(
-                                    f"Done — {summary['processed']} processed, "
-                                    f"{summary['error']} error(s)"
-                                ),
-                                state="error" if summary["error"] else "complete",
-                            )
-                        except Exception as exc:
-                            error_text = (str(exc).strip() if isinstance(exc, (AIError, ValueError)) else
-                                          "Analysis failed. Please try again or contact the app administrator.")
-                            error_text = redact(error_text, get_ai_key(provider))
-                            status_container.update(
-                                label=f"Failed: {error_text}",
-                                state="error",
-                            )
-                            st.session_state["analysis_last_results"] = {
-                                "processed": 0, "error": len(selected_posts), "analyses": [], "errors": [error_text],
-                            }
-
-            # --- Display analysis results ---
-            analysis_results = st.session_state.get("analysis_last_results")
-            if analysis_results:
-                st.divider()
-                st.subheader("Analysis results")
-
-                res_c1, res_c2 = st.columns(2)
-                res_c1.metric("Processed", analysis_results.get("processed", 0))
-                res_c2.metric("Errors", analysis_results.get("error", 0))
-
-                for message in dict.fromkeys(analysis_results.get("errors", [])):
-                    st.error(message)
-                analyses = analysis_results.get("analyses", [])
-                if analyses:
-                    def evidence() -> None:
-                        visible = _render_signal_overview(analyses, "latest_signals_filter")
-                        _render_analysis_cards(visible)
-                        with st.expander("Raw analysis JSON"):
-                            st.json(analyses)
-
-                    report_date = max((str(a.get("processed_at") or "") for a in analyses), default="") or _now_iso()
-                    _render_client_report(analyses, "latest_report", report_date, evidence)
-                elif analysis_results.get("error", 0) > 0:
-                    st.warning("No records were analyzed. Resolve the error above and retry."
-                               if analysis_results.get("errors") else
-                               "This result was created before detailed errors were available. Run analysis again to see the cause.")
-
-            # --- View previously processed records ---
-            st.divider()
-            st.subheader("View processed records")
-            st.caption("Load records with status 'processed' to see their saved analysis.")
-            if st.button("Load processed records", key="load_processed_records_btn", disabled=not dataset_ready):
-                try:
-                    if use_recent:
-                        processed_rows = _fetch_last_scrape_posts(recent, status_filter="processed", limit=load_limit)
-                    else:
-                        processed_rows = _fetch_firestore_posts(status_filter="processed", limit=load_limit,
-                                                               source_urls=analysis_sources, dataset=selected_dataset)
-                    st.session_state["processed_rows"] = processed_rows
-                except Exception as exc:
-                    st.error(f"Failed to load: {str(exc).strip() or repr(exc)}")
-                    st.session_state["processed_rows"] = []
-
-            processed_rows = [row for row in st.session_state.get("processed_rows", [])
-                              if in_selected_dataset(row)]
-            _render_processed_deletion(processed_rows)
-            if processed_rows:
-                _render_processed_records(processed_rows)
+        analysis_sources = _render_analysis_tab(user_email)
 
     # Render after processing so the trends page includes the latest saved run.
     with trends_tab:

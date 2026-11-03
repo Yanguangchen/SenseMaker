@@ -8,13 +8,17 @@ import re
 import socket
 import ssl
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 from html.parser import HTMLParser
 from urllib.parse import quote, urljoin, urlsplit, urlunsplit
 
 import certifi
 
-MAX_LINKS = 10
+MAX_LINKS = 100
+MAX_WORKERS = 5
+PAGE_TIMEOUT_SECONDS = 30
+BATCH_TIMEOUT_SECONDS = 600
 MAX_BYTES = 2_000_000
 MAX_TEXT = 60_000
 SOCIAL_HOSTS = ("facebook.com", "fb.com", "fb.watch", "reddit.com", "redd.it", "x.com", "twitter.com",
@@ -107,7 +111,7 @@ def _get_page(url: str, deadline: float) -> tuple[int, dict[str, str], bytes]:
 
     remaining = min(15, deadline - time.monotonic())
     if remaining <= 0:
-        raise WebsiteError("Collection reached its time limit. Try fewer links.")
+        raise WebsiteError("This page reached its time limit. Try this link again later.")
     if parts.scheme == "https":
         connection = http.client.HTTPSConnection(parts.hostname, timeout=remaining,
                                                 context=ssl.create_default_context(cafile=certifi.where()))
@@ -131,7 +135,7 @@ def _get_page(url: str, deadline: float) -> tuple[int, dict[str, str], bytes]:
         while True:
             remaining = deadline - time.monotonic()
             if remaining <= 0:
-                raise WebsiteError("Collection reached its time limit. Try fewer links.")
+                raise WebsiteError("This page reached its time limit. Try this link again later.")
             if connection.sock is not None:
                 connection.sock.settimeout(min(15, remaining))
             chunk = response.read1(min(65536, MAX_BYTES + 1 - size))
@@ -221,37 +225,52 @@ def extract_page(payload: bytes, content_type: str) -> tuple[str, str, str, bool
     return title, text[:MAX_TEXT], published, len(text) > MAX_TEXT
 
 
+def _collect_website(original: str, batch_deadline: float) -> dict:
+    current = original
+    try:
+        now = time.monotonic()
+        if now >= batch_deadline:
+            raise WebsiteError("Collection reached its time limit. This link was not attempted; completed pages were kept.")
+        deadline = min(batch_deadline, now + PAGE_TIMEOUT_SECONDS)
+        for hop in range(6):
+            current = normalize_website_url(current)
+            status, headers, payload = _get_page(current, deadline)
+            if status not in {301, 302, 303, 307, 308}:
+                break
+            if hop == 5 or not headers.get("location"):
+                raise WebsiteError("The page redirected too many times or returned an invalid redirect.")
+            current = urljoin(current, headers["location"])
+        if status != 200:
+            raise WebsiteError(f"The website returned HTTP {status}. It may be unavailable or require sign-in or verification.")
+        title, text, published, truncated = extract_page(payload, headers.get("content-type", ""))
+        return {"url": current, "target_url": original, "raw_text": text, "title": title,
+                "publisher": urlsplit(current).hostname, "platform": "website", "source_type": "website_page",
+                "scraped_at": datetime.now(timezone.utc).isoformat(), "created_at": published,
+                "text_truncated": truncated, "comments": [], "comment_count": 0}
+    except WebsiteError as exc:
+        return {"url": original, "target_url": original, "source_type": "batch_warning", "raw_text": str(exc)}
+
+
 def collect_websites(urls: list[str], *, on_progress=None) -> list[dict]:
     urls = parse_website_links("\n".join(urls))
-    records, seen = [], set()
-    deadline = time.monotonic() + 90
-    for index, original in enumerate(urls, 1):
-        current = original
-        try:
-            if time.monotonic() >= deadline:
-                raise WebsiteError("Collection reached its time limit. Remaining links were not attempted; completed pages were kept.")
-            for hop in range(6):
-                current = normalize_website_url(current)
-                status, headers, payload = _get_page(current, deadline)
-                if status not in {301, 302, 303, 307, 308}:
-                    break
-                if hop == 5 or not headers.get("location"):
-                    raise WebsiteError("The page redirected too many times or returned an invalid redirect.")
-                current = urljoin(current, headers["location"])
-            if status != 200:
-                raise WebsiteError(f"The website returned HTTP {status}. It may be unavailable or require sign-in or verification.")
-            title, text, published, truncated = extract_page(payload, headers.get("content-type", ""))
-            if current not in seen:
-                seen.add(current)
-                records.append({"url": current, "target_url": original, "raw_text": text, "title": title,
-                                "publisher": urlsplit(current).hostname, "platform": "website", "source_type": "website_page",
-                                "scraped_at": datetime.now(timezone.utc).isoformat(), "created_at": published,
-                                "text_truncated": truncated, "comments": [], "comment_count": 0})
-        except WebsiteError as exc:
-            records.append({"url": original, "target_url": original, "source_type": "batch_warning", "raw_text": str(exc)})
-            if time.monotonic() >= deadline:
-                break
-        finally:
+    deadline = time.monotonic() + BATCH_TIMEOUT_SECONDS
+    results = {}
+    with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
+        pending = {executor.submit(_collect_website, url, deadline): index for index, url in enumerate(urls)}
+        for future in as_completed(pending):
+            index = pending[future]
+            results[index] = future.result()
+            # Streamlit progress updates must stay on the calling thread.
             if on_progress:
-                on_progress(index, len(urls), original)
+                on_progress(len(results), len(urls), urls[index])
+
+    records, seen = [], set()
+    # Keep input order and the first supplied alias when URLs redirect to the same page.
+    for index in range(len(urls)):
+        row = results[index]
+        if row["source_type"] == "batch_warning":
+            records.append(row)
+        elif row["url"] not in seen:
+            seen.add(row["url"])
+            records.append(row)
     return records

@@ -217,8 +217,10 @@ class SourceWorkspaceTests(unittest.TestCase):
 
         with patch("dashboard.init_db", return_value=db), \
              patch("dashboard.reddit_configured", return_value=True), \
+             patch("modules.auth.verify_access", return_value="owner@example.com"), \
              patch("dashboard._run_multi_scrape_sync", side_effect=collect) as scrape:
             app = AppTest.from_string(self.script).run()
+            app.button(key="open_facebook_steps").click().run()
             self.assertFalse(list(app.exception))
             self.assertEqual(app.multiselect[0].options, [facebook_url])
             self.assertEqual(len(app.multiselect), 1)
@@ -226,6 +228,7 @@ class SourceWorkspaceTests(unittest.TestCase):
             self.assertFalse(list(app.tabs[1].text_area))
             self.assertNotIn("Your links", [heading.value for heading in app.tabs[1].subheader])
             app.button(key="select_all_links_facebook").click().run()
+            app.button(key="facebook_wizard_step_next").click().run()
             app.button(key="collect_facebook_posts").click().run()
             self.assertEqual(scrape.call_args.kwargs["urls"], [facebook_url])
             app.number_input(key="reddit_post_limit").set_value(100).run()
@@ -236,6 +239,7 @@ class SourceWorkspaceTests(unittest.TestCase):
             self.assertEqual(app.session_state["last_reddit_scrape_results"][0]["url"], CAMBODIA_URL)
             self.assertTrue(any(button.key == "save_last_results_btn" for button in app.button))
             self.assertTrue(any(button.key == "save_reddit_results_btn" for button in app.button))
+            app.button(key="facebook_wizard_step_previous").click().run()
             app.button(key="clear_selected_links_facebook").click().run()
             self.assertFalse(list(app.exception))
             self.assertEqual(app.multiselect[0].value, [])
@@ -245,12 +249,16 @@ class SourceWorkspaceTests(unittest.TestCase):
     def test_other_platform_links_cannot_be_saved_or_collected_in_facebook(self):
         db = MemoryDB()
         with patch("dashboard.init_db", return_value=db), \
+             patch("modules.auth.verify_access", return_value="owner@example.com"), \
              patch("dashboard._run_multi_scrape_sync") as scrape:
             app = AppTest.from_string(self.script).run()
+            app.button(key="open_facebook_steps").click().run()
             app.text_area[0].input(CAMBODIA_URL).run()
-            app.button(key="collect_facebook_posts").click().run()
             self.assertFalse(list(app.exception))
             self.assertTrue(any("Use valid Facebook links" in error.value for error in app.error))
+            # Invalid links block the step, so collection cannot be reached at all.
+            self.assertTrue(app.button(key="facebook_wizard_step_next").disabled)
+            self.assertNotIn("collect_facebook_posts", [button.key for button in app.button])
             self.assertEqual(db.records, {})
             scrape.assert_not_called()
 

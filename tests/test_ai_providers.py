@@ -13,6 +13,7 @@ from streamlit.testing.v1 import AppTest
 from modules.config import get_ai_key, get_ai_provider
 from modules.openai import OpenAIError, api_error, generate_content
 from modules.processor import analyze_posts, process_pending_posts
+from tests.analysis_steps import ui
 
 
 def response(payload):
@@ -146,6 +147,11 @@ class ProviderTests(unittest.TestCase):
 
 
 class ProviderUITests(unittest.TestCase):
+    def setUp(self):
+        access = patch("modules.auth.verify_access", return_value="editor@example.com")
+        access.start()
+        self.addCleanup(access.stop)
+
     script = "from dashboard import _render_ai_settings\n_render_ai_settings()\n"
 
     def test_switching_providers_never_renders_or_stores_keys_in_widgets(self):
@@ -170,15 +176,15 @@ class ProviderUITests(unittest.TestCase):
              patch("modules.processor._generate_content") as gemini:
             app = AppTest.from_file(str(Path(__file__).resolve().parents[1] / "dashboard.py"), default_timeout=30)
             app.run()
+            ui(app, "analysis_sources").select("source:other").run()
             app.session_state["analysis_dataset_catalog"] = {"rows": [{"key": "untitled:", "title": "Untitled", "count": 1, "pending": 1}], "error": False}
             app.run()
-            app.selectbox(key="analysis_dataset").select("untitled:").run()
+            ui(app, "analysis_datasets").select("untitled:").run()
             app.session_state["firestore_rows"] = [{"_id": "a", "raw_text": "Hello", "status": "pending"}]
             app.run()
-            app.multiselect(key="analysis_record_selection").select("a").run()
             app.selectbox(key="ai_provider").select("openai").run()
-            self.assertEqual(app.button(key="run_analysis_selected_btn").label, "Run ChatGPT on 1 selected record")
-            app.button(key="run_analysis_selected_btn").click().run()
+            self.assertEqual(ui(app, "run_analysis_selected_btn").label, "Run ChatGPT on 1 included record")
+            ui(app, "run_analysis_selected_btn").click().run()
             self.assertFalse(list(app.exception))
             self.assertEqual(app.session_state["analysis_last_results"]["processed"], 1)
             self.assertEqual(save.call_args.args[2]["a"]["provider"], "openai")
@@ -186,7 +192,7 @@ class ProviderUITests(unittest.TestCase):
             gemini.assert_not_called()
             os.environ["OPENAI_API_KEY"] = ""
             app.run()
-            self.assertTrue(app.button(key="run_analysis_selected_btn").disabled)
+            self.assertTrue(ui(app, "run_analysis_selected_btn").disabled)
             self.assertTrue(any("ChatGPT is not configured" in warning.value for warning in app.warning))
 
 

@@ -10,6 +10,7 @@ from unittest.mock import MagicMock, patch
 import altair as alt
 from streamlit.testing.v1 import AppTest
 
+from tests.analysis_steps import ui
 from modules.sentiment_history import (
     AI_SOURCE, NEWS_SOURCE, build_snapshot, chart_spec, combined_history, load_history, news_sentiment_rows,
     persist_analysis_run,
@@ -170,6 +171,9 @@ class TimelineUITests(unittest.TestCase):
     script = "from dashboard import _render_sentiment_history\n_render_sentiment_history()\n"
 
     def setUp(self):
+        access = patch("modules.auth.verify_access", return_value="editor@example.com")
+        access.start()
+        self.addCleanup(access.stop)
         news = patch("dashboard._load_news_history", return_value=[])
         self.news = news.start()
         self.addCleanup(news.stop)
@@ -221,6 +225,17 @@ class TimelineUITests(unittest.TestCase):
         self.assertEqual(len(app.get("arrow_vega_lite_chart")), 1)
         self.assertTrue(any("Online News points" in caption.value for caption in app.caption))
 
+    def test_news_history_requires_an_explicit_news_source(self):
+        self.news.return_value = [news_scan(1, positive=1)]
+        script = "from dashboard import _render_sentiment_history\n_render_sentiment_history(['source:website'])"
+        with patch("dashboard._load_sentiment_history", return_value=[]):
+            app = AppTest.from_string(script, default_timeout=30).run()
+            self.news.assert_not_called()
+            self.assertEqual(len(app.get("arrow_vega_lite_chart")), 0)
+            app = AppTest.from_string(script.replace("source:website", "source:news"), default_timeout=30).run()
+            self.assertEqual(len(app.get("arrow_vega_lite_chart")), 1)
+            self.assertFalse(list(app.exception))
+
     def test_dashboard_saves_one_run_and_invalidates_history_after_analysis(self):
         from dashboard import _process_selected_firestore_posts
         from modules.database import _get_collection_name
@@ -263,15 +278,15 @@ class TimelineUITests(unittest.TestCase):
                 ]):
             app = AppTest.from_file(path)
             app.run()
+            ui(app, "analysis_sources").select("source:reddit").run()
             app.session_state["analysis_dataset_catalog"] = {"rows": [{"key": "untitled:", "title": "Untitled", "count": 1, "pending": 1}], "error": False}
             app.run()
-            app.selectbox(key="analysis_dataset").select("untitled:").run()
+            ui(app, "analysis_datasets").select("untitled:").run()
             app.session_state["firestore_rows"] = [{"_id": "a", "raw_text": "Example",
                                                    "url": "https://www.reddit.com/r/cambodia/comments/a/"}]
             app.run()
-            app.multiselect(key="analysis_record_selection").select("a").run()
             for expected_count in (1, 2):
-                app.button(key="run_analysis_selected_btn").click().run()
+                ui(app, "run_analysis_selected_btn").click().run()
                 self.assertFalse(list(app.exception))
                 metrics = {metric.label: metric.value for metric in app.metric}
                 self.assertEqual(metrics["Analysis runs"], str(expected_count))
@@ -283,6 +298,7 @@ class TimelineUITests(unittest.TestCase):
             self.assertTrue({"Comment Sentiment Analysis", "Velocity Tracker", "Evidence by record"}
                             <= {tab.label for tab in app.tabs})
             restored = AppTest.from_file(path).run()
+            ui(restored, "analysis_sources").select("source:reddit").run()
             self.assertFalse(list(restored.exception))
             self.assertEqual({metric.label: metric.value for metric in restored.metric}["Analysis runs"], "2")
 

@@ -5,7 +5,7 @@ from math import ceil
 import pandas as pd
 import streamlit as st
 
-from modules.analysis_library import dataset_key, dataset_options, select_records
+from modules.analysis_library import dataset_date_label, dataset_key, dataset_options, select_records
 from modules.client_report import platform_label
 from modules.config import get_setting
 from modules.database import delete_dataset_records, delete_records, init_db, load_record_catalog
@@ -178,7 +178,7 @@ def render_record_management() -> None:
     first, second, third = st.columns(3)
     dataset = first.selectbox("Dataset", [None, *groups], key="record_manager_dataset", placeholder="All datasets",
                               format_func=lambda key: "All datasets" if key is None else
-                              groups[key]["title"])
+                              f"{groups[key]['title']} · {dataset_date_label(groups[key])}")
     platform = second.selectbox("Source", [None, *platforms], key="record_manager_platform", placeholder="All sources",
                                 format_func=lambda value: value or "All sources")
     status = third.selectbox("Status", [None, *statuses], key="record_manager_status", placeholder="All statuses",

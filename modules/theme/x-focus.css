@@ -1,0 +1,21 @@
+/* Scope the backdrop to X's native dialog; other dialogs keep their own style. */
+[data-testid="stDialog"]:has(.st-key-x_focus_dialog) {
+  background: rgba(7, 12, 24, 0.68) !important;
+  -webkit-backdrop-filter: blur(8px);
+  backdrop-filter: blur(8px);
+}
+
+[data-testid="stDialog"]:has(.st-key-x_focus_dialog) > div {
+  align-items: center !important;
+  padding: 1rem !important;
+}
+
+[data-testid="stDialog"]:has(.st-key-x_focus_dialog) [role="dialog"] {
+  width: min(752px, calc(100vw - 2rem));
+  min-width: 0;
+  max-height: calc(100vh - 2rem);
+  max-height: calc(100dvh - 2rem);
+  overflow-y: auto;
+  margin: 0;
+  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.4);
+}

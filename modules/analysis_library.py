@@ -6,6 +6,52 @@ from datetime import datetime, timezone
 from typing import Any
 from urllib.parse import urlsplit
 
+SOURCE_LABELS = {
+    "source:facebook": "Facebook", "source:reddit": "Reddit", "source:news": "Online news",
+    "source:x": "X", "source:website": "Custom website", "source:other": "Other saved sources",
+}
+
+
+def record_source(post: dict[str, Any]) -> str:
+    kind = str(post.get("source_type") or "")
+    platform = str(post.get("platform") or "").lower()
+    if kind == "website_page" or platform == "website":
+        return "source:website"
+    if kind == "news_article" or platform == "news":
+        return "source:news"
+    if kind.startswith("reddit_") or platform == "reddit":
+        return "source:reddit"
+    if kind in {"x_post", "x_reply"} or platform in {"x", "twitter"}:
+        return "source:x"
+    if platform == "facebook":
+        return "source:facebook"
+    for url in (post.get("target_url", ""), post.get("url", "")):
+        host = source_key(url).split("/", 1)[0]
+        if host in {"facebook.com", "reddit.com", "x.com"}:
+            return {"facebook.com": "source:facebook", "reddit.com": "source:reddit", "x.com": "source:x"}[host]
+    return "source:other"
+
+
+def _date(value: Any) -> datetime | None:
+    try:
+        parsed = value if isinstance(value, datetime) else datetime.fromisoformat(str(value))
+        return (parsed.replace(tzinfo=timezone.utc) if parsed.tzinfo is None else parsed).astimezone(timezone.utc)
+    except (TypeError, ValueError):
+        return None
+
+
+def dataset_timestamp(post: dict[str, Any]) -> datetime | None:
+    # Publication time is not the date a dataset was collected or saved.
+    for field in ("saved_at", "scraped_at", "record_created_at"):
+        if (value := _date(post.get(field))) is not None:
+            return value
+    return None
+
+
+def dataset_date_label(group: dict[str, Any]) -> str:
+    date = _date(group.get("timestamp"))
+    return date.strftime("%d %b %Y, %H:%M:%S UTC") if date else "Date unavailable"
+
 
 def dataset_key(post: dict[str, Any]) -> str:
     """Existing custom titles define datasets without migrating stored records."""
@@ -19,14 +65,23 @@ def dataset_options(rows: list[dict[str, Any]], source_urls: list[str] | None) -
     for row in select_records(rows, source_urls=source_urls, limit=len(rows)):
         key = dataset_key(row)
         group = groups.setdefault(key, {"key": key, "title": str(row.get("custom_title") or "").strip()
-                                       or "Untitled (older records)", "count": 0, "pending": 0})
+                                       or "Untitled (older records)", "count": 0, "pending": 0,
+                                       "timestamp": "", "sources": []})
         group["count"] += 1
         group["pending"] += row.get("status") == "pending"
-    return list(groups.values())
+        timestamp = dataset_timestamp(row)
+        if timestamp is not None and (not group["timestamp"] or timestamp > _date(group["timestamp"])):
+            group["timestamp"] = timestamp.isoformat()
+        source = SOURCE_LABELS[record_source(row)]
+        if source not in group["sources"]:
+            group["sources"].append(source)
+    return sorted(groups.values(), key=lambda group: (group["timestamp"], group["title"]), reverse=True)
 
 
 def source_key(url: str) -> str:
     """Ignore display-only URL variants while retaining individual post paths."""
+    if isinstance(url, str) and url in SOURCE_LABELS:
+        return url
     try:
         parts = urlsplit(str(url).strip())
         host = (parts.hostname or "").lower()
@@ -55,8 +110,7 @@ def source_key(url: str) -> str:
 
 
 def matches_sources(post: dict[str, Any], keys: set[str]) -> bool:
-    # On-demand news, X and website collections are included alongside saved sources.
-    if post.get("source_type") in {"news_article", "x_post", "x_reply", "website_page"}:
+    if record_source(post) in keys:
         return True
     for url in (post.get("target_url", ""), post.get("url", "")):
         key = source_key(url)
@@ -81,15 +135,18 @@ def _collected_at(post: dict[str, Any]) -> datetime:
 
 
 def select_records(
-    rows: list[dict[str, Any]], *, source_urls: list[str] | None, limit: int, dataset: str | None = None,
+    rows: list[dict[str, Any]], *, source_urls: list[str] | None, limit: int,
+    dataset: str | list[str] | None = None,
 ) -> list[dict[str, Any]]:
     """Filter before limiting so legacy records cannot crowd out current sources.
 
-    None is an explicit request for the full library. An empty source list never
-    widens access to older Facebook sources; saved Online News remains available.
+    A dataset list selects their union; an empty list selects no records.
+    None is an explicit request for the full library. An empty source list selects
+    no records; news, X and websites must also be explicitly selected.
     """
     if dataset is not None:
-        rows = [row for row in rows if dataset_key(row) == dataset]
+        datasets = {dataset} if isinstance(dataset, str) else set(dataset)
+        rows = [row for row in rows if dataset_key(row) in datasets]
     if source_urls is not None:
         keys = {key for url in source_urls if (key := source_key(url))}
         rows = [row for row in rows if matches_sources(row, keys)]

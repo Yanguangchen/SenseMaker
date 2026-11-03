@@ -17,7 +17,7 @@ import firebase_admin
 from firebase_admin import credentials, firestore
 
 from modules.config import firebase_credentials, get_setting
-from modules.analysis_library import dataset_key
+from modules.analysis_library import dataset_key, record_source
 from modules.engagement import add_check, is_tracked
 from modules.signals import NON_CONTENT_TYPES
 
@@ -99,9 +99,12 @@ def upsert_post(db: firestore.Client, post_data: PostData) -> str:
     is_website = source_type == "website_page"
     is_news = source_type == "news_article"
     if existing.exists and not is_reddit and not is_x and not is_website and not is_news:
-        # Saved posts keep their original text and analysis; only engagement is followed.
+        # Keep text and analysis while refreshing dataset metadata and engagement.
+        metadata = {key: post_data[key] for key in ("custom_title", "saved_at") if key in post_data}
         if checks:
-            doc_ref.set({"checks": checks}, merge=True)
+            metadata["checks"] = checks
+        if metadata:
+            doc_ref.set(metadata, merge=True)
         return doc_id
 
     payload: PostData = {
@@ -155,6 +158,35 @@ def upsert_post(db: firestore.Client, post_data: PostData) -> str:
 
     doc_ref.set(payload)
     return doc_id
+
+
+def save_dataset_inclusion(db: firestore.Client, records: List[PostData], included: Dict[str, bool]) -> None:
+    """Save reversible exclusions, without changing source content or saved analysis."""
+    expected = {str(row["_id"]): (dataset_key(row), record_source(row)) for row in records if row.get("_id")}
+    if any(ident not in expected or not ident or "/" in ident or ident in {".", ".."}
+           or len(ident.encode("utf-8")) > 1500 or type(value) is not bool for ident, value in included.items()):
+        raise ValueError("Choose records from the displayed dataset.")
+    if not included:
+        return
+    collection = db.collection(_get_collection_name())
+    entries = list(included.items())
+    edited_at = _now_iso()
+    for start in range(0, len(entries), 400):
+        changes = dict(entries[start:start + 400])
+        refs = {ident: collection.document(ident) for ident in changes}
+
+        @firestore.transactional
+        def update(transaction: Any) -> None:
+            snapshots = {doc.id: doc for doc in db.get_all(list(refs.values()), transaction=transaction, timeout=30)}
+            for ident in changes:
+                doc = snapshots.get(ident)
+                row = (doc.to_dict() or {}) if doc and doc.exists else None
+                if row is None or (dataset_key(row), record_source(row)) != expected[ident]:
+                    raise ValueError("A record was removed or moved. Refresh datasets before editing again.")
+            for ident, value in changes.items():
+                transaction.update(refs[ident], {"analysis_excluded": not value, "dataset_edited_at": edited_at})
+
+        update(db.transaction(max_attempts=3))
 
 
 def get_pending_posts(db: firestore.Client, limit: int = 50) -> List[PostData]:
@@ -228,7 +260,8 @@ def load_record_catalog(db: firestore.Client) -> List[PostData]:
         "custom_title", "title", "url", "source_type", "platform", "status",
         "scraped_at", "saved_at", "created_at",
     ])
-    return [{**(doc.to_dict() or {}), "_id": doc.id, "_version": doc.update_time.isoformat()}
+    return [{**(doc.to_dict() or {}), "_id": doc.id, "_version": doc.update_time.isoformat(),
+             "record_created_at": getattr(doc, "create_time", None)}
             for doc in query.stream(timeout=30)]
 
 

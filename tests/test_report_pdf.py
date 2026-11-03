@@ -13,6 +13,7 @@ from streamlit.testing.v1 import AppTest
 from modules import report_pdf
 from modules.client_report import report_document, report_record
 from modules.report_pdf import MISSING_BROWSER, PDFExportError, render_pdf
+from tests.analysis_steps import ui
 
 
 def negative(ident, risk=9):
@@ -82,14 +83,20 @@ class ReportPdfTests(unittest.TestCase):
 
 
 class DashboardPdfTests(unittest.TestCase):
+    def setUp(self):
+        access = patch("modules.auth.verify_access", return_value="editor@example.com")
+        access.start()
+        self.addCleanup(access.stop)
+
     def app(self):
         path = str(Path(__file__).resolve().parents[1] / "dashboard.py")
         app = AppTest.from_file(path)
         app.run(timeout=30)
+        ui(app, "analysis_sources").select("source:facebook").run(timeout=30)
         app.session_state["analysis_dataset_catalog"] = {"rows": [{"key": "untitled:", "title": "Untitled", "count": 2, "pending": 0}], "error": False}
         app.run(timeout=30)
-        app.selectbox(key="analysis_dataset").select("untitled:").run(timeout=30)
-        app.session_state["processed_rows"] = [negative("aa1111")]
+        ui(app, "analysis_datasets").select("untitled:").run(timeout=30)
+        app.session_state["firestore_rows"] = [negative("aa1111")]
         app.run(timeout=30)
         self.assertFalse(list(app.exception))
         return app
@@ -111,7 +118,7 @@ class DashboardPdfTests(unittest.TestCase):
             self.assertIn("Download PDF", self.labels(app))
             render.assert_called_once()
             self.assertIn("NPR-AA1111", render.call_args.args[0])
-            app.session_state["processed_rows"] = [negative("aa1111"), negative("cc3333")]
+            app.session_state["firestore_rows"] = [negative("aa1111"), negative("cc3333")]
             app.run(timeout=30)
             self.assertNotIn("Download PDF", self.labels(app))
             self.assertEqual(render.call_count, 1)

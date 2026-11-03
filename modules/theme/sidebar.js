@@ -37,6 +37,15 @@
   };
 
   const click = (event) => {
+    const sourceTab = event.target.closest('[role="tab"]');
+    if (sourceTab?.textContent.trim() === "X") {
+      requestAnimationFrame(() => {
+        if (!document.querySelector('[role="dialog"]')) {
+          document.querySelector('.st-key-open_x_collection button:not(:disabled)')?.click();
+        }
+      });
+      return;
+    }
     const button = event.target.closest(".sm-rail-button");
     if (!button) return;
     if (button.matches(".sm-sidebar-toggle")) {
@@ -55,6 +64,8 @@
   };
 
   const keydown = (event) => {
+    // Escape and focus belong to the active dialog, not the background rail.
+    if (document.querySelector('[role="dialog"]')) return;
     if (event.key === "Escape" && !collapsed) {
       collapsed = true;
       try { sessionStorage.setItem(storageKey, "true"); } catch { /* Optional preference. */ }

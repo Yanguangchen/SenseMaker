@@ -1,4 +1,4 @@
-"""Current sources must not inherit the earlier research dataset or selections."""
+"""Explicit sources must not inherit unselected platforms or earlier selections."""
 
 import unittest
 from types import SimpleNamespace
@@ -9,6 +9,7 @@ from streamlit.testing.v1 import AppTest
 from modules.analysis_library import select_history, select_records, source_key
 from modules.reddit import CAMBODIA_URL
 from modules.saved_links import library_owner_id
+from analysis_steps import ui
 
 GROUP = "https://www.facebook.com/groups/current/"
 OLD_GROUP = "https://www.facebook.com/groups/legacy/"
@@ -38,16 +39,26 @@ class SelectionTests(unittest.TestCase):
         rows = [post("facebook", target_url="", url="https://m.facebook.com/groups/current/posts/42/?ref=feed"),
                 post("reddit", target_url="", url="https://old.reddit.com/r/cambodia/comments/a/title/"),
                 post("news", "https://news.google.com/rss/articles/a", source_type="news_article")]
-        self.assertEqual(len(select_records(rows, source_urls=[GROUP, CAMBODIA_URL], limit=50)), 3)
+        self.assertEqual(len(select_records(rows, source_urls=[GROUP, CAMBODIA_URL], limit=50)), 2)
+        self.assertEqual(len(select_records(rows, source_urls=[GROUP, CAMBODIA_URL, "source:news"], limit=50)), 3)
         self.assertNotEqual(source_key("https://reddit.com/r/cambodiafake/"), source_key(CAMBODIA_URL))
 
-    def test_x_status_links_match_across_hosts_and_current_sources_include_x_posts(self):
+    def test_x_status_links_match_across_hosts_and_x_requires_selection(self):
         self.assertEqual(source_key("https://twitter.com/someone/status/123?s=20"), "x.com/i/status/123")
         self.assertEqual(source_key("https://x.com/i/web/status/123"), "x.com/i/status/123")
         rows = [post("x", source_type="x_post", url="https://x.com/i/status/9", target_url="https://x.com/search?q=OYOSHI"),
                 post("reply", source_type="x_reply", url="https://x.com/i/status/10"),
                 post("legacy", OLD_GROUP)]
-        self.assertEqual([r["_id"] for r in select_records(rows, source_urls=[GROUP], limit=50)], ["x", "reply"])
+        self.assertEqual([r["_id"] for r in select_records(rows, source_urls=["source:x"], limit=50)], ["x", "reply"])
+
+    def test_empty_sources_include_nothing_and_each_platform_is_independent(self):
+        rows = [post("facebook"), post("reddit", source_type="reddit_post"),
+                post("news", source_type="news_article"), post("x", source_type="x_post"),
+                post("website", source_type="website_page"), post("other", "https://example.com/archive")]
+        self.assertEqual(select_records(rows, source_urls=[], limit=50), [])
+        for source in ("facebook", "reddit", "news", "x", "website", "other"):
+            with self.subTest(source=source):
+                self.assertEqual([r["_id"] for r in select_records(rows, source_urls=["source:" + source], limit=50)], [source])
 
     def test_full_library_is_explicit_and_empty_sources_do_not_restore_legacy_posts(self):
         rows = [post("legacy", OLD_GROUP)]
@@ -86,7 +97,7 @@ class ScopeUITests(unittest.TestCase):
     library_key = f"saved_links_{library_owner_id('owner@example.com')}_facebook"
 
     def app(self, error=False):
-        app = AppTest.from_string(self.script)
+        app = AppTest.from_string(self.script, default_timeout=30)
         app.session_state[self.library_key] = {"urls": [GROUP], "error": error}
         return app
 
@@ -105,29 +116,29 @@ class ScopeUITests(unittest.TestCase):
 
     def test_existing_sessions_and_source_switches_clear_stale_results(self):
         app = self.app()
+        app.session_state["analysis_source_scope"] = "Current sources"
         self.seed_stale_data(app)
         app.run()
-        self.assertEqual(app.selectbox(key="analysis_source_scope").value, "All saved records (including older sources)")
+        self.assertEqual(ui(app, "analysis_sources").value, [])
         self.assert_cleared(app)
         self.seed_stale_data(app)
-        app.selectbox(key="analysis_source_scope").select("Current sources").run()
+        ui(app, "analysis_sources").set_value(["source:facebook"]).run()
         self.assert_cleared(app)
         self.seed_stale_data(app)
-        app.selectbox(key="analysis_source_scope").select("All saved records (including older sources)").run()
+        ui(app, "analysis_sources").set_value(["source:website"]).run()
         self.assert_cleared(app)
 
-    def test_changing_saved_links_or_a_library_failure_never_keeps_loaded_records(self):
-        app = self.app().run()
-        app.selectbox(key="analysis_source_scope").select("Current sources").run()
+    def test_saved_facebook_links_do_not_control_source_choices(self):
+        app = self.app(error=True).run()
+        ui(app, "analysis_sources").set_value(["source:website", "source:news"]).run()
         self.seed_stale_data(app)
         app.session_state[self.library_key] = {"urls": [GROUP + "another"], "error": False}
         app.run()
+        self.assertEqual(ui(app, "analysis_sources").value, ["source:website", "source:news"])
+        self.assertIn("firestore_rows", app.session_state)
+        self.assertFalse(list(app.warning))
+        ui(app, "analysis_sources").set_value([]).run()
         self.assert_cleared(app)
-        self.seed_stale_data(app)
-        app.session_state[self.library_key] = {"urls": [GROUP], "error": True}
-        app.run()
-        self.assert_cleared(app)
-        self.assertTrue(any("could not be loaded" in w.value for w in app.warning))
 
 
 if __name__ == "__main__":

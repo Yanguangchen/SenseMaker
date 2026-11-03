@@ -49,9 +49,18 @@ class DashboardAccessTests(unittest.TestCase):
              patch("modules.facebook_remote.remote_facebook_configured", return_value=True), \
              patch("modules.facebook_remote.remote_facebook_session", return_value=FacebookSession()):
             app = self.run_dashboard()
-            self.assertTrue(app.checkbox[0].value)
-            self.assertTrue(app.checkbox[0].disabled)
+            # The steps open in a focused modal, so the tab itself only offers the trigger.
+            self.assertNotIn("capture_fb_session_btn", [button.key for button in app.button])
+            app.button(key="open_facebook_steps").click().run(timeout=30)
             self.assertFalse(app.button(key="capture_fb_session_btn").disabled)
+            # The later steps stay hidden until the Facebook connection is confirmed.
+            self.assertNotIn("collect_facebook_posts", [button.key for button in app.button])
+            self.assertTrue(app.button(key="facebook_wizard_step_next").disabled)
+            app.session_state["facebook_wizard_step"] = "Collect posts"
+            app.run(timeout=30)
+            self.assertFalse(list(app.exception))
+            self.assertTrue(app.checkbox(key="facebook_headless").value)
+            self.assertTrue(app.checkbox(key="facebook_headless").disabled)
             self.assertTrue(app.button(key="collect_facebook_posts").disabled)
 
     def test_denied_identity_loses_loaded_records_and_sees_no_tabs(self):

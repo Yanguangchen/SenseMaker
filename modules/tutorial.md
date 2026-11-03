@@ -11,9 +11,9 @@ This walkthrough uses a public website article. You need an approved Google acco
 3. Paste one public article URL into **Website links (one per line)**. Use a page you can read without signing in.
 4. Optionally enter a **Dataset title**, such as `Delivery feedback — November baseline`. Leave it blank to use the source and collection time.
 5. Click **Collect website pages**. The pages save automatically. Wait for the cloud-save confirmation, then check that the extracted text matches the article.
-6. Open **Sentiment Analysis**. Under **Data selection**, choose **Manual selection** to pick your saved title in **Dataset to analyze**, then click **Load records from Firestore**. Or choose **Last scraped data** to load the most recent collection from this browser session. Use **Save and load last scraped data** if you have not saved it yet. Firestore is the platform's cloud record library.
-7. Open **Settings** to choose an **AI provider** if needed, then return to **Analysis**, review **Select records to process**, and keep only your intended records selected. Add relevant names in the watch list if your research concerns Thai projects, companies or brands.
-8. Check the selected-record count and click **Run Gemini on … selected records** or **Run ChatGPT on … selected records**. Successful analyses are saved automatically.
+6. Open **Sentiment Analysis** and click **Start sentiment analysis**. Choose **Manual selection**, your record sources and saved datasets, or choose **Last scraped data** for the latest collection. Records appear automatically.
+7. Review the table and uncheck **Include** for any unwanted records. Exclusions save with the dataset and can be reversed. Choose an **AI provider** in Settings if needed, then continue to **Analyze** and add relevant watch terms.
+8. Check the included-record count and click **Run Gemini** or **Run ChatGPT**. Successful analyses are saved automatically.
 9. Open **Evidence by record** in the results. Read the original excerpt, translation, signal and supporting quotes before drawing conclusions.
 10. Open **Content plan**, choose **Latest analysis**, enter a brand/topic and goal, and click **Generate content plan**. Review the drafts and export the plan if you want to keep it.
 
@@ -26,12 +26,12 @@ Use the Google account approved by your administrator. A Google login grants acc
 | Workspace | Use it to |
 | --- | --- |
 | Scrape Data | Collect Facebook, Reddit, Online news, X or Custom website material. |
-| Sentiment Analysis | Load saved records, analyze them, review evidence and export reports. |
+| Sentiment Analysis | Choose and edit datasets, analyze included records, review evidence and export reports. |
 | Sentiment Trends | Compare saved analysis runs and news scans over time. |
 | Content plan | Turn analyzed concerns into keywords, content briefs and drafts. |
 | GenCite | Measure brand mentions in sampled AI answers and explore visibility gaps. |
 | Manage records | Find saved records, filter a dataset and delete selected records with a preview. |
-| Tutorial | Look up a workflow, search for a control or download this guide. |
+| Tutorial | Read this guide in the app, browse Contents, move between chapters or search for a control. |
 
 Click the CrisisRadar heading to collapse or expand the sidebar. On small screens it may start collapsed; the icons still open each workspace. Keyboard users can Tab to a workspace, use Up/Down or Home/End to move among navigation buttons, and press Enter to open one. Escape collapses the sidebar.
 
@@ -49,7 +49,9 @@ Choose the tab that matches the material you want to collect. Collection runs wh
 | X | Recent posts matching your enabled searches, with optional reply samples. | Server bearer token, read access and API credit. |
 | Custom website | Public HTML or plain-text pages at URLs you paste. | No additional API key or social login. |
 
-**Online news, X and Custom website save collected records automatically.** Before collecting, optionally enter a **Dataset title**; a blank title uses the source and collection time. Wait for **Saved … record(s) to the cloud**. All collected records are saved, even if you later filter the preview. They can then be loaded in **Sentiment Analysis** and **Manage records**.
+**Online news, X and Custom website save collected records automatically.** X first asks for a required **Dataset name**, then reveals collection options and a final collection step. For Online news and Custom website, optionally enter a **Dataset title**; a blank title uses the source and collection time. Wait for **Saved … record(s) to the cloud**. All collected records are saved, even if you later filter the preview. They can then be loaded in **Sentiment Analysis** and **Manage records**.
+
+Selecting **X** or **Start X collection** opens a focused window with the surrounding page dimmed and blurred. Escape, the close button or clicking outside closes it; **Resume X collection** restores your draft and current step during the session. After collection and saving, the window closes to show your results.
 
 If cloud saving fails, keep the page open and click **Retry saving collected records**. The collected data and original title are retained; retrying does not scrape again or incur another X collection request. New collection is paused until these records are saved. A reload, sign-out or server restart can still lose data that has not reached the cloud.
 
@@ -63,15 +65,24 @@ An unavailable source may produce a warning while other sources succeed. Warning
 
 Use **Scrape Data → Custom website** for ordinary articles, blogs, company pages and other public websites.
 
-1. Paste URLs into **Website links (one per line)**. You can enter up to 10 unique links per run; a missing scheme is treated as HTTPS.
+1. Paste URLs into **Website links (one per line)**. You can enter up to 100 unique links per run; a missing scheme is treated as HTTPS.
 2. Optionally enter a **Dataset title**, then click **Collect website pages**. Only the supplied pages and their redirects are requested; links inside each page are not crawled.
 3. Check **Pages collected** and any per-link notices. Open each result to read the extracted text and use **Open source page** to compare it with the original.
 4. Confirm **Saved … record(s) to the cloud**. If saving failed, use **Retry saving collected records** while keeping the page open.
-5. In **Sentiment Analysis**, load the saved records and select the pages you want to analyze.
+5. To save after reviewing, edit **Dataset title** above and click **Save dataset** below the results. This saves the collected pages without collecting again. A blank title keeps the current title; a new title moves these records to that dataset without creating copies. Reusing a title groups them with its other records.
+6. In **Sentiment Analysis**, load the saved records and select the pages you want to analyze.
+
+**Reuse URL lists with presets:** After pasting links, enter a **New preset name** under **URL presets**
+and click **Save preset**. Choose a **Saved URL preset** and click **Load preset** to replace the URL
+input with that list. Edit the URLs and use **Update preset** to change the selected list, or give it
+a different name and **Save preset** to create another. **Delete preset** asks for confirmation and
+only removes the saved list; the current input and collected records are kept. Use **Refresh presets**
+to see changes from another device. Presets are private to your account and survive refreshes and
+sign-outs. Saving or loading a preset does not collect pages or run analysis.
 
 The collector prefers article/main text and removes common navigation, scripts and hidden elements. It supports HTML and plain text. It does not render JavaScript, sign in, solve CAPTCHA challenges, read PDFs, download media or transcribe audio. A page that works in your browser may still be unavailable to the collector.
 
-The limits are 2 MB per page, 60,000 extracted characters per page, up to 5 redirects and a 90-second batch budget. Long text is marked as truncated. AI analysis has its own excerpt limits, so review any truncation notes in the findings too.
+Up to 5 pages are collected at once. The limits are 2 MB per page, 60,000 extracted characters per page, up to 5 redirects, 30 seconds per page and a 10-minute batch budget. Each failed or unattempted link has its own notice; completed pages are kept. Long text is marked as truncated. AI analysis has its own excerpt limits, so review any truncation notes in the findings too.
 
 Duplicate input links are removed, and links ending at the same final URL produce one page record in a run. Recollecting and saving a changed website page refreshes its text and resets its earlier analysis to pending; unchanged text keeps its saved analysis. Private/local network links, nonstandard web ports and social media URLs are rejected.
 
@@ -107,7 +118,13 @@ A news record contains the returned headline/snippet and source metadata; it is 
 
 ### X
 
-Open **Scrape Data → X**. Enable the searches you want and edit their terms. Set **Posts per search** and **Replies per post**, review the read/cost estimate, optionally enter a **Dataset title**, then click **Collect posts**. Posts and collected replies save automatically; check the cloud-save confirmation.
+Open **Scrape Data → X** and follow three steps:
+
+1. **Name your dataset:** Enter a **Dataset name** and click **Continue to options**. The name is required; collection options appear only after you continue.
+2. **Choose collection options:** Enable the searches you want and edit their terms. Set **Posts per search** and **Replies per post**, review the read/cost estimate, then click **Continue to collect**. At least one enabled search needs search terms.
+3. **Collect posts:** Review the dataset name and collection summary, then use the separate **Collect posts** button to start. Posts and collected replies save automatically under your chosen name; check the cloud-save confirmation.
+
+Use **Back to options** or **Back to dataset name** to revise your choices without losing them. Moving between steps does not collect posts. If cloud saving fails, **Retry saving collected records** stays available even while you edit an earlier step, and uses the original collection's name.
 
 Recent search covers about the last seven days. Reposts are excluded. Replies are optional, capped samples and are off by default. The API may return more records than the app retains because its smallest reply page is larger than some requested samples. The displayed estimate is a guide; actual access, rates and credit depend on the provider account.
 
@@ -115,12 +132,12 @@ X replies are separate records with parent context. If a search fails, completed
 
 ## Run sentiment analysis
 
-1. Open **Sentiment Analysis** and choose **Data selection**: **Manual selection** or **Last scraped data**.
-2. For **Manual selection**, choose **Dataset to analyze** by its saved **Custom title**. Reusing a title groups records together; older untitled records appear under **Untitled (older records)**. No dataset is chosen automatically. All saved sources are available by default. Optionally restrict **Record sources** to **Current sources**, which uses your Facebook link library, r/cambodia, saved news, X posts and custom website pages. **Refresh datasets** picks up newly saved titles. For **Last scraped data**, review the source, title and count of the most recently completed collection in this browser session. This includes only that scrape's records, even when a title has been reused. It works across Facebook, Reddit, news, X and custom websites. An empty collection does not select an older one instead.
-3. Open the **Settings** tab within Sentiment Analysis to set **Record status** and **Load limit**. Manual selection defaults to **pending**; Last scraped data defaults to **all**, so previously analyzed URLs remain available. Use **error** to retry failed analyses. Dataset membership and status filters apply before the limit. Enter relevant names in the watch list to guide Thailand relevance checks; this does not fetch new sources.
-4. In **Settings**, select **AI provider**. Gemini and ChatGPT use server credentials. Gemini also offers **Refresh available models** and **Gemini model**. Return to the **Analysis** tab to load records and run analysis; the settings persist when switching tabs.
-5. Click **Load records from Firestore** for manual selection, or **Load last scraped data** for the recent collection. If it is unsaved, **Save and load last scraped data** first saves the collection under the displayed title. Existing URLs follow the normal cloud save rules, so review the saved text in the table. Choose individual records in **Select records to process**, or explicitly click **Select all loaded records** to include the loaded portion of this dataset. No records start selected. **Clear record selection** removes the selection.
-6. Check the exact count in **Run Gemini on … selected records** or **Run ChatGPT on … selected records**. The button stays disabled until at least one eligible record is selected and the provider is configured. Wait for the processed/error summary. Successful analyses are saved automatically; review any failures before retrying.
+1. Open **Sentiment Analysis** and click **Start sentiment analysis** (or **Continue**) to open the two-step dialog.
+2. In **Choose and edit data**, choose **Manual selection** or **Last scraped data**. For manual selection, choose **Record sources**, then one or more **Datasets to analyze**. Dates and times are shown in UTC. No sources or datasets are preselected in a new session. Reusing a title groups records together; older untitled records appear under **Untitled (older records)**.
+3. Records appear immediately below your choices. There is no load button or record limit. Only the selected sources and datasets appear. **Last scraped data** includes exactly that collection's records and saves an unsaved collection before opening it. **Refresh datasets** refreshes both the dataset list and its records.
+4. Edit the **Include** checkboxes directly in the table. Eligible records start included unless previously excluded. Unchecking a record saves a reversible exclusion with the shared dataset; check it again to restore it. Source text and saved analysis are kept. Exclusions persist when you reopen the dataset. If saving fails, use **Retry saving changes**; analysis stays blocked until the edits save.
+5. The **Settings** tab contains **Record status** (default **all**), **AI provider**, and the Gemini model controls. Use **pending** or **error** when you want to analyze only those statuses. Gemini and ChatGPT use server credentials.
+6. Click **Next** to **Analyze**, enter any Thai projects, companies or brands to watch, and check the included count on **Run Gemini** or **Run ChatGPT**. Only those included records are sent when you click Run. The dialog closes after the run and the processed/error summary appears on the page. Successful analyses are saved automatically.
 
 The results include original text, an English translation, topics, a sentiment label, a priority/risk score and an evidence-backed Thailand monitoring assessment. The current sentiment categories are **Joy**, **Anger**, **Anxiety** and **Neutral**. Sentiment and Thailand relevance are separate: negative language alone does not establish a Thailand-related signal.
 
@@ -135,7 +152,7 @@ The results include original text, an English translation, topics, a sentiment l
 
 Confidence is a model assessment, not a calibrated probability. Check exact source quotes and validation notes. A comment should not inherit the parent's position merely because it appears under that post. Long inputs may be excerpted; a translation is not a substitute for the original evidence.
 
-To reopen work later, use **Manual selection**, choose its saved dataset and click **Load processed records** under **View processed records**. This retrieves only that dataset's saved analyses without paying for another model run. Last scraped data also restricts processed records to that scrape's URLs, but its shortcut lasts only for the current browser session. Changing selection mode, dataset, source scope, status or load limit clears loaded selections and results; a new scrape also clears a loaded Last scraped data selection. Load again after switching. The sentiment timeline summarizes runs within the source scope; Last scraped data shows the full timeline, not only that collection's runs.
+To reopen work later, choose your sources and datasets in **Manual selection**. Their included records' saved analyses appear automatically under **View processed records**, without another model run. Changing datasets, sources, selection mode or record status refreshes the view and clears previous run results; saved exclusions remain. The sentiment timeline summarizes runs within the selected sources. **Last scraped data** is available only for the current browser session and shows the full timeline.
 
 ## Review evidence and export reports
 
@@ -168,7 +185,7 @@ To build a **Velocity Tracker** history, recollect the same eligible posts at la
 
 The sidebar's **Content plan** workspace is titled **Content recommendations**. It uses analyzed source records to suggest ways to address recurring concerns.
 
-1. In **Sentiment Analysis**, run an analysis or click **Load processed records**.
+1. In **Sentiment Analysis**, choose a dataset with saved analyses or run an analysis.
 2. Open **Content plan** and choose **Latest analysis** or **Loaded processed records** under **Use sentiment records from**.
 3. Select up to 30 records in **Records to use**. Include the concerns you want the plan to address.
 4. Enter **Brand or topic** and **What should the content improve?**. Optionally add a **Focus keyword or concern**.
@@ -206,8 +223,9 @@ In **Recommendations**, generate content recommendations or keyword ideas based 
 | Item | How to keep it | Where it lives |
 | --- | --- | --- |
 | Facebook source links | Add valid links in Your links. | Your account's saved source library. |
+| Website URL presets | Enter a New preset name and Save preset; use Update preset after editing. | Your account's saved URL presets, available on any device. |
 | Collected posts, articles and pages | Online news, X and Custom website save automatically; Facebook and Reddit use Save data to cloud. | The shared cloud record library. |
-| Successful sentiment analysis | Saved automatically after processing. | With the source record; reopen via Load processed records. |
+| Successful sentiment analysis | Saved automatically after processing. | With the source record; choose the dataset to view its saved analyses. |
 | Trend points | Saved automatically when an analysis/news scan succeeds and storage is available. | Sentiment/news history. |
 | Sentiment content plans | Download keywords CSV and/or content-plan JSON. | Exported files; the on-screen plan is session-only. |
 | GenCite results | Give the result a name and click Save analysis. | Your account's Saved analyses. |
@@ -244,13 +262,13 @@ Removing Facebook source links is different from deleting source records. Sign-o
 | No readable website text, HTTP 403, or verification page | Try a direct public article URL. JavaScript-only, login and CAPTCHA pages may be unavailable. |
 | Website collection reaches a size/time limit | Try fewer links or shorter pages. Save completed results before starting another run. |
 | Cloud saving failed after collection | Keep the page open and click Retry saving collected records. The original data/title are reused; collection stays paused until saving succeeds. |
-| No records in Sentiment Analysis | Choose Manual selection and a saved Custom title, or Last scraped data for this session's latest collection. Click the load button, check status and load limit, and refresh datasets if a saved title is missing. |
-| Run button shows 0 selected records | Choose individual records or click Select all loaded records within the selected dataset. Loading never selects records automatically. |
+| No records in Sentiment Analysis | Choose sources and datasets in Manual selection, or Last scraped data. Records open automatically; check Record status, Refresh datasets, or use Retry opening dataset after a connection failure. |
+| No included records | Check Include beside the records you want to analyze in Choose and edit data, then continue to Analyze. |
 | Source library could not be loaded | Refresh Your links in the Facebook tab, then retry loading. If storage still fails, contact the administrator. |
 | AI run control disabled | Check the selected provider's configuration and that eligible records are selected. Credentials are managed on the server. |
 | Provider timeout, quota or rate-limit notice | Try a smaller batch or retry later. The administrator may need to check provider access or billing. |
 | Incomplete plan or unsupported source evidence | Retry with fewer relevant analyzed records and a clear goal. Read any detailed validation notice; switch to another configured provider if it persists. |
-| Content plan shows no records | Load processed records or run sentiment analysis first, then choose the matching source mode in Content plan. |
+| Content plan shows no records | Choose a dataset with saved analyses or run sentiment analysis first, then choose the matching source mode in Content plan. |
 | A plan disappeared | Its source selection, brief, provider or model may have changed, or the session restarted. Regenerate it and export a copy. |
 | Trends are empty or stale | Complete an analysis or news scan, refresh the timeline and check source scope. A failed history write may need an administrator's help. |
 | PDF creation fails | Download the HTML report; ask the administrator to check the server's Playwright/Chromium installation. |
