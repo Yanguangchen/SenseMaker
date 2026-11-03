@@ -37,8 +37,8 @@ def source_key(url: str) -> str:
 
 
 def matches_sources(post: dict[str, Any], keys: set[str]) -> bool:
-    # Saved news articles and X searches are the app's current watches, not a personal link library.
-    if post.get("source_type") in {"news_article", "x_post", "x_reply"}:
+    # On-demand news, X and website collections are included alongside saved sources.
+    if post.get("source_type") in {"news_article", "x_post", "x_reply", "website_page"}:
         return True
     for url in (post.get("target_url", ""), post.get("url", "")):
         key = source_key(url)

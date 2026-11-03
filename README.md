@@ -235,6 +235,41 @@ select records, and confirm their permanent deletion. This removes the selected 
 and analyses from the shared library for all users. Records that are no longer processed
 are kept. Source links stay available for future collection.
 
+## Custom website collection
+
+Open **Scrape Data → Custom website** and paste ordinary website links, one per
+line. News articles, blogs and company pages are supported. This tab requires no
+additional API key or Facebook connection. It reads only the URLs you supply;
+it does not crawl the site's other pages. Social media URLs are rejected so they
+remain in their existing platform collectors.
+
+Click **Collect website pages**, review each text preview, enter a custom title,
+then click **Save data to cloud**. Saved pages appear in **Sentiment Analysis →
+Current sources** alongside the other collected sources. Analyze them with your
+existing Gemini/OpenAI key, then use those results in **Content recommendations**.
+Recollecting a changed page refreshes its text and resets its old analysis;
+unchanged pages keep their analysis. Website pages have no engagement checks.
+
+Collection supports public HTML and plain-text pages, preferring `<main>` or
+`<article>` content and excluding common navigation, scripts and hidden elements.
+It stores the title, final URL, submitted source URL, publisher hostname, collection
+time and an article publication timestamp when supplied. Extraction is best effort;
+review the text before analysis, particularly on pages with unusual layouts.
+
+Limits: 10 unique links per run, 2 MB per page, 60,000 extracted characters per page,
+up to 5 redirects and a 90-second batch budget (individual network operations also
+have timeouts). Long text is explicitly marked as truncated; AI analysis has its
+own existing excerpt limits. Results from completed pages remain available when
+another page fails. Different links redirecting to the same final URL are deduplicated.
+Private/local network destinations are blocked and DNS addresses are validated and
+pinned for every request, including redirects. Only standard HTTP/HTTPS ports are
+allowed; existing browser sessions and credentials are not reused.
+
+This collector does not execute JavaScript, log in, solve CAPTCHA challenges,
+download PDFs/media or transcribe audio. Inaccessible pages produce a notice rather
+than a fallback record. No new service needs to be configured in Railway, but the
+server must have network access to the websites users choose.
+
 ## Reddit collection: r/cambodia
 
 1. Open **Scrape Data → Reddit** to collect directly from **r/cambodia**.
@@ -618,7 +653,7 @@ The dashboard has **four pages**, accessible from the left toolbar:
 
 ### Tab 1 — Scrap data
 
-- Source tabs: **Facebook**, **Reddit**, **Online news** (Google News monitoring), and **X**.
+- Source tabs: **Facebook**, **Reddit**, **Online news** (Google News monitoring), **X**, and **Custom website** (user-provided public page links).
 - Facebook and Reddit each keep their own source selections, collection settings and results.
 - Facebook auth session capture (opens Chrome for manual login)
 - Save a personal library of links, available on future visits and other devices

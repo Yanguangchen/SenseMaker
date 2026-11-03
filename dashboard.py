@@ -48,6 +48,7 @@ from modules.processor import analyze_posts
 from modules.gemini import AUTO_MODEL, GeminiError, list_text_models, normalize_model_name
 from modules.reddit import CAMBODIA_URL, is_reddit_url, reddit_configured
 from modules.x import READ_PRICE_USD, X_SEARCHES, XClient, XError, collect_x, estimate_reads, x_configured
+from modules.websites import MAX_LINKS as MAX_WEBSITE_LINKS, WebsiteError, collect_websites, parse_website_links
 from modules.signals import NON_CONTENT_TYPES, SIGNAL_LABELS, is_analyzable, is_flagged, watch_terms
 from modules.saved_links import library_owner_id, load_saved_links, parse_links, remove_saved_links, save_links
 from modules.sentiment_history import (
@@ -122,7 +123,7 @@ def _render_analysis_sources(user_email: str) -> tuple[list[str] | None, bool]:
         library = st.session_state.get(f"saved_links_{library_owner_id(user_email)}_facebook", {})
         ready = bool(library) and not library.get("error", False)
         sources = sorted(set([CAMBODIA_URL] + library.get("urls", []))) if ready else []
-        st.caption("Uses your saved Facebook sources, r/cambodia, saved Online News articles and posts collected from X. "
+        st.caption("Uses your saved Facebook sources, r/cambodia, saved Online News articles, X posts and custom website pages. "
                    "Older groups appear only when you choose all saved records. Newest collected records load first.")
         if not ready:
             st.warning("Your source library could not be loaded. Refresh saved links in Scrape Data → Facebook, "
@@ -1580,6 +1581,49 @@ def _render_x_workspace() -> None:
         st.json(posts)
 
 
+def _render_website_workspace() -> None:
+    st.subheader("Custom website")
+    st.caption("Paste public article, blog, company or other website links, one per line. "
+               "Collects the readable text of each page for sentiment analysis.")
+    links = st.text_area("Website links (one per line)", key="website_links", height=160,
+                         placeholder="https://example.com/article\nhttps://example.org/news/update",
+                         help=f"Up to {MAX_WEBSITE_LINKS} unique pages per run. Only the links you enter are collected; linked pages are not crawled.")
+    st.caption("No API key or social media login is needed. Pages requiring JavaScript, sign-in or CAPTCHA verification "
+               "may be unavailable. HTML and plain text are supported; PDFs and media downloads are not.")
+    if st.button("Collect website pages", key="collect_website_pages", type="primary"):
+        try:
+            urls = parse_website_links(links)
+        except WebsiteError as exc:
+            st.error(str(exc))
+        else:
+            st.session_state["website_collection"] = {"urls": urls, "rows": []}
+            progress = st.progress(0, text="Starting website collection…")
+            with st.spinner("Reading website pages…"):
+                rows = collect_websites(urls, on_progress=lambda done, total, url:
+                                        progress.progress(done / total, text=f"Checked {done} of {total} pages"))
+                st.session_state["website_collection"]["rows"] = rows
+    collection = st.session_state.get("website_collection")
+    if collection is None:
+        return
+    with st.expander("Sources in the last website collection"):
+        st.code("\n".join(collection["urls"]))
+    rows = collection["rows"]
+    for issue in (row for row in rows if row.get("source_type") in NON_CONTENT_TYPES):
+        st.warning(f"{issue.get('target_url', 'Website')}: {issue.get('raw_text', 'Collection incomplete')}")
+    pages = [row for row in rows if row.get("source_type") not in NON_CONTENT_TYPES]
+    st.write(f"**Pages collected:** {len(pages)}")
+    if not pages:
+        st.info("No readable website pages were collected. Check the links and collection notices above.")
+        return
+    if any(page.get("text_truncated") for page in pages):
+        st.caption("Long pages were limited to the first 60,000 characters. Review the extracted text before analyzing.")
+    _render_cloud_save(pages, "website_custom_title", "save_website_results", noun="pages")
+    for page in pages:
+        with st.expander(page.get("title") or page["url"]):
+            st.link_button("Open source page", page["url"])
+            st.text(page["raw_text"])
+
+
 def main() -> None:
     load_environment()
     _bridge_secrets_to_env()
@@ -1599,7 +1643,7 @@ def main() -> None:
     scrape_tab, analysis_tab, trends_tab, content_tab, gencite_tab = dashboard_views(user_email, facebook_session)
 
     with scrape_tab:
-        facebook_tab, reddit_tab, news_tab, x_tab = st.tabs(["Facebook", "Reddit", "Online news", "X"])
+        facebook_tab, reddit_tab, news_tab, x_tab, website_tab = st.tabs(["Facebook", "Reddit", "Online news", "X", "Custom website"])
         with facebook_tab:
             _render_collection_workspace("facebook", user_email, facebook_session)
         with reddit_tab:
@@ -1608,6 +1652,8 @@ def main() -> None:
             _render_news_workspace()
         with x_tab:
             _render_x_workspace()
+        with website_tab:
+            _render_website_workspace()
 
     with analysis_tab:
         st.subheader("Sentiment Analysis")
