@@ -72,6 +72,12 @@ def render_content_workspace() -> None:
                 st.error(str(exc))
     if not plan:
         return
+    if plan.get("warnings"):
+        st.warning("Some suggestions were omitted because they were incomplete, duplicated another keyword, "
+                   "or referenced unavailable sources. The validated suggestions are shown below.")
+        with st.expander("Details about omitted suggestions"):
+            for warning in plan["warnings"]:
+                st.text(warning)
     st.caption(f"{AI_PROVIDERS[plan['provider']]} · {plan['model']} · {plan['record_count']} records · "
                f"Generated {plan['generated_at'][:16].replace('T', ' ')} UTC. Plans remain in this session; export to keep a copy.")
     st.markdown("**Sentiment baseline in the selected sample**")
@@ -105,5 +111,5 @@ def render_content_workspace() -> None:
                         st.link_button("Open source", ref["url"])
                 for fact in rec["facts_to_verify"]:
                     st.write("• " + fact)
-                st.caption("Quotes are checked against the supplied text. Check the interpretation and factual claims before publishing.")
+                st.caption("Source excerpts are attached from the selected records. Check the interpretation and factual claims before publishing.")
             st.write(f"**Measure after publishing:** {rec['measurement']}")

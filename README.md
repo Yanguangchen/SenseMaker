@@ -209,9 +209,12 @@ with bounded retries for temporary failures; it never publishes content automati
 
 Each plan contains up to five briefs with a specific primary keyword, supporting phrases,
 search intent, the concern addressed, content format, title, outline, draft, facts to verify
-and a measurement suggestion. Every brief must cite existing record IDs and verbatim
-quotes from their text or comment excerpts; unsupported quotes reject the response.
-Quotes establish source presence, not factual truth or interpretation accuracy. Drafts
+and a measurement suggestion. The provider selects IDs from a catalog of source excerpts;
+the server attaches the original text and source links, preserving Khmer, Thai and formatting.
+Unknown references are rejected. Valid briefs remain available if another brief is incomplete
+or duplicated, with a notice explaining what was omitted. A wholly invalid response gets
+one automatic repair attempt within the request budget. Source excerpts establish source
+presence, not factual truth or interpretation accuracy. Drafts
 should retain verification placeholders until the relevant facts are checked.
 
 Plans show the sentiment baseline of the selected records and rank briefs by the number
