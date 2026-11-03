@@ -20,10 +20,12 @@ html.sm-navigation-ready [data-testid="stSidebar"] {
   transform: none !important;
   visibility: visible !important;
   overflow: visible;
-  border: 1px solid rgb(255 255 255 / 0.12);
+  border: 1px solid color-mix(in srgb, currentColor 20%, transparent);
   border-radius: 24px;
-  background: linear-gradient(155deg, rgb(83 77 138 / 0.13), rgb(14 18 42 / 0.72) 45%);
-  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.08), 0 20px 60px -28px rgb(0 0 0 / 0.65);
+  /* Keep Streamlit's opaque, theme-aware background-color. A background shorthand
+     here made the dark rail translucent over the white page in light mode. */
+  background-image: linear-gradient(155deg, rgb(139 123 255 / 0.06), transparent 45%);
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.08), 0 20px 60px -28px rgb(0 0 0 / 0.24);
   -webkit-backdrop-filter: blur(24px) saturate(150%);
   backdrop-filter: blur(24px) saturate(150%);
   transition: width var(--sm-rail-duration) var(--sm-rail-ease), min-width var(--sm-rail-duration) var(--sm-rail-ease);
@@ -33,6 +35,9 @@ html.sm-navigation-ready [data-testid="stSidebarContent"] {
   height: 100%;
   padding: 0;
   overflow: hidden;
+  /* Streamlit reserves scrollbar space on both edges even with overflow hidden,
+     which clips the icons when the rail is collapsed. */
+  scrollbar-gutter: auto;
   background: transparent;
 }
 
@@ -70,7 +75,8 @@ html.sm-navigation-ready .sm-sidebar {
   flex-direction: column;
   height: calc(100dvh - 66px);
   min-height: 300px;
-  color: #eceeff;
+  /* Inherit the selected Streamlit theme's text color, including theme changes. */
+  color: inherit;
 }
 
 .sm-workspace-nav {
@@ -92,11 +98,11 @@ html.sm-navigation-ready .sm-sidebar {
   height: 48px;
   padding: 0 14px;
   overflow: hidden;
-  border: 1px solid rgb(255 255 255 / 0.09);
+  border: 1px solid color-mix(in srgb, currentColor 55%, transparent);
   border-radius: 16px;
-  background: linear-gradient(145deg, rgb(255 255 255 / 0.065), rgb(255 255 255 / 0.015));
+  background: color-mix(in srgb, currentColor 3%, transparent);
   box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.045);
-  color: #adb4d3;
+  color: inherit;
   font: inherit;
   font-size: 14px;
   font-weight: 500;
@@ -107,20 +113,21 @@ html.sm-navigation-ready .sm-sidebar {
 }
 
 .stApp .sm-rail-button:hover {
-  color: #fff;
-  border-color: rgb(180 170 255 / 0.35);
-  background-color: rgb(139 123 255 / 0.1);
+  color: inherit;
+  border-color: currentColor;
+  background-color: color-mix(in srgb, currentColor 8%, transparent);
   box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.08), 0 6px 20px -12px rgb(139 123 255 / 0.45);
 }
 
 .stApp .sm-rail-button[aria-current="page"] {
-  color: #ded8ff;
-  border-color: rgb(167 148 255 / 0.4);
-  background: linear-gradient(135deg, rgb(139 123 255 / 0.25), rgb(107 113 215 / 0.09));
-  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.12), 0 8px 24px -16px rgb(139 123 255 / 0.7);
+  color: inherit;
+  font-weight: 650;
+  border-color: color-mix(in srgb, currentColor 60%, #8b7bff);
+  background: linear-gradient(135deg, rgb(139 123 255 / 0.18), rgb(107 113 215 / 0.09));
+  box-shadow: inset 3px 0 0 color-mix(in srgb, currentColor 60%, #8b7bff), 0 8px 24px -16px rgb(139 123 255 / 0.25);
 }
 
-.stApp .sm-rail-button:focus-visible { outline: 2px solid #c4bcff; outline-offset: 4px; }
+.stApp .sm-rail-button:focus-visible { outline: 2px solid currentColor; outline-offset: 4px; }
 .sm-rail-icon { display: grid; flex: 0 0 22px; width: 22px; height: 22px; place-items: center; }
 .sm-rail-icon svg { width: 22px; height: 22px; }
 .sm-rail-label {
@@ -133,8 +140,8 @@ html.sm-navigation-ready .sm-sidebar {
 }
 
 .stApp .sm-sidebar-toggle { border-color: transparent; background: transparent; box-shadow: none; }
-.sm-brand { color: #eceeff; font-weight: 650; font-size: 16px; letter-spacing: -0.025em; }
-.sm-sidebar-chevron { display: grid; margin-left: auto; opacity: 0.6; transition: opacity 180ms ease; }
+.sm-brand { color: inherit; font-weight: 650; font-size: 16px; letter-spacing: -0.025em; }
+.sm-sidebar-chevron { display: grid; margin-left: auto; opacity: 0.85; transition: opacity 180ms ease; }
 .sm-sidebar-chevron svg { width: 18px; height: 18px; }
 .sm-rail-account { display: flex; align-items: center; gap: 12px; padding: 0 9px; transition: padding var(--sm-rail-duration) var(--sm-rail-ease), gap var(--sm-rail-duration) var(--sm-rail-ease); }
 .sm-rail-avatar {
@@ -142,19 +149,20 @@ html.sm-navigation-ready .sm-sidebar {
   flex: 0 0 32px;
   height: 32px;
   place-items: center;
-  border: 1px solid rgb(167 148 255 / 0.25);
+  border: 1px solid color-mix(in srgb, currentColor 55%, transparent);
   border-radius: 11px;
   background: linear-gradient(135deg, rgb(139 123 255 / 0.22), rgb(68 137 188 / 0.12));
-  color: #d3caff;
+  color: inherit;
   font-size: 13px;
   font-weight: 600;
 }
-.sm-rail-account-meta { display: grid; gap: 2px; color: #9199bb; font-size: 11px; }
+.sm-rail-account-meta { display: grid; gap: 2px; color: inherit; font-size: 11px; }
+.sm-rail-account-meta > span:first-child { opacity: 0.8; }
 .sm-rail-facebook-avatar {
   position: relative;
-  border-color: rgb(102 166 255 / 0.3);
-  background: linear-gradient(135deg, rgb(24 119 242 / 0.3), rgb(68 137 188 / 0.12));
-  color: #b4d4ff;
+  border-color: color-mix(in srgb, currentColor 55%, transparent);
+  background: linear-gradient(135deg, rgb(24 119 242 / 0.14), rgb(68 137 188 / 0.06));
+  color: color-mix(in srgb, currentColor 55%, #1877f2);
   font-size: 20px;
   font-weight: 700;
 }
@@ -165,11 +173,11 @@ html.sm-navigation-ready .sm-sidebar {
   bottom: -3px;
   width: 8px;
   height: 8px;
-  border: 2px solid #171c34;
+  border: 2px solid currentColor;
   border-radius: 50%;
-  background: #64d5a0;
+  background: #2b8b5f;
 }
-.sm-rail-email { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #cbd0e7; font-size: 12px; }
+.sm-rail-email { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: inherit; font-size: 12px; }
 .stApp .sm-rail-sign-out { border-color: transparent; background: transparent; box-shadow: none; }
 
 html.sm-sidebar-collapsed .sm-rail-button { padding-inline: 12px; gap: 0; }
