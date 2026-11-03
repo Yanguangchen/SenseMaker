@@ -95,7 +95,8 @@ def upsert_post(db: firestore.Client, post_data: PostData) -> str:
     source_type = str(post_data.get("source_type", "")).strip()
     is_reddit = source_type in {"reddit_post", "reddit_comment"}
     is_x = source_type in {"x_post", "x_reply"}
-    if existing.exists and not is_reddit and not is_x:
+    is_website = source_type == "website_page"
+    if existing.exists and not is_reddit and not is_x and not is_website:
         # Saved posts keep their original text and analysis; only engagement is followed.
         if checks:
             doc_ref.set({"checks": checks}, merge=True)
@@ -127,12 +128,14 @@ def upsert_post(db: firestore.Client, post_data: PostData) -> str:
             if key in post_data:
                 payload[key] = post_data[key]
 
-    if is_reddit or is_x:
+    if is_reddit or is_x or is_website:
         fields = ("platform", "x_id", "created_at", "conversation_id", "lang", "x_query", "x_category",
                   "x_categories", "parent_url", "parent_text", "reply_sample_limit", "content_removed",
                   "reported_comment_count") if is_x else (
             "platform", "subreddit", "reddit_id", "created_at", "parent_url", "parent_text",
             "thread_id", "comment_sample_limit", "content_removed", "reported_comment_count")
+        if is_website:
+            fields = ("platform", "title", "publisher", "created_at", "text_truncated")
         for key in fields:
             if key in post_data:
                 payload[key] = post_data[key]
