@@ -240,9 +240,13 @@ class TimelineUITests(unittest.TestCase):
                 ]):
             app = AppTest.from_file(path)
             app.run()
+            app.session_state["analysis_dataset_catalog"] = {"rows": [{"key": "untitled:", "title": "Untitled", "count": 1, "pending": 1}], "error": False}
+            app.run()
+            app.selectbox(key="analysis_dataset").select("untitled:").run()
             app.session_state["firestore_rows"] = [{"_id": "a", "raw_text": "Example",
                                                    "url": "https://www.reddit.com/r/cambodia/comments/a/"}]
             app.run()
+            app.multiselect(key="analysis_record_selection").select("a").run()
             for expected_count in (1, 2):
                 app.button(key="run_analysis_selected_btn").click().run()
                 self.assertFalse(list(app.exception))

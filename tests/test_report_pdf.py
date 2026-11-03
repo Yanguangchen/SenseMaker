@@ -86,6 +86,9 @@ class DashboardPdfTests(unittest.TestCase):
         path = str(Path(__file__).resolve().parents[1] / "dashboard.py")
         app = AppTest.from_file(path)
         app.run(timeout=30)
+        app.session_state["analysis_dataset_catalog"] = {"rows": [{"key": "untitled:", "title": "Untitled", "count": 2, "pending": 0}], "error": False}
+        app.run(timeout=30)
+        app.selectbox(key="analysis_dataset").select("untitled:").run(timeout=30)
         app.session_state["processed_rows"] = [negative("aa1111")]
         app.run(timeout=30)
         self.assertFalse(list(app.exception))
@@ -98,6 +101,7 @@ class DashboardPdfTests(unittest.TestCase):
         with patch.dict(os.environ, {"PLAYWRIGHT_STORAGE_STATE": "/tmp/crisisradar-no-session-for-pdf-test.json"}), \
                 patch("modules.config.load_environment"), \
                 patch("modules.auth.require_access", return_value="editor@example.com"), \
+                patch("modules.database.init_db"), \
                 patch("modules.saved_links.load_saved_links", return_value=[]), \
                 patch("modules.report_pdf.render_pdf", return_value=b"%PDF-1.4 test") as render:
             app = self.app()
@@ -116,6 +120,7 @@ class DashboardPdfTests(unittest.TestCase):
         with patch.dict(os.environ, {"PLAYWRIGHT_STORAGE_STATE": "/tmp/crisisradar-no-session-for-pdf-test.json"}), \
                 patch("modules.config.load_environment"), \
                 patch("modules.auth.require_access", return_value="editor@example.com"), \
+                patch("modules.database.init_db"), \
                 patch("modules.saved_links.load_saved_links", return_value=[]), \
                 patch("modules.report_pdf.render_pdf", side_effect=PDFExportError(MISSING_BROWSER)):
             app = self.app()

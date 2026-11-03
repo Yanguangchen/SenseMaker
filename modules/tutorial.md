@@ -11,9 +11,9 @@ This walkthrough uses a public website article. You need an approved Google acco
 3. Paste one public article URL into **Website links (one per line)**. Use a page you can read without signing in.
 4. Click **Collect website pages**. Expand the result and check that the extracted text matches the article.
 5. Enter a **Custom title**, such as `Delivery feedback — November baseline`, then click **Save data to cloud**. Wait for the saved confirmation.
-6. Open **Sentiment Analysis**. Choose **Current sources**, set **Record status** to **pending**, and click **Load records from Firestore**. Firestore is the platform's cloud record library.
+6. Open **Sentiment Analysis**. Choose **Current sources**, select your saved title in **Dataset to analyze**, keep **Record status** as **pending**, and click **Load records from Firestore**. Firestore is the platform's cloud record library. Use **Refresh datasets** if your title is missing.
 7. Choose an **AI provider**, review **Select records to process**, and keep only your intended records selected. Add relevant names in the watch list if your research concerns Thai projects, companies or brands.
-8. Click **Run Gemini on selected records** or **Run ChatGPT on selected records**. Successful analyses are saved automatically.
+8. Check the selected-record count and click **Run Gemini on … selected records** or **Run ChatGPT on … selected records**. Successful analyses are saved automatically.
 9. Open **Evidence by record** in the results. Read the original excerpt, translation, signal and supporting quotes before drawing conclusions.
 10. Open **Content plan**, choose **Latest analysis**, enter a brand/topic and goal, and click **Generate content plan**. Review the drafts and export the plan if you want to keep it.
 
@@ -111,11 +111,11 @@ X replies are separate records with parent context. If a search fails, completed
 ## Run sentiment analysis
 
 1. Open **Sentiment Analysis** and choose **Record sources**. **Current sources** includes your saved Facebook sources, r/cambodia, saved news, X posts and custom website pages. **All saved records (including older sources)** also includes earlier research outside that selection.
-2. Enter Thai projects, companies, brands and local-language aliases in the watch list, one per line. Leave it blank to monitor Thailand generally. This list changes relevance checks during analysis; it does not fetch new sources.
-3. Set **Record status** and **Load limit**. Use **pending** for newly saved material, **error** to find failed records, or **all** to inspect a broader set. The newest collected records load first within the selected scope.
+2. Choose **Dataset to analyze**. Datasets group records by their saved **Custom title**; reusing a title adds records to the same group. Older records without a title appear under **Untitled (older records)**. Nothing is chosen automatically. Use **Refresh datasets** after another user saves a collection. Enter relevant names in the watch list to guide Thailand relevance checks; this does not fetch new sources.
+3. Set **Record status** and **Load limit**. **pending** is the default; use **error** to find failed records, or **all** to inspect every status in the chosen dataset. Dataset and source filters apply before the limit, so other collections cannot fill the result list.
 4. Select **AI provider**. Gemini and ChatGPT use server credentials. Choose a model if that provider's model control is available.
-5. Click **Load records from Firestore**, review the table and adjust **Select records to process**. Loaded analyzable records start selected, so narrow the selection before running a small test.
-6. Click **Run Gemini on selected records** or **Run ChatGPT on selected records**. Wait for the processed/error summary. Successful analyses are saved automatically; review any failures before retrying.
+5. Click **Load records from Firestore**, review the table and choose **Select records to process**. No records start selected. Pick individual records by their text preview, or explicitly click **Select all loaded records** to include the loaded portion of this dataset. **Clear record selection** removes the selection.
+6. Check the exact count in **Run Gemini on … selected records** or **Run ChatGPT on … selected records**. The button stays disabled until at least one eligible record is selected and the provider is configured. Wait for the processed/error summary. Successful analyses are saved automatically; review any failures before retrying.
 
 The results include original text, an English translation, topics, a sentiment label, a priority/risk score and an evidence-backed Thailand monitoring assessment. The current sentiment categories are **Joy**, **Anger**, **Anxiety** and **Neutral**. Sentiment and Thailand relevance are separate: negative language alone does not establish a Thailand-related signal.
 
@@ -130,7 +130,7 @@ The results include original text, an English translation, topics, a sentiment l
 
 Confidence is a model assessment, not a calibrated probability. Check exact source quotes and validation notes. A comment should not inherit the parent's position merely because it appears under that post. Long inputs may be excerpted; a translation is not a substitute for the original evidence.
 
-To reopen work later, click **Load processed records** under **View processed records**. This retrieves saved analysis without paying for another model run. Changing source scope clears stale loaded selections; load records again after switching.
+To reopen work later, choose its dataset and click **Load processed records** under **View processed records**. This retrieves only that dataset's saved analyses without paying for another model run. Changing dataset, source scope, status or load limit clears loaded selections and results; load again after switching. The sentiment timeline still summarizes runs within the source scope, rather than being limited to the selected dataset.
 
 ## Review evidence and export reports
 
@@ -224,7 +224,8 @@ Removing Facebook source links is different from deleting source records. Sign-o
 | Website link rejected | Use a public HTTP/HTTPS page on a standard web port. Social media and private-network links are not accepted here. |
 | No readable website text, HTTP 403, or verification page | Try a direct public article URL. JavaScript-only, login and CAPTCHA pages may be unavailable. |
 | Website collection reaches a size/time limit | Try fewer links or shorter pages. Save completed results before starting another run. |
-| No records in Sentiment Analysis | Confirm you clicked Save data to cloud. Check source scope, status and load limit, then load again. |
+| No records in Sentiment Analysis | Confirm you clicked Save data to cloud. Refresh datasets, choose the saved Custom title, check source scope/status and load again. |
+| Run button shows 0 selected records | Choose individual records or click Select all loaded records within the selected dataset. Loading never selects records automatically. |
 | Source library could not be loaded | Refresh Your links in the Facebook tab, then retry loading. If storage still fails, contact the administrator. |
 | AI run control disabled | Check the selected provider's configuration and that eligible records are selected. Credentials are managed on the server. |
 | Provider timeout, quota or rate-limit notice | Try a smaller batch or retry later. The administrator may need to check provider access or billing. |
