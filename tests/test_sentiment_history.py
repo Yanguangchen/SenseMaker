@@ -41,13 +41,21 @@ class MemoryDatabase:
 
     def batch(self):
         writes = []
+        updates = set()
+
+        def update(ref, value):
+            updates.add(ref)
+            writes.append((ref, value, True))
 
         def commit(**kwargs):
             if self.fail_commit:
                 raise RuntimeError("offline")
+            if any(ref not in self.documents for ref in updates):
+                raise RuntimeError("record deleted")
             for ref, value, merge in writes:
                 self.documents[ref] = {**(self.documents.get(ref, {}) if merge else {}), **copy.deepcopy(value)}
-        return SimpleNamespace(set=lambda ref, value, merge=False: writes.append((ref, value, merge)), commit=commit)
+        return SimpleNamespace(set=lambda ref, value, merge=False: writes.append((ref, value, merge)),
+                               update=update, commit=commit)
 
 
 class SnapshotTests(unittest.TestCase):
@@ -114,6 +122,8 @@ class PersistenceTests(unittest.TestCase):
         self.db = MemoryDatabase()
 
     def save(self, values):
+        for key in values:
+            self.db.documents.setdefault(("test_posts", key), {"status": "pending"})
         return persist_analysis_run(self.db, [{"_id": key} for key in values],
                                     {key: {"sentiment": value} for key, value in values.items() if value},
                                     provider="gemini", targets=[])
@@ -139,7 +149,16 @@ class PersistenceTests(unittest.TestCase):
         self.db.fail_commit = True
         with self.assertRaisesRegex(RuntimeError, "offline"):
             self.save({"a": "Joy"})
-        self.assertEqual(self.db.documents, {})
+        self.assertEqual(self.db.documents, {("test_posts", "a"): {"status": "pending"}})
+
+    def test_deleted_source_cannot_be_recreated_by_an_analysis_already_in_flight(self):
+        self.db.documents[("test_posts", "kept")] = {"status": "pending"}
+        with self.assertRaisesRegex(RuntimeError, "record deleted"):
+            persist_analysis_run(self.db, [{"_id": "kept"}, {"_id": "deleted"}],
+                                 {"kept": {"sentiment": "Joy"}, "deleted": {"sentiment": "Joy"}},
+                                 provider="gemini", targets=[])
+        self.assertEqual(self.db.documents, {("test_posts", "kept"): {"status": "pending"}})
+        self.assertEqual(load_history(self.db), [])
 
     def test_entirely_failed_run_does_not_change_the_timeline_average(self):
         self.save({"a": "Joy"})
@@ -204,7 +223,9 @@ class TimelineUITests(unittest.TestCase):
 
     def test_dashboard_saves_one_run_and_invalidates_history_after_analysis(self):
         from dashboard import _process_selected_firestore_posts
+        from modules.database import _get_collection_name
         db = MemoryDatabase()
+        db.documents[(_get_collection_name(), "a")] = {"status": "pending"}
         with patch("dashboard.init_db", return_value=db), patch("dashboard.st.session_state", {}), \
                 patch("dashboard.analyze_posts", return_value={"a": {"sentiment": "Joy"}}), \
                 patch("dashboard._load_sentiment_history") as cached:
@@ -225,7 +246,9 @@ class TimelineUITests(unittest.TestCase):
 
     def test_each_dashboard_run_updates_the_chart_and_survives_a_new_session(self):
         import dashboard
+        from modules.database import _get_collection_name
         db = MemoryDatabase()
+        db.documents[(_get_collection_name(), "a")] = {"status": "pending"}
         dashboard._load_sentiment_history.clear()
         self.addCleanup(dashboard._load_sentiment_history.clear)
         path = str(Path(__file__).resolve().parents[1] / "dashboard.py")

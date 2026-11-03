@@ -96,7 +96,8 @@ def upsert_post(db: firestore.Client, post_data: PostData) -> str:
     is_reddit = source_type in {"reddit_post", "reddit_comment"}
     is_x = source_type in {"x_post", "x_reply"}
     is_website = source_type == "website_page"
-    if existing.exists and not is_reddit and not is_x and not is_website:
+    is_news = source_type == "news_article"
+    if existing.exists and not is_reddit and not is_x and not is_website and not is_news:
         # Saved posts keep their original text and analysis; only engagement is followed.
         if checks:
             doc_ref.set({"checks": checks}, merge=True)
@@ -123,12 +124,7 @@ def upsert_post(db: firestore.Client, post_data: PostData) -> str:
         payload["target_url"] = str(post_data.get("target_url", "")).strip()
     if checks:
         payload["checks"] = checks
-    if post_data.get("source_type") == "news_article":
-        for key in NEWS_FIELDS:
-            if key in post_data:
-                payload[key] = post_data[key]
-
-    if is_reddit or is_x or is_website:
+    if is_reddit or is_x or is_website or is_news:
         fields = ("platform", "x_id", "created_at", "conversation_id", "lang", "x_query", "x_category",
                   "x_categories", "parent_url", "parent_text", "reply_sample_limit", "content_removed",
                   "reported_comment_count") if is_x else (
@@ -136,6 +132,8 @@ def upsert_post(db: firestore.Client, post_data: PostData) -> str:
             "thread_id", "comment_sample_limit", "content_removed", "reported_comment_count")
         if is_website:
             fields = ("platform", "title", "publisher", "created_at", "text_truncated")
+        elif is_news:
+            fields = NEWS_FIELDS
         for key in fields:
             if key in post_data:
                 payload[key] = post_data[key]
@@ -185,7 +183,8 @@ def mark_post_processed(
     elif status == "error":
         update_payload["analysis"] = firestore.DELETE_FIELD
 
-    db.collection(_get_collection_name()).document(doc_id).set(update_payload, merge=True)
+    # Error handling must not recreate a source deleted while analysis was running.
+    db.collection(_get_collection_name()).document(doc_id).update(update_payload)
 
 
 
@@ -217,6 +216,48 @@ def delete_processed_posts(db: firestore.Client, doc_ids: List[str]) -> Dict[str
             else:
                 transaction.delete(ref)
                 result["deleted"].append(doc_id)
+        return result
+
+    return remove(db.transaction(max_attempts=3))
+
+
+def load_record_catalog(db: firestore.Client) -> List[PostData]:
+    """Load management metadata and server versions without analysis or source bodies."""
+    query = db.collection(_get_collection_name()).select([
+        "custom_title", "title", "url", "source_type", "platform", "status",
+        "scraped_at", "saved_at", "created_at",
+    ])
+    return [{**(doc.to_dict() or {}), "_id": doc.id, "_version": doc.update_time.isoformat()}
+            for doc in query.stream(timeout=30)]
+
+
+def delete_records(db: firestore.Client, expected_versions: Dict[str, str]) -> Dict[str, List[str]]:
+    """Delete the exact reviewed versions atomically; keep concurrently changed records."""
+    if any(not isinstance(ident, str) or not ident or "/" in ident or ident in {".", ".."}
+           or len(ident.encode("utf-8")) > 1500 or not isinstance(version, str) or not version
+           for ident, version in expected_versions.items()):
+        raise ValueError("Reload records and select valid record versions.")
+    if len(expected_versions) > 200:
+        raise ValueError("Delete at most 200 records at a time.")
+    if not expected_versions:
+        return {"deleted": [], "skipped": [], "missing": []}
+    collection = db.collection(_get_collection_name())
+    refs = {ident: collection.document(ident) for ident in expected_versions}
+
+    @firestore.transactional
+    def remove(transaction: Any) -> Dict[str, List[str]]:
+        snapshots = {doc.id: doc for doc in db.get_all(
+            list(refs.values()), field_paths=[], transaction=transaction, timeout=30)}
+        result: Dict[str, List[str]] = {"deleted": [], "skipped": [], "missing": []}
+        for ident, ref in refs.items():
+            snapshot = snapshots[ident]
+            if not snapshot.exists:
+                result["missing"].append(ident)
+            elif snapshot.update_time.isoformat() != expected_versions[ident]:
+                result["skipped"].append(ident)
+            else:
+                transaction.delete(ref)
+                result["deleted"].append(ident)
         return result
 
     return remove(db.transaction(max_attempts=3))

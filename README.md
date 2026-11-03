@@ -157,18 +157,18 @@ SenseMaker/
 
 ## Thailand tensions and boycott watch
 
-Sentiment Analysis defaults to **Current sources**: the signed-in account's saved
-Facebook sources, r/cambodia, articles saved from Online News, and posts collected from X. Records load newest
-first, with source filtering applied before the load limit. **All saved records
-(including older sources)** explicitly includes the earlier research library.
+Sentiment Analysis lists **All saved records (including older sources)** by default when
+choosing a dataset manually. The optional **Current sources** filter includes the account's saved
+Facebook sources, r/cambodia, Online News articles, X posts and custom website pages. Records load newest
+first, with dataset/source filtering applied before the load limit.
 Changing sources clears loaded records, selections and previous results. The old
 records remain in Firestore; they are not deleted or reclassified by language.
 The sentiment timeline uses the same source selection. New analysis runs record
 their source links; older runs without that metadata and mixed-source runs remain
 available under all saved records, rather than contributing to current-source averages.
 
-If the current sources have no saved records yet, collect and save their posts (or
-save Online News articles) before loading Sentiment Analysis. Saving source links
+If the current sources have no saved records yet, collect their posts before loading Sentiment Analysis.
+Online news, X and Custom website save automatically; Facebook and Reddit require **Save data to cloud**. Saving source links
 alone does not collect any posts. X posts collected from **Scrape Data → X** are
 included with the current watches.
 
@@ -232,7 +232,27 @@ characters each). Removed content, collection errors and unanalyzed records are 
 Changing selected data, inputs, provider or model clears the displayed plan. Plans remain
 in the current session; download the keyword CSV and full JSON plan to keep a copy.
 
-## Delete processed records
+## Manage and delete records
+
+Open **Manage records** in the sidebar and click **Load / refresh records**. Filter the shared
+library by dataset (saved Custom title), source or status, and search by dataset, page title,
+URL or record ID. Pending, processed, error, removed and legacy records are supported.
+
+Select individual **Records to delete**, or **Select all records on this page**, then click
+**Review deletion of … record(s)**. Check the preview before **Permanently delete … record(s)**,
+or use **Cancel deletion**. Nothing starts selected. Each deletion covers at most 200 records;
+for a larger dataset, filter by its title and repeat on the remaining pages. Changing a filter,
+page, search or selection invalidates the deletion preview.
+
+Deletion removes the source record and its saved analysis for all approved users. The server
+rechecks each record's Firestore update version in a transaction and keeps records changed
+since loading; refresh to review those again. Timeline summaries, saved source links,
+GenCite analyses and exported files remain. Deleted records are removed from the current
+session's analysis and collection copies. Collecting and saving a URL again can create it anew;
+an analysis already in flight cannot recreate a deleted source record.
+
+The management catalog loads metadata only, on request, and does not require an AI API key.
+It uses the same approved-user access as the other workspaces; the cloud library is shared.
 
 In **Sentiment Analysis**, load processed records, open **Delete processed records**,
 select records, and confirm their permanent deletion. This removes the selected records
@@ -247,9 +267,9 @@ additional API key or Facebook connection. It reads only the URLs you supply;
 it does not crawl the site's other pages. Social media URLs are rejected so they
 remain in their existing platform collectors.
 
-Click **Collect website pages**, review each text preview, enter a custom title,
-then click **Save data to cloud**. Saved pages appear in **Sentiment Analysis →
-Current sources** alongside the other collected sources. Analyze them with your
+Optionally enter a **Dataset title**, then click **Collect website pages**. Collected pages save
+automatically; a blank title uses the source and collection time. Wait for the cloud-save confirmation.
+Saved pages appear in **Sentiment Analysis** and **Manage records** alongside the other sources. Analyze them with your
 existing Gemini/OpenAI key, then use those results in **Content recommendations**.
 Recollecting a changed page refreshes its text and resets its old analysis;
 unchanged pages keep their analysis. Website pages have no engagement checks.
@@ -318,7 +338,7 @@ this repository. See [Reddit's access policy](https://support.reddithelp.com/hc/
 
 1. Open **Scrape Data → X**. The same three watches as Online News are filled in and can be edited.
 2. Choose up to **100 posts per search**. Leave **Replies per post** at 0 unless you want a small reply sample.
-3. Click **Collect posts**, inspect the results and save them to Firestore.
+3. Optionally enter a **Dataset title**, then click **Collect posts**. Posts and collected replies save automatically; inspect the results and cloud-save confirmation.
 4. Select saved records in **Sentiment Analysis**, set your watchlist and run analysis.
 
 The connector uses X's official recent-search API (`GET /2/tweets/search/recent`), which covers about
@@ -346,8 +366,8 @@ To connect X:
    Streamlit Secrets also works. Keep the value out of `.env.example`, which is a template and
    is not loaded as runtime configuration.
 5. Open **Scrape Data → X**, select one watch, keep **Posts per search** at 10 and **Replies per post**
-   at 0, then **Collect posts** to verify access with a small request. Successful results can be saved
-   to Firestore and analyzed alongside the other sources.
+   at 0, then **Collect posts** to verify access with a small request. Successful results save automatically
+   to Firestore and can be analyzed alongside the other sources.
 
 The only X environment variable read by the app is:
 
@@ -393,9 +413,12 @@ index as a dashed line. High, elevated or rising risk and any boycott articles r
 both pages. Scans are stored in `<FIREBASE_COLLECTION>_news_scans`. Compare scans that use the
 same searches and window, because the score depends on what each search returns.
 
-Keyword flags are leads for review, not confirmed events, and only headlines are scanned. Use
-**Save data to cloud** to store the articles, then run the AI provider on them in **Sentiment
-Analysis** for evidence-grounded sentiment, boycott and tension assessments. On the
+Online news automatically saves the collected article records as well as the separate trend snapshot.
+An optional **Dataset title** groups the records; otherwise the source and collection time are used.
+Keyword flags are leads for review, not confirmed events, and only headlines are scanned. After the
+cloud-save confirmation, select the articles in **Sentiment Analysis** for evidence-grounded
+sentiment, boycott and tension assessments. Recollected articles update their title and metadata;
+unchanged headlines keep their analysis, while changed text resets analysis to pending. On the
 **Sentiment over time** chart, each search's headline tone appears as an **Online News**
 point, and red rings mark searches and analysis runs that found border-tension or boycott signals. Short search terms such as `OYOSHI` can also match unrelated news, so refine
 the terms when needed. Google's feed is intended for personal, non-commercial use; check its
@@ -665,18 +688,31 @@ The dashboard has **four pages**, accessible from the left toolbar:
 - Collect large batches with progress tracking; three sources run at a time
 - Headless browser toggle + scroll iterations slider (1-50)
 - Results table + raw JSON output
-- "Save data to cloud" button with custom title — writes scraped data to Firestore with timestamps
+- Online news, X and Custom website automatically save collected records with an optional dataset title.
+  Facebook and Reddit use **Save data to cloud** with a custom title.
+- Failed automatic saves retain collected data and show **Retry saving collected records**. New collection is
+  paused until saving succeeds. Retrying reuses the same records/title without recollecting or duplicating URL-based records.
+  Keep the session open until the cloud-save confirmation; failed saves are not durable across a session reset.
 
 ### Tab 2 — Sentiment Analysis
 
-- Choose **Dataset to analyze** before loading: datasets group saved records by **Custom title**,
+The **Analysis** subtab opens by default. The **Settings** subtab contains Record status, Load limit, AI provider, Refresh available models and Gemini model.
+
+- **Data selection** offers **Manual selection** and **Last scraped data** prominently above analysis settings.
+- In Manual selection, choose **Dataset to analyze** before loading: datasets group saved records by **Custom title**,
   with **Untitled (older records)** for legacy data. No dataset is preselected; **Refresh datasets**
   reloads the list. Reusing a title groups records together; datasets are not private projects or immutable snapshots.
+- **Last scraped data** uses the exact record IDs from the most recently completed collection in this browser session,
+  across all five scraping options. It shows the source/title/count and offers **Save and load last scraped data**
+  for unsaved collections, using the normal upsert rules. Failed/empty collections never fall back to an older batch.
+  Use Manual selection to reopen saved data after a new browser session.
 - Load records from the selected dataset by status (`all`, `pending`, `processed`, `error`),
-  defaulting to `pending`. Dataset/source filters apply before the load limit.
+  defaulting to `pending` for manual selection and `all` for the latest scrape. Membership/status filters apply before the load limit.
+  Manual selection lists all saved sources by default, without depending on the Facebook source library.
 - No records are selected automatically. Choose individual text previews or explicitly **Select all loaded records**.
   The Run button shows the exact selection count and is disabled when the selection is empty.
-- Changing dataset, source scope, status or load limit clears previous loaded results and selections.
+- Changing selection mode, dataset, source scope, status or load limit clears previous loaded results and selections.
+  A newly completed scrape also invalidates a loaded Last scraped data selection.
   **Load processed records** is also limited to the chosen dataset; the timeline remains scoped to sources.
 - Choose Gemini or ChatGPT, select records and run analysis (translation, sentiment, risk score, topics)
 - **Live progress panel** shows retry status when rate-limited (429 errors)
@@ -772,7 +808,7 @@ Use this sequence for the most reliable results:
 5) New valid links are saved and selected automatically when you finish editing. Click **Collect posts** and inspect results. Use **Clear** to deselect all sources and clear pasted links.
 6) Enter a **Custom title** and click **Save data to cloud** to persist to Firestore.
 7) Switch to the **Sentiment Analysis** tab:
-   - Choose **Dataset to analyze** using its saved Custom title, then click **Load records from Firestore** (status: `pending`)
+   - Choose **Manual selection**, select **Dataset to analyze** using its saved Custom title, then click **Load records from Firestore** (status: `pending`). Or choose **Last scraped data** and click **Save and load last scraped data** / **Load last scraped data** (status: `all`).
    - Select the records you want to analyze; no records are preselected
    - Choose an AI provider, select records, check the exact count, and click **Run Gemini on … selected records** or **Run ChatGPT on … selected records**
    - View sentiment cards, risk scores, and translations inline

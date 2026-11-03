@@ -9,6 +9,7 @@ from streamlit.testing.v1 import AppTest
 
 from modules.analysis_library import dataset_key, dataset_options, select_records
 from modules.facebook_session import FacebookSession
+from modules.recent_collection import collection_snapshot
 
 
 def record(ident, title="Campaign A", **extra):
@@ -148,6 +149,76 @@ class DatasetUITests(unittest.TestCase):
         self.assertIsNone(self.app.selectbox(key="analysis_dataset").value)
         self.assertTrue(self.app.button(key="load_firestore_records_btn").disabled)
         self.assertNotIn("firestore_rows", self.app.session_state)
+
+    def use_latest(self, rows=None, saved=True):
+        recent = collection_snapshot(self.rows[:2] if rows is None else rows, "Custom website", 100)
+        recent["saved"] = saved
+        self.app.session_state["last_collected_dataset"] = recent
+        self.app.radio(key="analysis_selection_mode").set_value("Last scraped data").run()
+        return recent
+
+    def test_latest_is_exact_batch_even_with_reused_title_and_no_source_library(self):
+        recent = self.use_latest(rows=[self.rows[0]])
+        with patch("dashboard._fetch_last_scrape_posts", return_value=recent["rows"] + [self.rows[1]]) as fetch:
+            self.app.button(key="load_firestore_records_btn").click().run()
+            self.assertFalse(self.app.exception)
+            self.assertEqual(self.app.selectbox(key="analysis_recent_status").value, "all")
+            self.app.button(key="analysis_select_all").click().run()
+            self.app.button(key="run_analysis_selected_btn").click().run()
+            self.assertEqual([r["_id"] for r in self.process.call_args.args[0]], [recent["rows"][0]["_id"]])
+            self.assertEqual(fetch.call_args.kwargs["status_filter"], "all")
+            self.fetch.assert_not_called()
+
+    def test_unsaved_latest_requires_successful_save_before_loading(self):
+        recent = self.use_latest(saved=False)
+        with patch("dashboard._write_results_to_firestore", side_effect=RuntimeError("offline")) as save, \
+                patch("dashboard._fetch_last_scrape_posts", return_value=recent["rows"]) as fetch:
+            self.assertEqual(self.app.button(key="load_firestore_records_btn").label, "Save and load last scraped data")
+            self.app.button(key="load_firestore_records_btn").click().run()
+            self.assertTrue(self.app.error)
+            fetch.assert_not_called()
+            self.process.assert_not_called()
+            save.side_effect = None
+            self.app.button(key="load_firestore_records_btn").click().run()
+            self.assertEqual(save.call_args.args[0], recent["rows"])
+            fetch.assert_called_once()
+            self.assertEqual(self.app.multiselect(key="analysis_record_selection").value, [])
+
+    def test_mode_change_and_new_latest_clear_prior_selection_results_and_plan(self):
+        self.load()
+        self.app.button(key="analysis_select_all").click().run()
+        self.app.session_state["analysis_last_results"] = {"analyses": []}
+        self.app.session_state["content_recommendation_plan"] = {"old": True}
+        recent = self.use_latest()
+        for key in ("firestore_rows", "analysis_record_selection", "analysis_last_results", "content_recommendation_plan"):
+            self.assertNotIn(key, self.app.session_state)
+        with patch("dashboard._fetch_last_scrape_posts", return_value=recent["rows"]):
+            self.app.button(key="load_firestore_records_btn").click().run()
+            self.app.button(key="analysis_select_all").click().run()
+            # Same title and URLs, a new collection must still invalidate loaded data.
+            self.app.session_state["last_collected_dataset"] = collection_snapshot(self.rows[:2], "Custom website", 100)
+            self.app.run()
+            self.assertNotIn("firestore_rows", self.app.session_state)
+            self.assertNotIn("analysis_record_selection", self.app.session_state)
+        self.app.radio(key="analysis_selection_mode").set_value("Manual selection").run()
+        self.assertNotIn("firestore_rows", self.app.session_state)
+
+    def test_no_recent_or_empty_recent_never_falls_back_to_saved_library(self):
+        self.app.radio(key="analysis_selection_mode").set_value("Last scraped data").run()
+        self.assertTrue(self.app.button(key="load_firestore_records_btn").disabled)
+        self.assertTrue(self.app.button(key="load_processed_records_btn").disabled)
+        self.use_latest(rows=[])
+        self.assertTrue(self.app.button(key="load_firestore_records_btn").disabled)
+        self.fetch.assert_not_called()
+        self.process.assert_not_called()
+
+    def test_latest_processed_view_uses_membership_not_title(self):
+        recent = self.use_latest(rows=[self.rows[0]])
+        with patch("dashboard._fetch_last_scrape_posts", return_value=[]) as fetch:
+            self.app.button(key="load_processed_records_btn").click().run()
+            self.assertEqual(fetch.call_args.args[0]["id"], recent["id"])
+            self.assertEqual(fetch.call_args.kwargs["status_filter"], "processed")
+            self.fetch.assert_not_called()
 
 
 if __name__ == "__main__":

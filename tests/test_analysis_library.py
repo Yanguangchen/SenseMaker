@@ -107,17 +107,18 @@ class ScopeUITests(unittest.TestCase):
         app = self.app()
         self.seed_stale_data(app)
         app.run()
-        self.assertEqual(app.selectbox(key="analysis_source_scope").value, "Current sources")
-        self.assert_cleared(app)
-        self.seed_stale_data(app)
-        app.selectbox(key="analysis_source_scope").select("All saved records (including older sources)").run()
+        self.assertEqual(app.selectbox(key="analysis_source_scope").value, "All saved records (including older sources)")
         self.assert_cleared(app)
         self.seed_stale_data(app)
         app.selectbox(key="analysis_source_scope").select("Current sources").run()
         self.assert_cleared(app)
+        self.seed_stale_data(app)
+        app.selectbox(key="analysis_source_scope").select("All saved records (including older sources)").run()
+        self.assert_cleared(app)
 
     def test_changing_saved_links_or_a_library_failure_never_keeps_loaded_records(self):
         app = self.app().run()
+        app.selectbox(key="analysis_source_scope").select("Current sources").run()
         self.seed_stale_data(app)
         app.session_state[self.library_key] = {"urls": [GROUP + "another"], "error": False}
         app.run()
