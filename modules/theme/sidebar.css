@@ -81,9 +81,14 @@ html.sm-navigation-ready .sm-sidebar {
 
 .sm-workspace-nav {
   display: grid;
+  /* Keep every workspace reachable on shorter screens as navigation grows. */
+  min-height: 0;
+  overflow-y: auto;
+  align-content: start;
   gap: 16px;
   margin-block: auto;
-  padding-block: 28px;
+  padding: 28px 5px;
+  margin-inline: -5px;
 }
 
 .sm-sidebar-footer { display: grid; gap: 16px; }
