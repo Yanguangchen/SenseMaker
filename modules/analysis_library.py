@@ -7,6 +7,24 @@ from typing import Any
 from urllib.parse import urlsplit
 
 
+def dataset_key(post: dict[str, Any]) -> str:
+    """Existing custom titles define datasets without migrating stored records."""
+    title = str(post.get("custom_title") or "").strip()
+    return "title:" + title if title else "untitled:"
+
+
+def dataset_options(rows: list[dict[str, Any]], source_urls: list[str] | None) -> list[dict[str, Any]]:
+    """Summarize all matching records before the user's per-load limit is applied."""
+    groups = {}
+    for row in select_records(rows, source_urls=source_urls, limit=len(rows)):
+        key = dataset_key(row)
+        group = groups.setdefault(key, {"key": key, "title": str(row.get("custom_title") or "").strip()
+                                       or "Untitled (older records)", "count": 0, "pending": 0})
+        group["count"] += 1
+        group["pending"] += row.get("status") == "pending"
+    return list(groups.values())
+
+
 def source_key(url: str) -> str:
     """Ignore display-only URL variants while retaining individual post paths."""
     try:
@@ -63,13 +81,15 @@ def _collected_at(post: dict[str, Any]) -> datetime:
 
 
 def select_records(
-    rows: list[dict[str, Any]], *, source_urls: list[str] | None, limit: int,
+    rows: list[dict[str, Any]], *, source_urls: list[str] | None, limit: int, dataset: str | None = None,
 ) -> list[dict[str, Any]]:
     """Filter before limiting so legacy records cannot crowd out current sources.
 
     None is an explicit request for the full library. An empty source list never
     widens access to older Facebook sources; saved Online News remains available.
     """
+    if dataset is not None:
+        rows = [row for row in rows if dataset_key(row) == dataset]
     if source_urls is not None:
         keys = {key for url in source_urls if (key := source_key(url))}
         rows = [row for row in rows if matches_sources(row, keys)]

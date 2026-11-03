@@ -138,8 +138,13 @@ class GeminiSettingsTests(unittest.TestCase):
              patch("modules.processor.resolve_model", side_effect=GeminiError("Gemini HTTP 404: Model unavailable.")):
             app = AppTest.from_file(str(Path(__file__).resolve().parents[1] / "dashboard.py"))
             app.run()
+            app.session_state["analysis_dataset_catalog"] = {"rows": [{"key": "untitled:", "title": "Untitled", "count": 1, "pending": 0}], "error": False}
+            app.run()
+            app.selectbox(key="analysis_dataset").select("untitled:").run()
+            app.selectbox(key="analysis_record_status").select("all").run()
             app.session_state["firestore_rows"] = [{"_id": "a", "raw_text": "A Thai project", "status": "processed"}]
             app.run()
+            app.multiselect(key="analysis_record_selection").select("a").run()
             self.assertFalse(any("API key" in e.label for e in app.text_input))
             app.button(key="run_analysis_selected_btn").click().run()
             app.run()

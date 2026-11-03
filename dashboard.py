@@ -19,7 +19,7 @@ import streamlit as st
 
 from modules.auth import require_access
 from modules.ui import apply_brand
-from modules.analysis_library import select_history, select_records, source_key
+from modules.analysis_library import dataset_key, dataset_options, select_history, select_records, source_key
 from modules.navigation import dashboard_views
 from modules.content_recommendations_ui import render_content_workspace
 from modules.tutorial_ui import render_tutorial_workspace
@@ -96,11 +96,12 @@ def _write_results_to_firestore(posts: List[Dict[str, Any]], custom_title: str) 
             payload["scraped_at"] = save_timestamp
         upsert_post(db, payload)
         inserted += 1
+    st.session_state.pop("analysis_dataset_catalog", None)
     return {"inserted": inserted, "skipped": skipped}
 
 
 def _fetch_firestore_posts(
-    status_filter: str, limit: int, source_urls: list[str] | None = None,
+    status_filter: str, limit: int, source_urls: list[str] | None = None, dataset: str | None = None,
 ) -> List[Dict[str, Any]]:
     db = init_db()
     query = db.collection(get_setting("FIREBASE_COLLECTION", "raw_posts"))
@@ -112,7 +113,61 @@ def _fetch_firestore_posts(
         item = doc.to_dict() or {}
         item["_id"] = doc.id
         rows.append(item)
-    return select_records(rows, source_urls=source_urls, limit=limit)
+    return select_records(rows, source_urls=source_urls, limit=limit, dataset=dataset)
+
+
+def _clear_loaded_analysis() -> None:
+    for key in ("firestore_rows", "processed_rows", "analysis_last_results", "gemini_last_results",
+                "firestore_load_error", "firestore_last_load_count", "analysis_record_selection",
+                "processed_delete_selection", "processed_delete_pending", "processed_delete_notice",
+                "content_recommendation_plan", "content_records"):
+        st.session_state.pop(key, None)
+
+
+def _fetch_analysis_datasets(source_urls: list[str] | None) -> list[dict[str, Any]]:
+    # Only metadata is needed to choose a dataset; source text loads on request.
+    query = init_db().collection(get_setting("FIREBASE_COLLECTION", "raw_posts")).select([
+        "custom_title", "source_type", "target_url", "url", "status", "scraped_at", "saved_at", "created_at",
+    ])
+    return dataset_options([doc.to_dict() or {} for doc in query.stream(timeout=30)], source_urls)
+
+
+def _render_analysis_datasets(source_urls: list[str] | None, ready: bool) -> str | None:
+    def refresh() -> None:
+        st.session_state.pop("analysis_dataset_catalog", None)
+        _clear_loaded_analysis()
+
+    st.button("Refresh datasets", key="refresh_analysis_datasets", on_click=refresh, disabled=not ready)
+    if ready and "analysis_dataset_catalog" not in st.session_state:
+        try:
+            st.session_state["analysis_dataset_catalog"] = {"rows": _fetch_analysis_datasets(source_urls), "error": False}
+        except Exception:
+            st.session_state["analysis_dataset_catalog"] = {"rows": [], "error": True}
+    catalog = st.session_state.get("analysis_dataset_catalog", {}) if ready else {}
+    if catalog.get("error"):
+        st.error("Datasets could not be loaded. Click Refresh datasets to retry.")
+    options = {row["key"]: row for row in catalog.get("rows", [])}
+    def label(key: str) -> str:
+        row = options[key]
+        return f"{row['title']} · {row['count']} record{'s' if row['count'] != 1 else ''} · {row['pending']} pending"
+
+    if st.session_state.get("analysis_dataset") not in options:
+        st.session_state.pop("analysis_dataset", None)
+    selected = st.selectbox("Dataset to analyze", list(options), index=None, key="analysis_dataset",
+                            placeholder="Choose a saved dataset", disabled=not ready or not options,
+                            format_func=label)
+    st.caption("Datasets are grouped by the Custom title used when saving. Reusing a title groups those records together. "
+               "Choose one dataset before loading or analyzing records.")
+    if ready and not options and not catalog.get("error"):
+        st.info("No saved datasets match these sources. Save a collection with a Custom title, then refresh datasets.")
+    return selected
+
+
+def _sync_analysis_dataset(dataset: str | None, status: str, limit: int) -> None:
+    context = (dataset, status, limit)
+    if st.session_state.get("analysis_dataset_context") != context:
+        _clear_loaded_analysis()
+        st.session_state["analysis_dataset_context"] = context
 
 
 def _render_analysis_sources(user_email: str) -> tuple[list[str] | None, bool]:
@@ -140,9 +195,8 @@ def _render_analysis_sources(user_email: str) -> tuple[list[str] | None, bool]:
     if st.session_state.get("analysis_library_context") != context:
         # Includes sessions created before source selection existed. No stale rows
         # or prior AI results can survive a change of source library.
-        for key in ("firestore_rows", "processed_rows", "analysis_last_results", "gemini_last_results",
-                    "firestore_load_error", "firestore_last_load_count", "analysis_record_selection",
-                    "processed_delete_selection", "processed_delete_pending", "processed_delete_notice"):
+        _clear_loaded_analysis()
+        for key in ("analysis_dataset_catalog", "analysis_dataset", "analysis_dataset_context"):
             st.session_state.pop(key, None)
         st.session_state["analysis_library_context"] = context
     return sources, ready
@@ -1660,22 +1714,26 @@ def main() -> None:
         st.subheader("Sentiment Analysis")
         st.caption("Detect Thailand-related criticism, tensions and boycott calls, with source evidence.")
         analysis_sources, sources_ready = _render_analysis_sources(user_email)
+        selected_dataset = _render_analysis_datasets(analysis_sources, sources_ready)
+        dataset_ready = sources_ready and selected_dataset is not None
         st.text_area("Thai projects, companies and brands to watch (one name or alias per line)",
                      value=get_setting("THAILAND_WATCH_TERMS"), key="thailand_watch_terms",
                      help="Leave blank for Thailand generally. Add the names and local-language aliases of your Thai-linked targets.")
 
         # --- Settings row ---
         gc1, gc2 = st.columns([1, 1])
-        status_filter = gc1.selectbox("Record status", options=["all", "pending", "processed", "error"], index=0)
-        load_limit = gc2.slider("Load limit", min_value=1, max_value=200, value=50)
+        status_filter = gc1.selectbox("Record status", options=["all", "pending", "processed", "error"], index=1,
+                                      key="analysis_record_status")
+        load_limit = gc2.slider("Load limit", min_value=1, max_value=200, value=50, key="analysis_load_limit")
+        _sync_analysis_dataset(selected_dataset, status_filter, load_limit)
         provider = _render_ai_settings()
         provider_label = AI_PROVIDERS[provider]
 
         # --- Load records ---
-        if st.button("Load records from Firestore", key="load_firestore_records_btn", disabled=not sources_ready):
+        if st.button("Load records from Firestore", key="load_firestore_records_btn", disabled=not dataset_ready):
             try:
                 rows = _fetch_firestore_posts(status_filter=status_filter, limit=load_limit,
-                                             source_urls=analysis_sources)
+                                             source_urls=analysis_sources, dataset=selected_dataset)
                 st.session_state["firestore_rows"] = rows
                 st.session_state.pop("analysis_record_selection", None)
                 st.session_state["firestore_load_error"] = ""
@@ -1685,7 +1743,8 @@ def main() -> None:
                 st.session_state["firestore_load_error"] = str(exc).strip() or repr(exc)
                 st.session_state["firestore_last_load_count"] = None
 
-        firestore_rows = st.session_state.get("firestore_rows", [])
+        firestore_rows = [row for row in st.session_state.get("firestore_rows", [])
+                          if dataset_ready and dataset_key(row) == selected_dataset]
         firestore_load_error = st.session_state.get("firestore_load_error", "")
         firestore_last_load_count = st.session_state.get("firestore_last_load_count", None)
         if firestore_load_error:
@@ -1693,12 +1752,12 @@ def main() -> None:
         elif firestore_last_load_count is not None:
             if firestore_last_load_count == 0:
                 st.info(
-                    "No saved records match these sources and status. "
-                    "Collect posts from your current Facebook sources, r/cambodia or X and save the results, "
-                    "or search Online News and save its articles. Then load records here."
+                    "No records in this dataset match the selected status. Choose another status or dataset, "
+                    "or save more source records and refresh datasets."
                 )
             else:
-                st.success(f"Loaded {firestore_last_load_count} records from Firestore.")
+                st.success(f"Loaded {firestore_last_load_count} record{'s' if firestore_last_load_count != 1 else ''} "
+                           "from the selected dataset. Choose which records to analyze below.")
 
         if firestore_rows:
             display_rows = []
@@ -1716,15 +1775,29 @@ def main() -> None:
             st.dataframe(pd.DataFrame(display_rows), use_container_width=True, hide_index=True)
 
             id_options = [str(r.get("_id", "")) for r in firestore_rows if r.get("_id") and is_analyzable(r)]
+            records_by_id = {str(row["_id"]): row for row in firestore_rows if row.get("_id")}
+            if "analysis_record_selection" in st.session_state:
+                st.session_state["analysis_record_selection"] = [ident for ident in st.session_state["analysis_record_selection"]
+                                                                if ident in id_options]
+            select, clear = st.columns(2)
+            select.button("Select all loaded records", key="analysis_select_all", disabled=not id_options,
+                          on_click=lambda: st.session_state.update(analysis_record_selection=id_options))
+            clear.button("Clear record selection", key="analysis_clear_selection",
+                         on_click=lambda: st.session_state.update(analysis_record_selection=[]))
             selected_ids = st.multiselect(
                 "Select records to process",
                 options=id_options,
-                default=id_options,
+                default=[],
                 key="analysis_record_selection",
+                format_func=lambda ident: f"{' '.join(str(records_by_id[ident].get('title') or records_by_id[ident].get('raw_text') or ident).split())[:100]} "
+                    f"· {platform_label(records_by_id[ident])} · {ident[:8]}",
             )
+            st.caption(f"{len(selected_ids)} of {len(id_options)} loaded, analyzable records selected from this dataset. "
+                       "Only selected records will be sent to the AI provider.")
 
-            if st.button(f"Run {provider_label} on selected records", key="run_analysis_selected_btn",
-                         disabled=not get_ai_key(provider)):
+            if st.button(f"Run {provider_label} on {len(selected_ids)} selected record{'s' if len(selected_ids) != 1 else ''}",
+                         key="run_analysis_selected_btn",
+                         disabled=not get_ai_key(provider) or not selected_ids or not dataset_ready):
                 if not selected_ids:
                     st.error("Please select at least one record.")
                 else:
@@ -1793,16 +1866,17 @@ def main() -> None:
         st.divider()
         st.subheader("View processed records")
         st.caption("Load records with status 'processed' to see their saved analysis.")
-        if st.button("Load processed records", key="load_processed_records_btn", disabled=not sources_ready):
+        if st.button("Load processed records", key="load_processed_records_btn", disabled=not dataset_ready):
             try:
                 processed_rows = _fetch_firestore_posts(status_filter="processed", limit=load_limit,
-                                                       source_urls=analysis_sources)
+                                                       source_urls=analysis_sources, dataset=selected_dataset)
                 st.session_state["processed_rows"] = processed_rows
             except Exception as exc:
                 st.error(f"Failed to load: {str(exc).strip() or repr(exc)}")
                 st.session_state["processed_rows"] = []
 
-        processed_rows = st.session_state.get("processed_rows", [])
+        processed_rows = [row for row in st.session_state.get("processed_rows", [])
+                          if dataset_ready and dataset_key(row) == selected_dataset]
         _render_processed_deletion(processed_rows)
         if processed_rows:
             _render_processed_records(processed_rows)

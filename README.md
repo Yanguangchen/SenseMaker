@@ -669,7 +669,15 @@ The dashboard has **four pages**, accessible from the left toolbar:
 
 ### Tab 2 — Sentiment Analysis
 
-- Load records from Firestore by status (`all`, `pending`, `processed`, `error`)
+- Choose **Dataset to analyze** before loading: datasets group saved records by **Custom title**,
+  with **Untitled (older records)** for legacy data. No dataset is preselected; **Refresh datasets**
+  reloads the list. Reusing a title groups records together; datasets are not private projects or immutable snapshots.
+- Load records from the selected dataset by status (`all`, `pending`, `processed`, `error`),
+  defaulting to `pending`. Dataset/source filters apply before the load limit.
+- No records are selected automatically. Choose individual text previews or explicitly **Select all loaded records**.
+  The Run button shows the exact selection count and is disabled when the selection is empty.
+- Changing dataset, source scope, status or load limit clears previous loaded results and selections.
+  **Load processed records** is also limited to the chosen dataset; the timeline remains scoped to sources.
 - Choose Gemini or ChatGPT, select records and run analysis (translation, sentiment, risk score, topics)
 - **Live progress panel** shows retry status when rate-limited (429 errors)
 - **Visual analysis cards** after processing:
@@ -764,8 +772,9 @@ Use this sequence for the most reliable results:
 5) New valid links are saved and selected automatically when you finish editing. Click **Collect posts** and inspect results. Use **Clear** to deselect all sources and clear pasted links.
 6) Enter a **Custom title** and click **Save data to cloud** to persist to Firestore.
 7) Switch to the **Sentiment Analysis** tab:
-   - Click **Load records from Firestore** (status: `pending`)
-   - Choose an AI provider, select records and click **Run Gemini on selected records** or **Run ChatGPT on selected records**
+   - Choose **Dataset to analyze** using its saved Custom title, then click **Load records from Firestore** (status: `pending`)
+   - Select the records you want to analyze; no records are preselected
+   - Choose an AI provider, select records, check the exact count, and click **Run Gemini on … selected records** or **Run ChatGPT on … selected records**
    - View sentiment cards, risk scores, and translations inline
 
 If extraction is still sparse, raise scroll iterations and verify the target page is visible to the authenticated account used in capture.

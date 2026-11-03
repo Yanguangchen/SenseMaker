@@ -170,10 +170,14 @@ class ProviderUITests(unittest.TestCase):
              patch("modules.processor._generate_content") as gemini:
             app = AppTest.from_file(str(Path(__file__).resolve().parents[1] / "dashboard.py"), default_timeout=30)
             app.run()
+            app.session_state["analysis_dataset_catalog"] = {"rows": [{"key": "untitled:", "title": "Untitled", "count": 1, "pending": 1}], "error": False}
+            app.run()
+            app.selectbox(key="analysis_dataset").select("untitled:").run()
             app.session_state["firestore_rows"] = [{"_id": "a", "raw_text": "Hello", "status": "pending"}]
             app.run()
+            app.multiselect(key="analysis_record_selection").select("a").run()
             app.selectbox(key="ai_provider").select("openai").run()
-            self.assertEqual(app.button(key="run_analysis_selected_btn").label, "Run ChatGPT on selected records")
+            self.assertEqual(app.button(key="run_analysis_selected_btn").label, "Run ChatGPT on 1 selected record")
             app.button(key="run_analysis_selected_btn").click().run()
             self.assertFalse(list(app.exception))
             self.assertEqual(app.session_state["analysis_last_results"]["processed"], 1)
