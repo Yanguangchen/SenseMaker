@@ -23,13 +23,18 @@ from uuid import uuid4
 import certifi
 
 NEWS_CATEGORIES = {
-    "oyoshi": {"label": "OYOSHI mentions", "query": "OYOSHI"},
-    "border_tension": {"label": "Thailand–Cambodia border tension", "query": "Thailand Cambodia border tension"},
-    "boycott": {"label": "Boycott of Thai products in Cambodia", "query": "boycott Thailand products Cambodia"},
+    "oyoshi": {"label": "OYOSHI mentions", "query": "OYOSHI", "query_km": ""},
+    "border_tension": {"label": "Thailand–Cambodia border tension", "query": "Thailand Cambodia border tension",
+                       "query_km": "ថៃ កម្ពុជា"},
+    "boycott": {"label": "Boycott of Thai products in Cambodia", "query": "boycott Thailand products Cambodia",
+                "query_km": "ពហិការ ទំនិញថៃ"},
 }
+# Google News has no Cambodia or Khmer edition (those settings redirect to US English), so the
+# Khmer option searches all of Google News with Khmer terms instead of the English ones.
 EDITIONS = {
     "en": {"label": "English", "hl": "en-US", "gl": "US", "ceid": "US:en"},
     "th": {"label": "Thai", "hl": "th", "gl": "TH", "ceid": "TH:th"},
+    "km": {"label": "Khmer", "hl": "en-US", "gl": "US", "ceid": "US:en", "khmer_terms": True},
 }
 TIME_WINDOWS = {"1d": "Past 24 hours", "7d": "Past week", "30d": "Past month", "1y": "Past year"}
 MAX_ARTICLES = 100
@@ -220,17 +225,30 @@ def fetch_feed(url: str, timeout: float = 20) -> bytes:
         raise NewsError("Google News could not be reached. Check the server connection and try again.") from None
 
 
+def search_jobs(searches: dict[str, str], editions: Iterable[str],
+                khmer_searches: dict[str, str] | None = None) -> list[tuple[str, str, str]]:
+    """(category, query, edition) for every search to run; categories without terms are skipped."""
+    jobs = []
+    for edition in editions:
+        if edition not in EDITIONS:
+            continue
+        terms = (khmer_searches or {}) if EDITIONS[edition].get("khmer_terms") else searches
+        jobs += [(category, query.strip(), edition) for category, query in terms.items() if query.strip()]
+    return jobs
+
+
 def collect_news(
     searches: dict[str, str], *, window: str = "7d", editions: Iterable[str] = ("en",),
     limit: int = 50, fetch: Callable[[str], bytes] = fetch_feed,
     on_progress: Callable[[int, int, str], None] | None = None,
+    khmer_searches: dict[str, str] | None = None,
 ) -> list[dict[str, Any]]:
     """Search each category in each edition; deduplicate articles found by several searches.
 
-    A failed search becomes a ``batch_warning`` row so the other categories are kept.
+    The Khmer edition uses ``khmer_searches``. A failed search becomes a ``batch_warning`` row
+    so the other categories are kept.
     """
-    jobs = [(category, query.strip(), edition) for category, query in searches.items() if query.strip()
-            for edition in editions if edition in EDITIONS]
+    jobs = search_jobs(searches, editions, khmer_searches)
     by_url: dict[str, dict[str, Any]] = {}
     warnings = []
     for done, (category, query, edition) in enumerate(jobs, 1):
@@ -264,6 +282,7 @@ def risk_level(score: float) -> str:
 def build_scan_snapshot(
     articles: list[dict[str, Any]], *, searches: dict[str, str], window: str, editions: list[str],
     previous: dict[str, Any] | None = None, scan_id: str | None = None, scanned_at: str | None = None,
+    khmer_searches: dict[str, str] | None = None,
 ) -> dict[str, Any] | None:
     """Aggregate one scan into a dated border-tension risk point.
 
@@ -306,6 +325,7 @@ def build_scan_snapshot(
         "boycott_index": round(100 * boycott / max(len(linked), MIN_SAMPLE), 1),
         "tone_counts": tones,
         "searches": {k: v for k, v in searches.items() if v.strip()},
+        "khmer_searches": {k: v for k, v in (khmer_searches or {}).items() if v.strip()},
         "window": window,
         "editions": list(editions),
         "score_version": 1,
