@@ -10,6 +10,10 @@ The dashboard requires Google sign-in. Access is limited to verified accounts in
 **GenCite:** Measure how often Gemini and ChatGPT mention a brand when answering customer questions,
 then close the gaps with content and keyword recommendations. See [GenCite: AI share of voice](#gencite-ai-share-of-voice).
 
+**User tutorial:** Open **Tutorial** in the dashboard sidebar for a first-analysis walkthrough,
+searchable instructions for every workspace, troubleshooting and administrator setup.
+Download the complete guide there, or read the [CrisisRadar tutorial](modules/tutorial.md).
+
 ## AI provider setup
 
 Configure credentials once on the server in `.env.local` or `.env`; dashboard users choose **Gemini**
