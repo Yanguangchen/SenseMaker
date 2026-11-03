@@ -696,6 +696,8 @@ The dashboard has **four pages**, accessible from the left toolbar:
 
 ### Tab 2 — Sentiment Analysis
 
+The **Analysis** subtab opens by default. The **Settings** subtab contains Record status, Load limit, AI provider, Refresh available models and Gemini model.
+
 - **Data selection** offers **Manual selection** and **Last scraped data** prominently above analysis settings.
 - In Manual selection, choose **Dataset to analyze** before loading: datasets group saved records by **Custom title**,
   with **Untitled (older records)** for legacy data. No dataset is preselected; **Refresh datasets**

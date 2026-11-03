@@ -1825,218 +1825,223 @@ def main() -> None:
     with analysis_tab:
         st.subheader("Sentiment Analysis")
         st.caption("Detect Thailand-related criticism, tensions and boycott calls, with source evidence.")
-        st.markdown("#### 1. Choose your data")
-        selection_mode = st.radio("Data selection", ["Manual selection", "Last scraped data"],
-                                  horizontal=True, key="analysis_selection_mode")
-        if st.session_state.get("analysis_previous_mode") != selection_mode:
-            _clear_loaded_analysis()
-            st.session_state.pop("analysis_dataset_context", None)
-            st.session_state["analysis_previous_mode"] = selection_mode
-        use_recent = selection_mode == "Last scraped data"
-        recent = st.session_state.get("last_collected_dataset") if use_recent else None
-        recent_ids = {row["_id"] for row in recent["rows"]} if recent else set()
-        analysis_sources = None
-        if use_recent:
-            selected_dataset = "recent:" + recent["id"] if recent else None
-            dataset_ready = bool(recent_ids)
-            st.caption("The most recently completed collection in this browser session, across all scraping options. "
-                       "Only records from that collection are included. After reopening the app, use Manual selection to find saved data.")
-            if recent:
-                st.write(f"**{recent['title']}**")
-                st.caption(f"Source: {recent['source']} · {len(recent_ids)} analyzable records")
-                if not recent_ids:
-                    st.info("No analyzable records remain in the last collection. Collect again or choose a saved dataset manually.")
-                elif not recent.get("saved"):
-                    st.caption("Save and load adds new records to your cloud library under the title above. "
-                               "Existing URLs follow the platform's usual save rules. Review the loaded text before analysis.")
-            else:
-                st.info("Collect data in Scrape Data first, then choose Last scraped data here. "
-                        "To analyze an earlier saved collection, choose Manual selection.")
-        else:
-            analysis_sources, sources_ready = _render_analysis_sources(user_email)
-            selected_dataset = _render_analysis_datasets(analysis_sources, sources_ready)
-            dataset_ready = sources_ready and selected_dataset is not None
-
-        def in_selected_dataset(row: dict[str, Any]) -> bool:
-            return dataset_ready and (row.get("_id") in recent_ids if use_recent
-                                      else dataset_key(row) == selected_dataset)
-
-        st.markdown("#### 2. Load and select records")
-        st.text_area("Thai projects, companies and brands to watch (one name or alias per line)",
-                     value=get_setting("THAILAND_WATCH_TERMS"), key="thailand_watch_terms",
-                     help="Leave blank for Thailand generally. Add the names and local-language aliases of your Thai-linked targets.")
-
-        # --- Settings row ---
-        gc1, gc2 = st.columns([1, 1])
-        status_filter = gc1.selectbox("Record status", options=["all", "pending", "processed", "error"],
-                                      index=0 if use_recent else 1,
-                                      key="analysis_recent_status" if use_recent else "analysis_record_status")
-        load_limit = gc2.slider("Load limit", min_value=1, max_value=200, value=50, key="analysis_load_limit")
-        _sync_analysis_dataset(selected_dataset, status_filter, load_limit)
-        provider = _render_ai_settings()
-        provider_label = AI_PROVIDERS[provider]
-
-        # --- Load records ---
-        load_label = ("Load last scraped data" if recent and recent.get("saved") else "Save and load last scraped data"
-                      ) if use_recent else "Load records from Firestore"
-        if st.button(load_label, key="load_firestore_records_btn", disabled=not dataset_ready, type="primary"):
-            try:
-                if use_recent:
-                    if not recent.get("saved"):
-                        _write_results_to_firestore(recent["rows"], custom_title=recent["title"])
-                    rows = _fetch_last_scrape_posts(recent, status_filter=status_filter, limit=load_limit)
+        analysis_workspace, analysis_settings = st.tabs(["Analysis", "Settings"])
+        with analysis_workspace:
+            st.markdown("#### 1. Choose your data")
+            selection_mode = st.radio("Data selection", ["Manual selection", "Last scraped data"],
+                                      horizontal=True, key="analysis_selection_mode")
+            if st.session_state.get("analysis_previous_mode") != selection_mode:
+                _clear_loaded_analysis()
+                st.session_state.pop("analysis_dataset_context", None)
+                st.session_state["analysis_previous_mode"] = selection_mode
+            use_recent = selection_mode == "Last scraped data"
+            recent = st.session_state.get("last_collected_dataset") if use_recent else None
+            recent_ids = {row["_id"] for row in recent["rows"]} if recent else set()
+            analysis_sources = None
+            if use_recent:
+                selected_dataset = "recent:" + recent["id"] if recent else None
+                dataset_ready = bool(recent_ids)
+                st.caption("The most recently completed collection in this browser session, across all scraping options. "
+                           "Only records from that collection are included. After reopening the app, use Manual selection to find saved data.")
+                if recent:
+                    st.write(f"**{recent['title']}**")
+                    st.caption(f"Source: {recent['source']} · {len(recent_ids)} analyzable records")
+                    if not recent_ids:
+                        st.info("No analyzable records remain in the last collection. Collect again or choose a saved dataset manually.")
+                    elif not recent.get("saved"):
+                        st.caption("Save and load adds new records to your cloud library under the title above. "
+                                   "Existing URLs follow the platform's usual save rules. Review the loaded text before analysis.")
                 else:
-                    rows = _fetch_firestore_posts(status_filter=status_filter, limit=load_limit,
-                                                 source_urls=analysis_sources, dataset=selected_dataset)
-                st.session_state["firestore_rows"] = rows
-                st.session_state.pop("analysis_record_selection", None)
-                st.session_state["firestore_load_error"] = ""
-                st.session_state["firestore_last_load_count"] = len(rows)
-            except Exception as exc:
-                st.session_state["firestore_rows"] = []
-                st.session_state["firestore_load_error"] = str(exc).strip() or repr(exc)
-                st.session_state["firestore_last_load_count"] = None
-
-        firestore_rows = [row for row in st.session_state.get("firestore_rows", [])
-                          if in_selected_dataset(row)]
-        firestore_load_error = st.session_state.get("firestore_load_error", "")
-        firestore_last_load_count = st.session_state.get("firestore_last_load_count", None)
-        if firestore_load_error:
-            st.error(f"Load failed: {firestore_load_error}")
-        elif firestore_last_load_count is not None:
-            if firestore_last_load_count == 0:
-                st.info(
-                    "No records in this dataset match the selected status. Choose another status or dataset, "
-                    "or save more source records and refresh datasets."
-                )
+                    st.info("Collect data in Scrape Data first, then choose Last scraped data here. "
+                            "To analyze an earlier saved collection, choose Manual selection.")
             else:
-                st.success(f"Loaded {firestore_last_load_count} record{'s' if firestore_last_load_count != 1 else ''} "
-                           "from the selected dataset. Choose which records to analyze below.")
+                analysis_sources, sources_ready = _render_analysis_sources(user_email)
+                selected_dataset = _render_analysis_datasets(analysis_sources, sources_ready)
+                dataset_ready = sources_ready and selected_dataset is not None
 
-        if firestore_rows:
-            display_rows = []
-            for row in firestore_rows:
-                display_rows.append(
-                    {
-                        "_id": row.get("_id", ""),
-                        "status": row.get("status", ""),
-                        "custom_title": row.get("custom_title", ""),
-                        "url": row.get("url", ""),
-                        "scraped_at": row.get("scraped_at", ""),
-                        "raw_text_preview": str(row.get("raw_text", ""))[:160],
-                    }
-                )
-            st.dataframe(pd.DataFrame(display_rows), use_container_width=True, hide_index=True)
+            def in_selected_dataset(row: dict[str, Any]) -> bool:
+                return dataset_ready and (row.get("_id") in recent_ids if use_recent
+                                          else dataset_key(row) == selected_dataset)
 
-            id_options = [str(r.get("_id", "")) for r in firestore_rows if r.get("_id") and is_analyzable(r)]
-            records_by_id = {str(row["_id"]): row for row in firestore_rows if row.get("_id")}
-            if "analysis_record_selection" in st.session_state:
-                st.session_state["analysis_record_selection"] = [ident for ident in st.session_state["analysis_record_selection"]
-                                                                if ident in id_options]
-            select, clear = st.columns(2)
-            select.button("Select all loaded records", key="analysis_select_all", disabled=not id_options,
-                          on_click=lambda: st.session_state.update(analysis_record_selection=id_options))
-            clear.button("Clear record selection", key="analysis_clear_selection",
-                         on_click=lambda: st.session_state.update(analysis_record_selection=[]))
-            selected_ids = st.multiselect(
-                "Select records to process",
-                options=id_options,
-                default=[],
-                key="analysis_record_selection",
-                format_func=lambda ident: f"{' '.join(str(records_by_id[ident].get('title') or records_by_id[ident].get('raw_text') or ident).split())[:100]} "
-                    f"· {platform_label(records_by_id[ident])} · {ident[:8]}",
-            )
-            st.caption(f"{len(selected_ids)} of {len(id_options)} loaded, analyzable records selected from this dataset. "
-                       "Only selected records will be sent to the AI provider.")
+            st.markdown("#### 2. Load and select records")
+            st.text_area("Thai projects, companies and brands to watch (one name or alias per line)",
+                         value=get_setting("THAILAND_WATCH_TERMS"), key="thailand_watch_terms",
+                         help="Leave blank for Thailand generally. Add the names and local-language aliases of your Thai-linked targets.")
 
-            if st.button(f"Run {provider_label} on {len(selected_ids)} selected record{'s' if len(selected_ids) != 1 else ''}",
-                         key="run_analysis_selected_btn",
-                         disabled=not get_ai_key(provider) or not selected_ids or not dataset_ready):
-                if not selected_ids:
-                    st.error("Please select at least one record.")
-                else:
-                    selected_posts = [r for r in firestore_rows if str(r.get("_id", "")) in set(selected_ids)]
-                    status_container = st.status(
-                        f"Running {provider_label} on {len(selected_posts)} record(s)...",
-                        expanded=True,
+        with analysis_settings:
+            st.subheader("Analysis settings")
+            st.caption("Changing record status or load limit clears loaded records; return to Analysis to load them again.")
+            gc1, gc2 = st.columns([1, 1])
+            status_filter = gc1.selectbox("Record status", options=["all", "pending", "processed", "error"],
+                                          index=0 if use_recent else 1,
+                                          key="analysis_recent_status" if use_recent else "analysis_record_status")
+            load_limit = gc2.slider("Load limit", min_value=1, max_value=200, value=50, key="analysis_load_limit")
+            _sync_analysis_dataset(selected_dataset, status_filter, load_limit)
+            provider = _render_ai_settings()
+            provider_label = AI_PROVIDERS[provider]
+
+        with analysis_workspace:
+            # --- Load records ---
+            load_label = ("Load last scraped data" if recent and recent.get("saved") else "Save and load last scraped data"
+                          ) if use_recent else "Load records from Firestore"
+            if st.button(load_label, key="load_firestore_records_btn", disabled=not dataset_ready, type="primary"):
+                try:
+                    if use_recent:
+                        if not recent.get("saved"):
+                            _write_results_to_firestore(recent["rows"], custom_title=recent["title"])
+                        rows = _fetch_last_scrape_posts(recent, status_filter=status_filter, limit=load_limit)
+                    else:
+                        rows = _fetch_firestore_posts(status_filter=status_filter, limit=load_limit,
+                                                     source_urls=analysis_sources, dataset=selected_dataset)
+                    st.session_state["firestore_rows"] = rows
+                    st.session_state.pop("analysis_record_selection", None)
+                    st.session_state["firestore_load_error"] = ""
+                    st.session_state["firestore_last_load_count"] = len(rows)
+                except Exception as exc:
+                    st.session_state["firestore_rows"] = []
+                    st.session_state["firestore_load_error"] = str(exc).strip() or repr(exc)
+                    st.session_state["firestore_last_load_count"] = None
+
+            firestore_rows = [row for row in st.session_state.get("firestore_rows", [])
+                              if in_selected_dataset(row)]
+            firestore_load_error = st.session_state.get("firestore_load_error", "")
+            firestore_last_load_count = st.session_state.get("firestore_last_load_count", None)
+            if firestore_load_error:
+                st.error(f"Load failed: {firestore_load_error}")
+            elif firestore_last_load_count is not None:
+                if firestore_last_load_count == 0:
+                    st.info(
+                        "No records in this dataset match the selected status. Choose another status or dataset, "
+                        "or save more source records and refresh datasets."
                     )
-                    try:
-                        def _update_status(msg: str) -> None:
-                            status_container.write(msg)
-
-                        summary = _process_selected_firestore_posts(
-                            selected_posts,
-                            provider=provider,
-                            status_callback=_update_status,
-                        )
-                        st.session_state["analysis_last_results"] = summary
-                        status_container.update(
-                            label=(
-                                f"Done — {summary['processed']} processed, "
-                                f"{summary['error']} error(s)"
-                            ),
-                            state="error" if summary["error"] else "complete",
-                        )
-                    except Exception as exc:
-                        error_text = (str(exc).strip() if isinstance(exc, (AIError, ValueError)) else
-                                      "Analysis failed. Please try again or contact the app administrator.")
-                        error_text = redact(error_text, get_ai_key(provider))
-                        status_container.update(
-                            label=f"Failed: {error_text}",
-                            state="error",
-                        )
-                        st.session_state["analysis_last_results"] = {
-                            "processed": 0, "error": len(selected_posts), "analyses": [], "errors": [error_text],
-                        }
-
-        # --- Display analysis results ---
-        analysis_results = st.session_state.get("analysis_last_results")
-        if analysis_results:
-            st.divider()
-            st.subheader("Analysis results")
-
-            res_c1, res_c2 = st.columns(2)
-            res_c1.metric("Processed", analysis_results.get("processed", 0))
-            res_c2.metric("Errors", analysis_results.get("error", 0))
-
-            for message in dict.fromkeys(analysis_results.get("errors", [])):
-                st.error(message)
-            analyses = analysis_results.get("analyses", [])
-            if analyses:
-                def evidence() -> None:
-                    visible = _render_signal_overview(analyses, "latest_signals_filter")
-                    _render_analysis_cards(visible)
-                    with st.expander("Raw analysis JSON"):
-                        st.json(analyses)
-
-                report_date = max((str(a.get("processed_at") or "") for a in analyses), default="") or _now_iso()
-                _render_client_report(analyses, "latest_report", report_date, evidence)
-            elif analysis_results.get("error", 0) > 0:
-                st.warning("No records were analyzed. Resolve the error above and retry."
-                           if analysis_results.get("errors") else
-                           "This result was created before detailed errors were available. Run analysis again to see the cause.")
-
-        # --- View previously processed records ---
-        st.divider()
-        st.subheader("View processed records")
-        st.caption("Load records with status 'processed' to see their saved analysis.")
-        if st.button("Load processed records", key="load_processed_records_btn", disabled=not dataset_ready):
-            try:
-                if use_recent:
-                    processed_rows = _fetch_last_scrape_posts(recent, status_filter="processed", limit=load_limit)
                 else:
-                    processed_rows = _fetch_firestore_posts(status_filter="processed", limit=load_limit,
-                                                           source_urls=analysis_sources, dataset=selected_dataset)
-                st.session_state["processed_rows"] = processed_rows
-            except Exception as exc:
-                st.error(f"Failed to load: {str(exc).strip() or repr(exc)}")
-                st.session_state["processed_rows"] = []
+                    st.success(f"Loaded {firestore_last_load_count} record{'s' if firestore_last_load_count != 1 else ''} "
+                               "from the selected dataset. Choose which records to analyze below.")
 
-        processed_rows = [row for row in st.session_state.get("processed_rows", [])
-                          if in_selected_dataset(row)]
-        _render_processed_deletion(processed_rows)
-        if processed_rows:
-            _render_processed_records(processed_rows)
+            if firestore_rows:
+                display_rows = []
+                for row in firestore_rows:
+                    display_rows.append(
+                        {
+                            "_id": row.get("_id", ""),
+                            "status": row.get("status", ""),
+                            "custom_title": row.get("custom_title", ""),
+                            "url": row.get("url", ""),
+                            "scraped_at": row.get("scraped_at", ""),
+                            "raw_text_preview": str(row.get("raw_text", ""))[:160],
+                        }
+                    )
+                st.dataframe(pd.DataFrame(display_rows), use_container_width=True, hide_index=True)
+
+                id_options = [str(r.get("_id", "")) for r in firestore_rows if r.get("_id") and is_analyzable(r)]
+                records_by_id = {str(row["_id"]): row for row in firestore_rows if row.get("_id")}
+                if "analysis_record_selection" in st.session_state:
+                    st.session_state["analysis_record_selection"] = [ident for ident in st.session_state["analysis_record_selection"]
+                                                                    if ident in id_options]
+                select, clear = st.columns(2)
+                select.button("Select all loaded records", key="analysis_select_all", disabled=not id_options,
+                              on_click=lambda: st.session_state.update(analysis_record_selection=id_options))
+                clear.button("Clear record selection", key="analysis_clear_selection",
+                             on_click=lambda: st.session_state.update(analysis_record_selection=[]))
+                selected_ids = st.multiselect(
+                    "Select records to process",
+                    options=id_options,
+                    default=[],
+                    key="analysis_record_selection",
+                    format_func=lambda ident: f"{' '.join(str(records_by_id[ident].get('title') or records_by_id[ident].get('raw_text') or ident).split())[:100]} "
+                        f"· {platform_label(records_by_id[ident])} · {ident[:8]}",
+                )
+                st.caption(f"{len(selected_ids)} of {len(id_options)} loaded, analyzable records selected from this dataset. "
+                           "Only selected records will be sent to the AI provider.")
+
+                if st.button(f"Run {provider_label} on {len(selected_ids)} selected record{'s' if len(selected_ids) != 1 else ''}",
+                             key="run_analysis_selected_btn",
+                             disabled=not get_ai_key(provider) or not selected_ids or not dataset_ready):
+                    if not selected_ids:
+                        st.error("Please select at least one record.")
+                    else:
+                        selected_posts = [r for r in firestore_rows if str(r.get("_id", "")) in set(selected_ids)]
+                        status_container = st.status(
+                            f"Running {provider_label} on {len(selected_posts)} record(s)...",
+                            expanded=True,
+                        )
+                        try:
+                            def _update_status(msg: str) -> None:
+                                status_container.write(msg)
+
+                            summary = _process_selected_firestore_posts(
+                                selected_posts,
+                                provider=provider,
+                                status_callback=_update_status,
+                            )
+                            st.session_state["analysis_last_results"] = summary
+                            status_container.update(
+                                label=(
+                                    f"Done — {summary['processed']} processed, "
+                                    f"{summary['error']} error(s)"
+                                ),
+                                state="error" if summary["error"] else "complete",
+                            )
+                        except Exception as exc:
+                            error_text = (str(exc).strip() if isinstance(exc, (AIError, ValueError)) else
+                                          "Analysis failed. Please try again or contact the app administrator.")
+                            error_text = redact(error_text, get_ai_key(provider))
+                            status_container.update(
+                                label=f"Failed: {error_text}",
+                                state="error",
+                            )
+                            st.session_state["analysis_last_results"] = {
+                                "processed": 0, "error": len(selected_posts), "analyses": [], "errors": [error_text],
+                            }
+
+            # --- Display analysis results ---
+            analysis_results = st.session_state.get("analysis_last_results")
+            if analysis_results:
+                st.divider()
+                st.subheader("Analysis results")
+
+                res_c1, res_c2 = st.columns(2)
+                res_c1.metric("Processed", analysis_results.get("processed", 0))
+                res_c2.metric("Errors", analysis_results.get("error", 0))
+
+                for message in dict.fromkeys(analysis_results.get("errors", [])):
+                    st.error(message)
+                analyses = analysis_results.get("analyses", [])
+                if analyses:
+                    def evidence() -> None:
+                        visible = _render_signal_overview(analyses, "latest_signals_filter")
+                        _render_analysis_cards(visible)
+                        with st.expander("Raw analysis JSON"):
+                            st.json(analyses)
+
+                    report_date = max((str(a.get("processed_at") or "") for a in analyses), default="") or _now_iso()
+                    _render_client_report(analyses, "latest_report", report_date, evidence)
+                elif analysis_results.get("error", 0) > 0:
+                    st.warning("No records were analyzed. Resolve the error above and retry."
+                               if analysis_results.get("errors") else
+                               "This result was created before detailed errors were available. Run analysis again to see the cause.")
+
+            # --- View previously processed records ---
+            st.divider()
+            st.subheader("View processed records")
+            st.caption("Load records with status 'processed' to see their saved analysis.")
+            if st.button("Load processed records", key="load_processed_records_btn", disabled=not dataset_ready):
+                try:
+                    if use_recent:
+                        processed_rows = _fetch_last_scrape_posts(recent, status_filter="processed", limit=load_limit)
+                    else:
+                        processed_rows = _fetch_firestore_posts(status_filter="processed", limit=load_limit,
+                                                               source_urls=analysis_sources, dataset=selected_dataset)
+                    st.session_state["processed_rows"] = processed_rows
+                except Exception as exc:
+                    st.error(f"Failed to load: {str(exc).strip() or repr(exc)}")
+                    st.session_state["processed_rows"] = []
+
+            processed_rows = [row for row in st.session_state.get("processed_rows", [])
+                              if in_selected_dataset(row)]
+            _render_processed_deletion(processed_rows)
+            if processed_rows:
+                _render_processed_records(processed_rows)
 
     # Render after processing so the trends page includes the latest saved run.
     with trends_tab:
