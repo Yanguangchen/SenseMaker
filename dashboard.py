@@ -28,7 +28,7 @@ from modules.content_recommendations_ui import render_content_workspace
 from modules.tutorial_ui import render_tutorial_workspace
 from modules.ai_errors import AIError, redact
 from modules.config import AI_PROVIDERS, get_ai_key, get_ai_model, get_ai_provider, get_setting, load_environment
-from modules.database import delete_processed_posts, init_db, upsert_post
+from modules.database import delete_processed_posts, get_post_id, init_db, upsert_post
 from modules.gencite_ui import render_gencite_workspace
 from modules.client_report import (
     CSS_PATH as REPORT_CSS, content_type, negative_records, npr_sheet, platform_label, report_document,
@@ -89,6 +89,12 @@ def _remember_collection(rows: list[dict[str, Any]], source: str, completed_at: 
     st.session_state["last_collected_dataset"] = collection_snapshot(rows, source, completed_at)
 
 
+def _collection_record_keys(rows: list[dict[str, Any]]) -> set[tuple[str, str, str]]:
+    return {(str(row.get("url") or "").strip(), str(row.get("scraped_at") or ""),
+             str(row.get("source_type") or "")) for row in rows
+            if str(row.get("url") or "").strip() and row.get("source_type") not in NON_CONTENT_TYPES}
+
+
 def _write_results_to_firestore(posts: List[Dict[str, Any]], custom_title: str) -> Dict[str, int]:
     """Upsert scraped posts into Firestore and return summary counts."""
     db = init_db()
@@ -110,6 +116,13 @@ def _write_results_to_firestore(posts: List[Dict[str, Any]], custom_title: str) 
         upsert_post(db, payload)
         inserted += 1
     st.session_state.pop("analysis_dataset_catalog", None)
+    st.session_state.pop("record_manager_rows", None)
+    st.session_state.pop("record_manager_pending", None)
+    saved_keys = _collection_record_keys(posts)
+    for key in ("news_scan", "x_collection", "website_collection"):
+        collection = st.session_state.get(key) or {}
+        if saved_keys and collection.get("cloud_save") and saved_keys == _collection_record_keys(collection.get("rows", [])):
+            collection["cloud_save"].update(state="saved", title=safe_title, count=inserted)
     recent = st.session_state.get("last_collected_dataset")
     if recent and recent["rows"] and {
         (row["url"], row.get("scraped_at")) for row in recent["rows"]
@@ -190,7 +203,7 @@ def _render_analysis_datasets(source_urls: list[str] | None, ready: bool) -> str
     selected = st.selectbox("Dataset to analyze", list(options), index=None, key="analysis_dataset",
                             placeholder="Choose a saved dataset", disabled=not ready or not options,
                             format_func=label)
-    st.caption("Datasets are grouped by the Custom title used when saving. Reusing a title groups those records together. "
+    st.caption("Datasets are grouped by the title saved with each collection (Custom title or Dataset title). Reusing a title groups those records together. "
                "Choose one dataset before loading or analyzing records.")
     if ready and not options and not catalog.get("error"):
         st.info("No saved datasets match these sources. Save a collection with a Custom title, then refresh datasets.")
@@ -1266,6 +1279,65 @@ def _render_cloud_save(records: List[Dict[str, Any]], title_key: str, save_key: 
             st.error(f"Firestore write failed: {error_text}")
 
 
+def _render_auto_save_title(key: str) -> str:
+    return st.text_input("Dataset title (optional)", key=key, max_chars=160,
+                         placeholder="Leave blank for a name with the source and collection time",
+                         help="Collected records save automatically. This title groups them in Sentiment Analysis and Manage records.")
+
+
+def _autosave_collection(collection: dict[str, Any], source: str, custom_title: str = "") -> None:
+    """Attempt once per collection (or explicit retry), retaining results on failure."""
+    save = collection.setdefault("cloud_save", {
+        "title": custom_title.strip() or f"{source} · {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}",
+        "state": "pending", "count": 0,
+    })
+    # Removed X records must be saved too, to clear their previous text/analysis.
+    records = list({str(row.get("url") or "").strip(): row for row in collection.get("rows", [])
+                    if str(row.get("url") or "").strip() and row.get("source_type") not in NON_CONTENT_TYPES}.values())
+    if not records:
+        save.update(state="empty", count=0)
+        return
+    updated_ids = {get_post_id(str(row["url"])) for row in records}
+    cached_rows = [row for key in ("firestore_rows", "processed_rows") for row in st.session_state.get(key, [])]
+    cached_rows += (st.session_state.get("analysis_last_results") or {}).get("analyses", [])
+    if any(str(row.get("_id")) in updated_ids for row in cached_rows):
+        # Reusing a title must not leave old source text runnable after an edit.
+        _clear_loaded_analysis()
+    try:
+        with st.spinner("Saving collected records to the cloud…"):
+            summary = _write_results_to_firestore(records, custom_title=save["title"])
+    except Exception:
+        save.update(state="error", count=0)
+        # A failed write can still have saved some rows. Refresh cloud views.
+        st.session_state.pop("analysis_dataset_catalog", None)
+        st.session_state.pop("record_manager_rows", None)
+        st.session_state.pop("record_manager_pending", None)
+    else:
+        save.update(state="saved", count=summary["inserted"])
+
+
+def _collection_save_pending(key: str) -> bool:
+    collection = st.session_state.get(key) or {}
+    return ((collection.get("cloud_save") or {}).get("state") == "error"
+            and bool(_collection_record_keys(collection.get("rows", []))))
+
+
+def _render_autosave_status(collection: dict[str, Any], retry_key: str) -> None:
+    if not _collection_record_keys(collection.get("rows", [])):
+        return
+    save = collection.get("cloud_save") or {}
+    if save.get("state") == "saved":
+        st.success(f"Saved {save['count']} record(s) to the cloud.")
+        st.caption(f"Dataset: {save['title']} · Available in Sentiment Analysis and Manage records.")
+    elif save.get("state") == "error":
+        st.error("Cloud saving failed. Some records may already be saved. Your collected data is still in this session; "
+                 "keep this page open and retry saving before collecting again.")
+        st.caption(f"Dataset: {save['title']} · Retrying saves these results without scraping again.")
+        if st.button("Retry saving collected records", key=retry_key):
+            _autosave_collection(collection, source="")  # Reuses the frozen dataset title and collected rows.
+            st.rerun()
+
+
 @st.fragment(run_every=2)
 def _render_facebook_collection_progress(email: str, job_id: str) -> None:
     from modules.auth import allowed_emails, verify_access
@@ -1466,7 +1538,9 @@ def _render_news_workspace() -> None:
         limit = limit_col.number_input("Articles per search", min_value=10, max_value=MAX_ARTICLES,
                                        value=50, step=10, key="news_limit")
 
-    if st.button("Search Google News", key="collect_news_articles", type="primary", use_container_width=True):
+    custom_title = _render_auto_save_title("news_custom_title_value")
+    if st.button("Search Google News", key="collect_news_articles", type="primary", use_container_width=True,
+                 disabled=_collection_save_pending("news_scan")) and not _collection_save_pending("news_scan"):
         if not searches:
             st.error("Choose at least one category with search terms.")
         elif not editions:
@@ -1478,6 +1552,9 @@ def _render_news_workspace() -> None:
                                     on_progress=lambda done, total, query: progress.progress(
                                         done / total, text=f"Searched {done} of {total}: {query}"))
             _remember_collection(rows, "Online news")
+            st.session_state["news_scan"] = {"rows": rows, "snapshot": None, "saved": False,
+                                             "searches": searches, "window": window, "editions": editions}
+            _autosave_collection(st.session_state["news_scan"], "Online news", custom_title)
             try:
                 history = _load_news_history()
             except Exception:
@@ -1492,12 +1569,13 @@ def _render_news_workspace() -> None:
                 except Exception:
                     logging.getLogger(__name__).exception("News scan snapshot could not be saved")
                 _load_news_history.clear()
-            st.session_state["news_scan"] = {"rows": rows, "snapshot": snapshot, "saved": saved,
-                                             "searches": searches, "window": window, "editions": editions}
+            st.session_state["news_scan"].update(snapshot=snapshot, saved=saved)
+            st.rerun()
 
     scan = st.session_state.get("news_scan")
     if not scan:
         return
+    _render_autosave_status(scan, "retry_news_save")
     for issue in (r for r in scan["rows"] if r.get("source_type") in NON_CONTENT_TYPES):
         st.warning(f"{issue.get('target_url', 'Search')}: {issue.get('raw_text', 'Search incomplete')}")
     articles = [r for r in scan["rows"] if r.get("source_type") == "news_article"]
@@ -1515,7 +1593,7 @@ def _render_news_workspace() -> None:
                           help=f"{snapshot['escalation_count']} escalation · {snapshot['tension_count']} tension")
     _risk_metric(risk_metric, "Border tension risk", snapshot)
     st.caption("Flags come from a keyword scan of headlines and need a Thailand or Cambodia mention. They are "
-               "leads for review, not confirmed events. Save the articles to run AI sentiment and boycott analysis.")
+               "leads for review, not confirmed events. After cloud saving succeeds, select these articles for AI sentiment and boycott analysis.")
     daily = daily_flag_counts(articles)
     if daily:
         st.markdown("**Flagged coverage by publication day**")
@@ -1548,7 +1626,6 @@ def _render_news_workspace() -> None:
             for edition in scan["editions"]:
                 st.markdown(f"[{NEWS_CATEGORIES[key]['label']} · {EDITIONS[edition]['label']}]"
                             f"({browse_url(query, scan['window'], edition)})")
-    _render_cloud_save(articles, "news_custom_title_value", "save_news_results_btn", noun="articles")
 
 
 def _render_news_risk_history() -> None:
@@ -1617,8 +1694,9 @@ def _render_x_workspace() -> None:
                    f"at ${READ_PRICE_USD:.3f} per post returned. Replies are a separate capped sample "
                    "and are off by default. A reply page asks for at least 10 posts even when fewer are kept.")
 
+    custom_title = _render_auto_save_title("x_custom_title_value")
     if st.button("Collect posts", key="collect_x_posts", type="primary", use_container_width=True,
-                 disabled=not x_configured()):
+                 disabled=not x_configured() or _collection_save_pending("x_collection")) and not _collection_save_pending("x_collection"):
         if not searches:
             st.error("Choose at least one X search.")
         else:
@@ -1631,6 +1709,7 @@ def _render_x_workspace() -> None:
                                          done / total, text=f"Searched {done} of {total}: {label}"))
                     st.session_state["x_collection"] = {"rows": rows, "reads": client.reads, "error": ""}
                     _remember_collection(rows, "X")
+                    _autosave_collection(st.session_state["x_collection"], "X", custom_title)
                 except XError as exc:
                     st.session_state["x_collection"] = {"rows": [], "reads": 0, "error": str(exc)}
                     _remember_collection([], "X")
@@ -1640,10 +1719,12 @@ def _render_x_workspace() -> None:
                         "rows": [], "reads": 0, "error": str(exc).strip() or "X collection failed.",
                     }
                     _remember_collection([], "X")
+            st.rerun()
 
     collection = st.session_state.get("x_collection")
     if not collection:
         return
+    _render_autosave_status(collection, "retry_x_save")
     if collection.get("error"):
         st.error(collection["error"])
     reads = int(collection.get("reads") or 0)
@@ -1657,7 +1738,6 @@ def _render_x_workspace() -> None:
     if not posts:
         st.info("No X posts were collected. Check any connection notices above, or broaden the search.")
         return
-    _render_cloud_save(posts, "x_custom_title_value", "save_x_results_btn")
     st.dataframe(pd.DataFrame(posts), use_container_width=True, hide_index=True)
     with st.expander("Raw JSON Output"):
         st.json(posts)
@@ -1672,7 +1752,9 @@ def _render_website_workspace() -> None:
                          help=f"Up to {MAX_WEBSITE_LINKS} unique pages per run. Only the links you enter are collected; linked pages are not crawled.")
     st.caption("No API key or social media login is needed. Pages requiring JavaScript, sign-in or CAPTCHA verification "
                "may be unavailable. HTML and plain text are supported; PDFs and media downloads are not.")
-    if st.button("Collect website pages", key="collect_website_pages", type="primary"):
+    custom_title = _render_auto_save_title("website_custom_title")
+    if st.button("Collect website pages", key="collect_website_pages", type="primary",
+                 disabled=_collection_save_pending("website_collection")) and not _collection_save_pending("website_collection"):
         try:
             urls = parse_website_links(links)
         except WebsiteError as exc:
@@ -1685,9 +1767,12 @@ def _render_website_workspace() -> None:
                                         progress.progress(done / total, text=f"Checked {done} of {total} pages"))
                 st.session_state["website_collection"]["rows"] = rows
                 _remember_collection(rows, "Custom website")
+                _autosave_collection(st.session_state["website_collection"], "Custom website", custom_title)
+            st.rerun()
     collection = st.session_state.get("website_collection")
     if collection is None:
         return
+    _render_autosave_status(collection, "retry_website_save")
     with st.expander("Sources in the last website collection"):
         st.code("\n".join(collection["urls"]))
     rows = collection["rows"]
@@ -1700,7 +1785,6 @@ def _render_website_workspace() -> None:
         return
     if any(page.get("text_truncated") for page in pages):
         st.caption("Long pages were limited to the first 60,000 characters. Review the extracted text before analyzing.")
-    _render_cloud_save(pages, "website_custom_title", "save_website_results", noun="pages")
     for page in pages:
         with st.expander(page.get("title") or page["url"]):
             st.link_button("Open source page", page["url"])

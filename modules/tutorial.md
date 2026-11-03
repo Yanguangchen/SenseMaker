@@ -9,15 +9,15 @@ This walkthrough uses a public website article. You need an approved Google acco
 1. Sign in with your approved Google account.
 2. Open **Scrape Data → Custom website** from the sidebar.
 3. Paste one public article URL into **Website links (one per line)**. Use a page you can read without signing in.
-4. Click **Collect website pages**. Expand the result and check that the extracted text matches the article.
-5. Enter a **Custom title**, such as `Delivery feedback — November baseline`, then click **Save data to cloud**. Wait for the saved confirmation.
+4. Optionally enter a **Dataset title**, such as `Delivery feedback — November baseline`. Leave it blank to use the source and collection time.
+5. Click **Collect website pages**. The pages save automatically. Wait for the cloud-save confirmation, then check that the extracted text matches the article.
 6. Open **Sentiment Analysis**. Under **Data selection**, choose **Manual selection** to pick your saved title in **Dataset to analyze**, then click **Load records from Firestore**. Or choose **Last scraped data** to load the most recent collection from this browser session. Use **Save and load last scraped data** if you have not saved it yet. Firestore is the platform's cloud record library.
 7. Choose an **AI provider**, review **Select records to process**, and keep only your intended records selected. Add relevant names in the watch list if your research concerns Thai projects, companies or brands.
 8. Check the selected-record count and click **Run Gemini on … selected records** or **Run ChatGPT on … selected records**. Successful analyses are saved automatically.
 9. Open **Evidence by record** in the results. Read the original excerpt, translation, signal and supporting quotes before drawing conclusions.
 10. Open **Content plan**, choose **Latest analysis**, enter a brand/topic and goal, and click **Generate content plan**. Review the drafts and export the plan if you want to keep it.
 
-**What you should have:** a saved source record, a saved analysis, a point on the sentiment timeline, and a draft content plan. Saving collection results is a separate action from analyzing them.
+**What you should have:** a saved source record, a saved analysis, a point on the sentiment timeline, and a draft content plan. Automatic cloud saving does not run AI analysis.
 
 ## Sign in and find your way around
 
@@ -49,7 +49,11 @@ Choose the tab that matches the material you want to collect. Collection runs wh
 | X | Recent posts matching your enabled searches, with optional reply samples. | Server bearer token, read access and API credit. |
 | Custom website | Public HTML or plain-text pages at URLs you paste. | No additional API key or social login. |
 
-For every source, review the collection notices and results before saving. Add a descriptive **Custom title**, then click **Save data to cloud**. A title such as `Brand A — customer questions — 03 Nov` makes the batch easier to recognize later.
+**Online news, X and Custom website save collected records automatically.** Before collecting, optionally enter a **Dataset title**; a blank title uses the source and collection time. Wait for **Saved … record(s) to the cloud**. All collected records are saved, even if you later filter the preview. They can then be loaded in **Sentiment Analysis** and **Manage records**.
+
+If cloud saving fails, keep the page open and click **Retry saving collected records**. The collected data and original title are retained; retrying does not scrape again or incur another X collection request. New collection is paused until these records are saved. A reload, sign-out or server restart can still lose data that has not reached the cloud.
+
+For **Facebook and Reddit**, review the results, add a descriptive **Custom title**, then click **Save data to cloud**. A title such as `Brand A — customer questions — 03 Nov` makes a dataset easier to recognize later.
 
 **Collected** means the result is available in the current session. **Saved** means it is in the cloud library. **Processed** means it has a saved AI analysis. Collecting material alone does not run AI analysis.
 
@@ -60,9 +64,9 @@ An unavailable source may produce a warning while other sources succeed. Warning
 Use **Scrape Data → Custom website** for ordinary articles, blogs, company pages and other public websites.
 
 1. Paste URLs into **Website links (one per line)**. You can enter up to 10 unique links per run; a missing scheme is treated as HTTPS.
-2. Click **Collect website pages**. Only the supplied pages and their redirects are requested; links inside each page are not crawled.
+2. Optionally enter a **Dataset title**, then click **Collect website pages**. Only the supplied pages and their redirects are requested; links inside each page are not crawled.
 3. Check **Pages collected** and any per-link notices. Open each result to read the extracted text and use **Open source page** to compare it with the original.
-4. Enter a **Custom title** and click **Save data to cloud**.
+4. Confirm **Saved … record(s) to the cloud**. If saving failed, use **Retry saving collected records** while keeping the page open.
 5. In **Sentiment Analysis**, load the saved records and select the pages you want to analyze.
 
 The collector prefers article/main text and removes common navigation, scripts and hidden elements. It supports HTML and plain text. It does not render JavaScript, sign in, solve CAPTCHA challenges, read PDFs, download media or transcribe audio. A page that works in your browser may still be unavailable to the collector.
@@ -95,15 +99,15 @@ The collector uses approved Reddit API access. It defaults to newest posts and s
 
 ### Online news
 
-Open **Scrape Data → Online news**. Enable the categories you want, edit their search terms, choose **Published**, select **Google News editions**, set **Articles per search**, and click **Search Google News**.
+Open **Scrape Data → Online news**. Enable the categories you want, edit their search terms, choose **Published**, select **Google News editions**, set **Articles per search**, optionally enter a **Dataset title**, and click **Search Google News**.
 
-Review article counts, keyword flags, the risk indicator and publication-day chart. The **Show** and **Category** controls filter the table for inspection. **Save data to cloud** saves the collected article set, not only the currently visible filtered rows.
+Review the cloud-save confirmation, article counts, keyword flags, risk indicator and publication-day chart. The entire collected article set saves automatically. The **Show** and **Category** controls only filter the preview.
 
-A news record contains the returned headline/snippet and source metadata; it is not necessarily the full publisher article. For full page text, use a direct publisher URL in **Custom website**. The news scan's timeline snapshot is saved automatically when storage succeeds; saving the articles for later AI analysis is a separate action.
+A news record contains the returned headline/snippet and source metadata; it is not necessarily the full publisher article. For full page text, use a direct publisher URL in **Custom website**. The articles and the timeline snapshot are saved separately and each reports its save result. Recollecting an article updates its dataset and metadata; unchanged text keeps its saved analysis, while changed text returns to pending analysis.
 
 ### X
 
-Open **Scrape Data → X**. Enable the searches you want and edit their terms. Set **Posts per search** and **Replies per post**, review the read/cost estimate shown, then click **Collect posts**. Review and save the results.
+Open **Scrape Data → X**. Enable the searches you want and edit their terms. Set **Posts per search** and **Replies per post**, review the read/cost estimate, optionally enter a **Dataset title**, then click **Collect posts**. Posts and collected replies save automatically; check the cloud-save confirmation.
 
 Recent search covers about the last seven days. Reposts are excluded. Replies are optional, capped samples and are off by default. The API may return more records than the app retains because its smallest reply page is larger than some requested samples. The displayed estimate is a guide; actual access, rates and credit depend on the provider account.
 
@@ -202,7 +206,7 @@ In **Recommendations**, generate content recommendations or keyword ideas based 
 | Item | How to keep it | Where it lives |
 | --- | --- | --- |
 | Facebook source links | Add valid links in Your links. | Your account's saved source library. |
-| Collected posts, articles and pages | Enter a custom title and click Save data to cloud. | The shared cloud record library. |
+| Collected posts, articles and pages | Online news, X and Custom website save automatically; Facebook and Reddit use Save data to cloud. | The shared cloud record library. |
 | Successful sentiment analysis | Saved automatically after processing. | With the source record; reopen via Load processed records. |
 | Trend points | Saved automatically when an analysis/news scan succeeds and storage is available. | Sentiment/news history. |
 | Sentiment content plans | Download keywords CSV and/or content-plan JSON. | Exported files; the on-screen plan is session-only. |
@@ -237,6 +241,7 @@ Removing Facebook source links is different from deleting source records. Sign-o
 | Website link rejected | Use a public HTTP/HTTPS page on a standard web port. Social media and private-network links are not accepted here. |
 | No readable website text, HTTP 403, or verification page | Try a direct public article URL. JavaScript-only, login and CAPTCHA pages may be unavailable. |
 | Website collection reaches a size/time limit | Try fewer links or shorter pages. Save completed results before starting another run. |
+| Cloud saving failed after collection | Keep the page open and click Retry saving collected records. The original data/title are reused; collection stays paused until saving succeeds. |
 | No records in Sentiment Analysis | Choose Manual selection and a saved Custom title, or Last scraped data for this session's latest collection. Click the load button, check status and load limit, and refresh datasets if a saved title is missing. |
 | Run button shows 0 selected records | Choose individual records or click Select all loaded records within the selected dataset. Loading never selects records automatically. |
 | Source library could not be loaded | Refresh Your links in the Facebook tab, then retry loading. If storage still fails, contact the administrator. |

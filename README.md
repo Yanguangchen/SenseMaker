@@ -157,18 +157,18 @@ SenseMaker/
 
 ## Thailand tensions and boycott watch
 
-Sentiment Analysis defaults to **Current sources**: the signed-in account's saved
-Facebook sources, r/cambodia, articles saved from Online News, and posts collected from X. Records load newest
-first, with source filtering applied before the load limit. **All saved records
-(including older sources)** explicitly includes the earlier research library.
+Sentiment Analysis lists **All saved records (including older sources)** by default when
+choosing a dataset manually. The optional **Current sources** filter includes the account's saved
+Facebook sources, r/cambodia, Online News articles, X posts and custom website pages. Records load newest
+first, with dataset/source filtering applied before the load limit.
 Changing sources clears loaded records, selections and previous results. The old
 records remain in Firestore; they are not deleted or reclassified by language.
 The sentiment timeline uses the same source selection. New analysis runs record
 their source links; older runs without that metadata and mixed-source runs remain
 available under all saved records, rather than contributing to current-source averages.
 
-If the current sources have no saved records yet, collect and save their posts (or
-save Online News articles) before loading Sentiment Analysis. Saving source links
+If the current sources have no saved records yet, collect their posts before loading Sentiment Analysis.
+Online news, X and Custom website save automatically; Facebook and Reddit require **Save data to cloud**. Saving source links
 alone does not collect any posts. X posts collected from **Scrape Data → X** are
 included with the current watches.
 
@@ -267,9 +267,9 @@ additional API key or Facebook connection. It reads only the URLs you supply;
 it does not crawl the site's other pages. Social media URLs are rejected so they
 remain in their existing platform collectors.
 
-Click **Collect website pages**, review each text preview, enter a custom title,
-then click **Save data to cloud**. Saved pages appear in **Sentiment Analysis →
-Current sources** alongside the other collected sources. Analyze them with your
+Optionally enter a **Dataset title**, then click **Collect website pages**. Collected pages save
+automatically; a blank title uses the source and collection time. Wait for the cloud-save confirmation.
+Saved pages appear in **Sentiment Analysis** and **Manage records** alongside the other sources. Analyze them with your
 existing Gemini/OpenAI key, then use those results in **Content recommendations**.
 Recollecting a changed page refreshes its text and resets its old analysis;
 unchanged pages keep their analysis. Website pages have no engagement checks.
@@ -338,7 +338,7 @@ this repository. See [Reddit's access policy](https://support.reddithelp.com/hc/
 
 1. Open **Scrape Data → X**. The same three watches as Online News are filled in and can be edited.
 2. Choose up to **100 posts per search**. Leave **Replies per post** at 0 unless you want a small reply sample.
-3. Click **Collect posts**, inspect the results and save them to Firestore.
+3. Optionally enter a **Dataset title**, then click **Collect posts**. Posts and collected replies save automatically; inspect the results and cloud-save confirmation.
 4. Select saved records in **Sentiment Analysis**, set your watchlist and run analysis.
 
 The connector uses X's official recent-search API (`GET /2/tweets/search/recent`), which covers about
@@ -366,8 +366,8 @@ To connect X:
    Streamlit Secrets also works. Keep the value out of `.env.example`, which is a template and
    is not loaded as runtime configuration.
 5. Open **Scrape Data → X**, select one watch, keep **Posts per search** at 10 and **Replies per post**
-   at 0, then **Collect posts** to verify access with a small request. Successful results can be saved
-   to Firestore and analyzed alongside the other sources.
+   at 0, then **Collect posts** to verify access with a small request. Successful results save automatically
+   to Firestore and can be analyzed alongside the other sources.
 
 The only X environment variable read by the app is:
 
@@ -413,9 +413,12 @@ index as a dashed line. High, elevated or rising risk and any boycott articles r
 both pages. Scans are stored in `<FIREBASE_COLLECTION>_news_scans`. Compare scans that use the
 same searches and window, because the score depends on what each search returns.
 
-Keyword flags are leads for review, not confirmed events, and only headlines are scanned. Use
-**Save data to cloud** to store the articles, then run the AI provider on them in **Sentiment
-Analysis** for evidence-grounded sentiment, boycott and tension assessments. On the
+Online news automatically saves the collected article records as well as the separate trend snapshot.
+An optional **Dataset title** groups the records; otherwise the source and collection time are used.
+Keyword flags are leads for review, not confirmed events, and only headlines are scanned. After the
+cloud-save confirmation, select the articles in **Sentiment Analysis** for evidence-grounded
+sentiment, boycott and tension assessments. Recollected articles update their title and metadata;
+unchanged headlines keep their analysis, while changed text resets analysis to pending. On the
 **Sentiment over time** chart, each search's headline tone appears as an **Online News**
 point, and red rings mark searches and analysis runs that found border-tension or boycott signals. Short search terms such as `OYOSHI` can also match unrelated news, so refine
 the terms when needed. Google's feed is intended for personal, non-commercial use; check its
@@ -685,7 +688,11 @@ The dashboard has **four pages**, accessible from the left toolbar:
 - Collect large batches with progress tracking; three sources run at a time
 - Headless browser toggle + scroll iterations slider (1-50)
 - Results table + raw JSON output
-- "Save data to cloud" button with custom title — writes scraped data to Firestore with timestamps
+- Online news, X and Custom website automatically save collected records with an optional dataset title.
+  Facebook and Reddit use **Save data to cloud** with a custom title.
+- Failed automatic saves retain collected data and show **Retry saving collected records**. New collection is
+  paused until saving succeeds. Retrying reuses the same records/title without recollecting or duplicating URL-based records.
+  Keep the session open until the cloud-save confirmation; failed saves are not durable across a session reset.
 
 ### Tab 2 — Sentiment Analysis
 

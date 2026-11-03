@@ -200,6 +200,7 @@ class IntegrationTests(unittest.TestCase):
     def test_ui_validates_then_collects_previews_and_saves_only_page_records(self):
         script = "from dashboard import _render_website_workspace\n_render_website_workspace()"
         with patch("dashboard.collect_websites") as collect, patch("dashboard._write_results_to_firestore") as save:
+            save.return_value = {"inserted": 1, "skipped": 0}
             app = AppTest.from_string(script).run()
             app.text_area(key="website_links").set_value("https://facebook.com/post/1").run()
             app.button(key="collect_website_pages").click().run()
@@ -208,13 +209,12 @@ class IntegrationTests(unittest.TestCase):
             row = self.record()
             collect.return_value = [row, {"source_type": "batch_warning", "raw_text": "Unavailable"}]
             app.text_area(key="website_links").set_value(URL).run()
+            app.text_input(key="website_custom_title").set_value("Product research").run()
             app.button(key="collect_website_pages").click().run()
             self.assertFalse(list(app.exception))
             self.assertEqual(len(app.warning), 1)
-            app.text_input(key="website_custom_title").set_value("Product research").run()
-            save.return_value = {"inserted": 1, "skipped": 0}
-            app.button(key="save_website_results").click().run()
             save.assert_called_once_with([row], custom_title="Product research")
+            self.assertTrue(any("Saved 1 record" in notice.value for notice in app.success))
             self.assertFalse(list(app.exception))
 
 

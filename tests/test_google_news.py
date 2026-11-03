@@ -187,6 +187,20 @@ class PersistenceTests(unittest.TestCase):
         self.assertEqual(saved["news_assessment"]["flags"], ["Boycott"])
         self.assertEqual(saved["status"], "pending")
 
+    def test_recollected_news_updates_dataset_and_preserves_analysis_only_for_unchanged_text(self):
+        for old_text in ("Same headline", "Older headline"):
+            with self.subTest(old_text=old_text):
+                db = MagicMock()
+                doc = db.collection.return_value.document.return_value
+                doc.get.return_value = SimpleNamespace(exists=True, to_dict=lambda: {
+                    "raw_text": old_text, "custom_title": "Old search", "status": "processed"})
+                upsert_post(db, {**article("Same headline"), "custom_title": "New search", "saved_at": "new"})
+                saved = doc.set.call_args.args[0]
+                self.assertEqual(saved["custom_title"], "New search")
+                self.assertEqual(saved["saved_at"], "new")
+                self.assertEqual(saved["status"], "processed" if old_text == "Same headline" else "pending")
+                self.assertEqual("analysis" in saved, old_text != "Same headline")
+
     def test_scan_snapshots_round_trip_in_their_own_collection(self):
         store = {}
         db = MagicMock()
