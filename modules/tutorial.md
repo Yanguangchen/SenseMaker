@@ -223,7 +223,9 @@ To manage or delete saved records:
 4. Click **Review deletion of … record(s)** and check the preview. Click **Permanently delete … record(s)** to proceed, or **Cancel deletion** to keep them. Deletion cannot be undone and affects every user of the shared library.
 5. Read the result. Records changed by another operation after you loaded them are kept; refresh to review their current versions. If a deletion cannot be confirmed, reload the library before retrying.
 
-To clear a dataset, filter by its Custom title and select its records. You can delete up to 200 records per confirmation; use **Records per page** and repeat for larger datasets. Changing a filter, search, page or selection cancels the previous review, so confirm only the selection currently shown.
+To delete a whole dataset, choose its title under **Dataset**, click **Review dataset deletion**, inspect the full preview, then click **Permanently delete dataset**. **Cancel dataset deletion** keeps the data. This action includes all reviewed records under that title, across all pages, sources and statuses; table search and source/status filters do not restrict it. Large datasets are processed in batches under one confirmation, so you do not need to select each page. Records changed or added since loading are kept, and you can refresh and review them again. A dataset disappears from the list when no records remain.
+
+If a batch fails, the result shows how many records were confirmed deleted and how many remaining deletions could not be confirmed. Refresh the library before retrying. Individual-record deletion still supports up to 200 selected records per confirmation. Changing a filter, search or page cancels the previous deletion review.
 
 Deleting a record removes its saved sentiment analysis too. Timeline summaries, saved source links, saved GenCite analyses and downloaded exports remain. The current session's collection copies and loaded results are cleared of deleted records. Collecting and saving a URL again can add it back to the library. An analysis already running cannot recreate a source that has been deleted.
 

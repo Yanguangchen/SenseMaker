@@ -17,6 +17,7 @@ import firebase_admin
 from firebase_admin import credentials, firestore
 
 from modules.config import firebase_credentials, get_setting
+from modules.analysis_library import dataset_key
 from modules.engagement import add_check, is_tracked
 from modules.signals import NON_CONTENT_TYPES
 
@@ -231,12 +232,17 @@ def load_record_catalog(db: firestore.Client) -> List[PostData]:
             for doc in query.stream(timeout=30)]
 
 
-def delete_records(db: firestore.Client, expected_versions: Dict[str, str]) -> Dict[str, List[str]]:
-    """Delete the exact reviewed versions atomically; keep concurrently changed records."""
+def _validate_record_versions(expected_versions: Dict[str, str]) -> None:
     if any(not isinstance(ident, str) or not ident or "/" in ident or ident in {".", ".."}
            or len(ident.encode("utf-8")) > 1500 or not isinstance(version, str) or not version
            for ident, version in expected_versions.items()):
         raise ValueError("Reload records and select valid record versions.")
+
+
+def delete_records(db: firestore.Client, expected_versions: Dict[str, str], *,
+                   dataset: str | None = None) -> Dict[str, List[str]]:
+    """Delete the exact reviewed versions atomically; keep concurrently changed records."""
+    _validate_record_versions(expected_versions)
     if len(expected_versions) > 200:
         raise ValueError("Delete at most 200 records at a time.")
     if not expected_versions:
@@ -247,7 +253,8 @@ def delete_records(db: firestore.Client, expected_versions: Dict[str, str]) -> D
     @firestore.transactional
     def remove(transaction: Any) -> Dict[str, List[str]]:
         snapshots = {doc.id: doc for doc in db.get_all(
-            list(refs.values()), field_paths=[], transaction=transaction, timeout=30)}
+            list(refs.values()), field_paths=["custom_title"] if dataset is not None else [],
+            transaction=transaction, timeout=30)}
         result: Dict[str, List[str]] = {"deleted": [], "skipped": [], "missing": []}
         for ident, ref in refs.items():
             snapshot = snapshots[ident]
@@ -255,9 +262,36 @@ def delete_records(db: firestore.Client, expected_versions: Dict[str, str]) -> D
                 result["missing"].append(ident)
             elif snapshot.update_time.isoformat() != expected_versions[ident]:
                 result["skipped"].append(ident)
+            elif dataset is not None and dataset_key(snapshot.to_dict() or {}) != dataset:
+                result["skipped"].append(ident)
             else:
                 transaction.delete(ref)
                 result["deleted"].append(ident)
         return result
 
     return remove(db.transaction(max_attempts=3))
+
+
+def delete_dataset_records(db: firestore.Client, dataset: str, expected_versions: Dict[str, str],
+                           on_progress: Any = None) -> Dict[str, List[str]]:
+    """Delete a reviewed dataset in bounded transactions, reporting partial progress."""
+    if not isinstance(dataset, str) or not (dataset == "untitled:" or
+                                          (dataset.startswith("title:") and dataset[6:].strip())):
+        raise ValueError("Choose a single saved dataset.")
+    # Validate the entire review before the first write, including later chunks.
+    _validate_record_versions(expected_versions)
+    result: Dict[str, List[str]] = {"deleted": [], "skipped": [], "missing": [], "unconfirmed": []}
+    ids = list(expected_versions)
+    for start in range(0, len(ids), 200):
+        batch_ids = ids[start:start + 200]
+        try:
+            part = delete_records(db, {ident: expected_versions[ident] for ident in batch_ids}, dataset=dataset)
+        except Exception:
+            # Earlier transactions may have committed; never hide that progress.
+            result["unconfirmed"] = ids[start:]
+            break
+        for key in ("deleted", "skipped", "missing"):
+            result[key].extend(part[key])
+        if on_progress:
+            on_progress(min(start + 200, len(ids)), len(ids))
+    return result
