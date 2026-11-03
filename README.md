@@ -669,14 +669,21 @@ The dashboard has **four pages**, accessible from the left toolbar:
 
 ### Tab 2 — Sentiment Analysis
 
-- Choose **Dataset to analyze** before loading: datasets group saved records by **Custom title**,
+- **Data selection** offers **Manual selection** and **Last scraped data** prominently above analysis settings.
+- In Manual selection, choose **Dataset to analyze** before loading: datasets group saved records by **Custom title**,
   with **Untitled (older records)** for legacy data. No dataset is preselected; **Refresh datasets**
   reloads the list. Reusing a title groups records together; datasets are not private projects or immutable snapshots.
+- **Last scraped data** uses the exact record IDs from the most recently completed collection in this browser session,
+  across all five scraping options. It shows the source/title/count and offers **Save and load last scraped data**
+  for unsaved collections, using the normal upsert rules. Failed/empty collections never fall back to an older batch.
+  Use Manual selection to reopen saved data after a new browser session.
 - Load records from the selected dataset by status (`all`, `pending`, `processed`, `error`),
-  defaulting to `pending`. Dataset/source filters apply before the load limit.
+  defaulting to `pending` for manual selection and `all` for the latest scrape. Membership/status filters apply before the load limit.
+  Manual selection lists all saved sources by default, without depending on the Facebook source library.
 - No records are selected automatically. Choose individual text previews or explicitly **Select all loaded records**.
   The Run button shows the exact selection count and is disabled when the selection is empty.
-- Changing dataset, source scope, status or load limit clears previous loaded results and selections.
+- Changing selection mode, dataset, source scope, status or load limit clears previous loaded results and selections.
+  A newly completed scrape also invalidates a loaded Last scraped data selection.
   **Load processed records** is also limited to the chosen dataset; the timeline remains scoped to sources.
 - Choose Gemini or ChatGPT, select records and run analysis (translation, sentiment, risk score, topics)
 - **Live progress panel** shows retry status when rate-limited (429 errors)
@@ -772,7 +779,7 @@ Use this sequence for the most reliable results:
 5) New valid links are saved and selected automatically when you finish editing. Click **Collect posts** and inspect results. Use **Clear** to deselect all sources and clear pasted links.
 6) Enter a **Custom title** and click **Save data to cloud** to persist to Firestore.
 7) Switch to the **Sentiment Analysis** tab:
-   - Choose **Dataset to analyze** using its saved Custom title, then click **Load records from Firestore** (status: `pending`)
+   - Choose **Manual selection**, select **Dataset to analyze** using its saved Custom title, then click **Load records from Firestore** (status: `pending`). Or choose **Last scraped data** and click **Save and load last scraped data** / **Load last scraped data** (status: `all`).
    - Select the records you want to analyze; no records are preselected
    - Choose an AI provider, select records, check the exact count, and click **Run Gemini on … selected records** or **Run ChatGPT on … selected records**
    - View sentiment cards, risk scores, and translations inline
