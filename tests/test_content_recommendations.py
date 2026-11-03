@@ -24,7 +24,7 @@ def row(ident="p1", sentiment="Anger"):
             "analysis": {"sentiment": sentiment, "topics": ["delivery"]}}
 
 
-def recommendation(keyword="Acme delayed delivery help", ident="p1"):
+def recommendation(keyword="Acme delayed delivery help", evidence_id="E1"):
     return {"concern": "Customers report late deliveries without updates.", "primary_keyword": keyword,
             "supporting_keywords": ["Acme delivery tracking", "Acme delivery support"],
             "search_intent": "Get an update on a late delivery", "title": "How to get an Acme delivery update",
@@ -33,7 +33,7 @@ def recommendation(keyword="Acme delayed delivery help", ident="p1"):
             "draft": "Waiting without an update is frustrating. Check [verify tracking link] for the latest status.",
             "facts_to_verify": ["Verify tracking link and support hours"],
             "measurement": "Compare delivery-related Anger/Anxiety shares on the same sources over two weeks.",
-            "evidence": [{"record_id": ident, "source": "raw_text", "quote": "My Acme delivery is late"}]}
+            "evidence_ids": [evidence_id]}
 
 
 def reply(value, provider):
@@ -72,6 +72,7 @@ class ContentPlanTests(unittest.TestCase):
                 self.assertEqual(sent.get_header("X-goog-api-key"), "private-gemini")
                 self.assertIn("responseJsonSchema", body["generationConfig"])
                 prompt = body["contents"][0]["parts"][0]["text"]
+                schema = body["generationConfig"]["responseJsonSchema"]
             else:
                 resolve.assert_not_called()
                 self.assertEqual(sent.get_header("Authorization"), "Bearer private-openai")
@@ -79,6 +80,11 @@ class ContentPlanTests(unittest.TestCase):
                 self.assertTrue(body["text"]["format"]["strict"])
                 self.assertFalse(body["store"])
                 prompt = body["input"]
+                schema = body["text"]["format"]["schema"]
+            properties = schema["properties"]["recommendations"]["items"]["properties"]
+            self.assertEqual(properties["evidence_ids"]["items"]["enum"], ["E1"])
+            self.assertEqual(properties["draft"]["maxLength"], 2000)
+            self.assertNotIn("evidence", properties)
             self.assertIn('"language": "Thai"', prompt)
             self.assertIn('"focus": "delivery"', prompt)
             self.assertIn("untrusted DATA", prompt)
@@ -91,6 +97,8 @@ class ContentPlanTests(unittest.TestCase):
                     self.generate(**kwargs)
             with self.assertRaises(ValueError):
                 self.generate([row(str(i)) for i in range(31)])
+            with self.assertRaisesRegex(ValueError, "no usable source text"):
+                self.generate([{**row(), "raw_text": " " * 1200 + "content outside excerpt"}])
             with patch.dict(os.environ, {"OPENAI_API_KEY": ""}), self.assertRaises(recs.RecommendationError):
                 self.generate(provider="openai")
             request.assert_not_called()
@@ -113,10 +121,10 @@ class ContentPlanTests(unittest.TestCase):
         self.assertTrue(record["excerpted"])
         self.assertEqual(record["url"], "")
 
-    def test_unknown_ids_fabricated_quotes_parent_evidence_and_malformed_plans_are_rejected(self):
-        mutations = [lambda r: r["evidence"][0].update(record_id="invented"),
-                     lambda r: r["evidence"][0].update(quote="The product is unsafe"),
-                     lambda r: r["evidence"][0].update(source="parent_text"),
+    def test_unknown_references_and_malformed_plans_are_rejected_with_specific_reasons(self):
+        mutations = [lambda r: r.update(evidence_ids=["invented"]),
+                     lambda r: r.update(evidence_ids=[]),
+                     lambda r: r.update(evidence_ids=[{"source": "parent_text"}]),
                      lambda r: r.update(outline="not a list"),
                      lambda r: r.update(primary_keyword=""),
                      lambda r: r.update(format="Made up format")]
@@ -127,16 +135,99 @@ class ContentPlanTests(unittest.TestCase):
                 recs._validate({"recommendations": [bad]}, recs.source_records([row()]))
         with self.assertRaisesRegex(recs.RecommendationError, "do not support"):
             recs._validate({"recommendations": []}, recs.source_records([row()]))
-        with self.assertRaises(recs.RecommendationError):
-            recs._validate({"recommendations": [recommendation(), recommendation()]}, recs.source_records([row()]))
+
+    def test_duplicates_and_bad_briefs_do_not_discard_a_valid_recommendation(self):
+        bad = recommendation("Another keyword", "unknown")
+        warnings = []
+        result = recs._validate({"recommendations": [bad, recommendation(), recommendation()]},
+                                recs.source_records([row()]), warnings=warnings)
+        self.assertEqual(len(result), 1)
+        self.assertEqual(len(warnings), 2)
+        self.assertIn("unknown source reference", warnings[0])
+        self.assertIn("duplicate primary keyword", warnings[1])
 
     def test_ranking_uses_distinct_cited_records_not_provider_scores_or_repeated_quotes(self):
-        first = recommendation("Acme customer experience", "happy")
+        first = recommendation("Acme customer experience", "E2")
         second = recommendation()
-        second["evidence"] *= 3
+        second["evidence_ids"] *= 3
         result = recs._validate({"recommendations": [first, second]}, recs.source_records([row(), row("happy", "Joy")]))
         self.assertEqual(result[0]["primary_keyword"], second["primary_keyword"])
         self.assertEqual((result[0]["cited_records"], result[0]["concern_records"]), (1, 1))
+        self.assertEqual(len(result[0]["evidence"]), 1)
+
+    def test_source_references_preserve_multilingual_text_and_never_use_provider_quotes(self):
+        for original in ("ดี", "ខ្ញុំមិនទាន់ទទួលទំនិញទេ។", "จัดส่งช้า\n\tไม่มีการแจ้งเตือน", "Cafe\u0301\u00a0— delayed\r\nagain"):
+            with self.subTest(original=original):
+                record = recs.source_records([{**row(), "raw_text": original,
+                                               "parent_text": "This is not the commenter speaking."}])
+                item = recommendation()
+                item["evidence"] = [{"record_id": "fake", "quote": "A fabricated translation", "url": "https://bad.test"}]
+                result = recs._validate({"recommendations": [item]}, record)[0]
+                self.assertEqual(result["evidence"][0]["quote"], original)
+                self.assertEqual(result["evidence"][0]["record_id"], "p1")
+                self.assertEqual(result["evidence"][0]["url"], "https://example.com/p1")
+                self.assertEqual(len(recs.evidence_catalog(record)), 1)
+
+    def test_comment_references_resolve_to_the_correct_comment_and_record(self):
+        records = recs.source_records([{**row(), "comments": ["First comment", "Second comment"]}, row("p2")])
+        result = recs._validate({"recommendations": [recommendation(evidence_id="E3")]}, records)[0]
+        self.assertEqual(result["evidence"][0]["source"], "comment_2")
+        self.assertEqual(result["evidence"][0]["quote"], "Second comment")
+        self.assertEqual(result["evidence"][0]["record_id"], "p1")
+
+    def test_invalid_response_is_repaired_once_for_each_provider(self):
+        bad = recommendation()
+        bad["draft"] = "x" * 2001
+        for provider in ("gemini", "openai"):
+            target = "modules.processor._generate_content" if provider == "gemini" else "modules.openai.generate_content"
+            with self.subTest(provider=provider), patch(target, side_effect=[
+                    json.dumps({"recommendations": [bad]}), json.dumps({"recommendations": [recommendation()]})]) as request, \
+                 patch("modules.content_recommendations.resolve_model", return_value="models/gemini-2.5-flash"):
+                plan = self.generate(provider=provider)
+            self.assertEqual(request.call_count, 2)
+            self.assertIn("draft must contain 1–2000 characters", request.call_args.args[0])
+            self.assertEqual(plan["warnings"], [])
+            self.assertEqual(len(plan["recommendations"]), 1)
+
+    def test_malformed_json_is_repaired_but_validation_retries_are_bounded(self):
+        good = json.dumps({"recommendations": [recommendation()]})
+        with patch("modules.openai.generate_content", side_effect=["not JSON", good]) as request:
+            self.generate(provider="openai")
+            self.assertEqual(request.call_count, 2)
+            self.assertIn("not a complete JSON object", request.call_args.args[0])
+        with patch("modules.openai.generate_content", return_value="not JSON private-openai") as request:
+            with self.assertRaisesRegex(recs.RecommendationError, "not a complete JSON object") as caught:
+                self.generate(provider="openai")
+            self.assertEqual(request.call_count, 2)
+            self.assertNotIn("private-openai", str(caught.exception))
+
+    def test_partial_response_returns_valid_briefs_with_warnings_without_retry(self):
+        bad = recommendation("Bad idea", "E999")
+        with patch("modules.openai.generate_content", return_value=json.dumps(
+                {"recommendations": [recommendation(), bad]})) as request:
+            plan = self.generate(provider="openai")
+        self.assertEqual(request.call_count, 1)
+        self.assertEqual(len(plan["recommendations"]), 1)
+        self.assertIn("unknown source reference", plan["warnings"][0])
+
+    def test_empty_response_is_not_retried_as_a_validation_failure(self):
+        with patch("modules.openai.generate_content", return_value='{"recommendations": []}') as request:
+            with self.assertRaisesRegex(recs.RecommendationError, "do not support"):
+                self.generate(provider="openai")
+        self.assertEqual(request.call_count, 1)
+
+    def test_no_repair_request_is_sent_after_the_time_budget(self):
+        now = [0]
+
+        def late_response(*args, **kwargs):
+            now[0] = 121
+            return json.dumps({"recommendations": [recommendation(evidence_id="unknown")]})
+
+        with patch("modules.content_recommendations.time.monotonic", side_effect=lambda: now[0]), \
+             patch("modules.openai.generate_content", side_effect=late_response) as request:
+            with self.assertRaises(recs.RecommendationError):
+                self.generate(provider="openai")
+        self.assertEqual(request.call_count, 1)
 
     def test_temporary_failure_retries_but_auth_errors_are_redacted_and_not_retried(self):
         good = json.dumps({"recommendations": [recommendation()]})
@@ -233,6 +324,22 @@ class ContentWorkspaceTests(unittest.TestCase):
         self.assertNotIn(PLAN, app.session_state)
         self.assertTrue(app.error)
         self.assertNotIn("private-gemini", app.error[0].value)
+
+    def test_partial_plan_renders_downloads_and_a_visible_notice(self):
+        self.request.return_value = json.dumps({"recommendations": [
+            recommendation(), recommendation("Another idea", "E999")]})
+        app = self.generate()
+        self.assertEqual(len(app.get("download_button")), 2)
+        self.assertTrue(any("Some suggestions were omitted" in warning.value for warning in app.warning))
+        self.assertTrue(any("unknown source reference" in text.value for text in app.text))
+        self.request.assert_called_once()
+
+    def test_ui_recovers_from_invalid_provider_output_automatically(self):
+        self.request.side_effect = [json.dumps({"recommendations": [recommendation(evidence_id="bad")]}),
+                                    json.dumps({"recommendations": [recommendation()]})]
+        app = self.generate()
+        self.assertFalse(list(app.error))
+        self.assertEqual(self.request.call_count, 2)
 
 
 if __name__ == "__main__":
