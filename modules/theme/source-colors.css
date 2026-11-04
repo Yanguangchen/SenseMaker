@@ -17,7 +17,7 @@
 
 .sm-other-source-reddit,
 [class*="st-key-sm_dataset_card_reddit_"],
-[data-sm-source="reddit"] { --sm-source-color: #ff4500; --sm-source-ink: #fff; }
+[data-sm-source="reddit"] { --sm-source-color: #ff4500; --sm-source-ink: #111; }
 
 [class*="st-key-sm_dataset_card_other_"],
 [class*="st-key-sm_dataset_card_mixed_"],
