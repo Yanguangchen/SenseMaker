@@ -256,13 +256,18 @@ to narrow the table. **Back to datasets** returns to the cards and keeps your da
 **Refresh datasets** reloads changes from the cloud. Pending, processed, error, removed
 and legacy records are supported.
 
-Select individual **Records to delete**, or **Select all records on this page**, then click
+Each record has a **Delete** button. Click it to review that record, then choose
+**Permanently delete record** or **Cancel deletion** in the confirmation beside it.
+The record disappears and dataset counts update after successful deletion.
+Expand **View record table** for the full metadata table.
+
+For bulk deletion, select individual **Records to delete**, or **Select all records on this page**, then click
 **Review deletion of … record(s)**. Check the preview before **Permanently delete … record(s)**,
 or use **Cancel deletion**. Nothing starts selected. Each individual-record deletion covers at most 200 records.
 Changing a filter,
 page, search or selection invalidates the deletion preview.
 
-To remove a whole dataset, choose its title under **Dataset**, click **Review dataset deletion**,
+To remove a whole dataset, choose its title under **Dataset**, expand **Delete an entire dataset**, click **Review dataset deletion**,
 check the preview, then **Permanently delete dataset**. This includes all reviewed records under
 that title across pages, sources and statuses, regardless of the table's other filters. Large
 datasets are deleted in batches under one confirmation. Records changed or added since loading

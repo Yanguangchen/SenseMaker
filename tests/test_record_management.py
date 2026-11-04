@@ -335,6 +335,105 @@ class RecordManagementUITests(unittest.TestCase):
         self.assertEqual(self.app.multiselect(key="record_manager_selection").value, [])
         self.assertEqual(self.app.selectbox(key="record_manager_dataset").value, "title:Campaign A")
 
+    def test_row_delete_reviews_only_clicked_record_and_updates_dataset(self):
+        self.rows[0]["title"] = self.rows[1]["title"] = "Same page title"
+        self.app.button(key="record_manager_card_featured_title:Campaign A").click().run()
+        self.app.session_state["firestore_rows"] = self.rows.copy()
+        self.app.button(key="record_manager_select_all").click().run()
+        self.app.button(key="record_manager_delete_b").click().run()
+        self.assertFalse(self.app.exception)
+        self.delete.assert_not_called()
+        self.assertEqual(self.app.session_state["record_manager_row_pending"], {"b": self.rows[1]["_version"]})
+        self.assertEqual(self.app.multiselect(key="record_manager_selection").value, [])
+        self.assertIn("cannot be undone", self.app.warning[0].value)
+        self.assertNotIn("record_manager_delete_c", [button.key for button in self.app.button])
+        self.delete.return_value = {"deleted": ["b"], "skipped": [], "missing": []}
+        self.app.button(key="record_manager_row_confirm_b").click().run()
+        self.assertFalse(self.app.exception)
+        self.delete.assert_called_once_with("db", {"b": self.rows[1]["_version"]})
+        self.assertEqual([row["_id"] for row in self.app.session_state["record_manager_rows"]], ["a", "c"])
+        self.assertEqual([row["_id"] for row in self.app.session_state["firestore_rows"]], ["a", "c"])
+        self.assertEqual(self.app.dataframe[0].value["ID"].tolist(), ["a"])
+        self.assertEqual(self.app.selectbox(key="record_manager_dataset").value, "title:Campaign A")
+        self.assertNotIn("record_manager_row_pending", self.app.session_state)
+        self.assertIn("Deleted 1", self.app.success[0].value)
+
+    def test_row_cancel_and_switching_rows_never_delete(self):
+        self.loaded()
+        self.app.button(key="record_manager_delete_a").click().run()
+        self.app.button(key="record_manager_delete_b").click().run()
+        self.assertEqual(self.app.session_state["record_manager_row_pending"], {"b": self.rows[1]["_version"]})
+        self.assertNotIn("record_manager_row_confirm_a", [button.key for button in self.app.button])
+        self.app.button(key="record_manager_row_cancel_b").click().run()
+        self.assertFalse(self.app.exception)
+        self.assertNotIn("record_manager_row_pending", self.app.session_state)
+        self.assertEqual(len(self.app.session_state["record_manager_rows"]), 3)
+        self.delete.assert_not_called()
+
+    def test_row_review_is_cleared_by_navigation_refresh_and_record_changes(self):
+        self.rows += [record(f"extra-{i}") for i in range(60)]
+        self.loaded()
+        for change in ("dataset", "source", "status", "search", "page_size", "page", "refresh", "version", "back"):
+            with self.subTest(change=change):
+                self.app.button(key="record_manager_back").click().run()
+                self.app.button(key="record_manager_card_featured_title:Campaign A").click().run()
+                ident = self.app.dataframe[0].value["ID"].iloc[0]
+                self.app.button(key=f"record_manager_delete_{ident}").click().run()
+                if change in {"dataset", "source", "status", "page_size", "page"}:
+                    key, value = {"dataset": ("dataset", "title:Campaign B"), "source": ("platform", "Custom website"),
+                                  "status": ("status", "processed"), "page_size": ("page_size", 25), "page": ("page", 2)}[change]
+                    self.app.selectbox(key=f"record_manager_{key}").select(value).run()
+                elif change == "search":
+                    self.app.text_input(key="record_manager_search").set_value("example.com/b").run()
+                elif change == "version":
+                    next(row for row in self.rows if row["_id"] == ident)["_version"] = "2026-11-05T00:00:00+00:00"
+                    self.app.run()
+                else:
+                    self.app.button(key=f"record_manager_{change}").click().run()
+                self.assertFalse(self.app.exception)
+                self.assertNotIn("record_manager_row_pending", self.app.session_state)
+                self.assertFalse(any(button.key.startswith("record_manager_row_confirm_") for button in self.app.button))
+        self.delete.assert_not_called()
+
+    def test_row_bulk_and_dataset_reviews_are_mutually_exclusive(self):
+        self.app.button(key="record_manager_card_featured_title:Campaign A").click().run()
+        self.review()
+        self.app.button(key="record_manager_delete_b").click().run()
+        self.assertNotIn("record_manager_pending", self.app.session_state)
+        self.app.button(key="record_manager_select_all").click().run()
+        self.assertNotIn("record_manager_row_pending", self.app.session_state)
+        self.app.button(key="record_manager_delete_a").click().run()
+        self.app.multiselect(key="record_manager_selection").set_value(["b"]).run()
+        self.assertNotIn("record_manager_row_pending", self.app.session_state)
+        self.app.button(key="dataset_delete_review").click().run()
+        self.app.button(key="record_manager_delete_a").click().run()
+        self.assertNotIn("dataset_delete_pending", self.app.session_state)
+        self.app.button(key="dataset_delete_review").click().run()
+        self.assertNotIn("record_manager_row_pending", self.app.session_state)
+        self.assertFalse(self.app.exception)
+        self.delete.assert_not_called()
+        self.delete_dataset.assert_not_called()
+
+    def test_row_delete_failure_requires_refresh_and_clears_review(self):
+        self.loaded()
+        self.app.button(key="record_manager_delete_a").click().run()
+        self.delete.side_effect = RuntimeError("offline")
+        self.app.button(key="record_manager_row_confirm_a").click().run()
+        self.assertFalse(self.app.exception)
+        self.assertNotIn("record_manager_row_pending", self.app.session_state)
+        self.assertNotIn("record_manager_rows", self.app.session_state)
+        self.assertIn("could not be confirmed", self.app.error[0].value)
+
+    def test_deleting_last_row_keeps_dataset_scope(self):
+        self.app.button(key="record_manager_card_featured_title:Campaign B").click().run()
+        self.app.button(key="record_manager_delete_c").click().run()
+        self.delete.return_value = {"deleted": ["c"], "skipped": [], "missing": []}
+        self.app.button(key="record_manager_row_confirm_c").click().run()
+        self.assertFalse(self.app.exception)
+        self.assertEqual(self.app.selectbox(key="record_manager_dataset").value, "title:Campaign B")
+        self.assertTrue(any("No records match" in info.value for info in self.app.info))
+        self.assertEqual([row["_id"] for row in self.app.session_state["record_manager_rows"]], ["a", "b"])
+
     def test_deleting_last_matching_records_keeps_filter_instead_of_showing_other_datasets(self):
         self.loaded()
         self.app.selectbox(key="record_manager_dataset").select("title:Campaign A").run()
