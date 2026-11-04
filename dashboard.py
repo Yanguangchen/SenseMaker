@@ -26,8 +26,12 @@ from modules.analysis_library import (
 from modules.analysis_dataset_ui import render_dataset_editor
 from modules.recent_collection import collection_snapshot
 from modules.record_management_ui import render_record_management
+from modules.dataset_cards import (
+    apply_dataset_card_theme, featured_datasets, local_dataset_date, render_dataset_cards, viewer_timezone,
+)
 from modules.record_state import purge_record_caches
 from modules.navigation import dashboard_views
+from modules.scrape_navigation import render_scrape_navigation
 from modules.content_recommendations_ui import render_content_workspace
 from modules.tutorial_ui import render_tutorial_workspace
 from modules.ai_errors import AIError, redact
@@ -189,6 +193,12 @@ def _fetch_analysis_datasets(source_urls: list[str] | None) -> list[dict[str, An
     return dataset_options(rows, source_urls)
 
 
+def _toggle_analysis_dataset(key: str) -> None:
+    selected = list(st.session_state.get("analysis_datasets", []))
+    st.session_state["analysis_datasets"] = ([item for item in selected if item != key]
+                                            if key in selected else [*selected, key])
+
+
 def _render_analysis_datasets(source_urls: list[str] | None, ready: bool) -> list[str]:
     def refresh() -> None:
         st.session_state.pop("analysis_dataset_catalog", None)
@@ -204,18 +214,36 @@ def _render_analysis_datasets(source_urls: list[str] | None, ready: bool) -> lis
     if catalog.get("error"):
         st.error("Datasets could not be loaded. Click Refresh datasets to retry.")
     options = {row["key"]: row for row in catalog.get("rows", [])}
+    local_tz = viewer_timezone()
     def label(key: str) -> str:
         row = options[key]
-        return (f"{row['title']} · {dataset_date_label(row)} · {', '.join(row.get('sources', []))} · "
+        return (f"{row['title']} · {local_dataset_date(row, local_tz, seconds=True)} · {', '.join(row.get('sources', []))} · "
                 f"{row['count']} record{'s' if row['count'] != 1 else ''} · {row['pending']} pending")
 
     # Preserve a single choice from sessions opened before multiple selection existed.
     legacy = st.session_state.pop("analysis_dataset", None)
     current = st.session_state.get("analysis_datasets", [legacy] if legacy else [])
     st.session_state["analysis_datasets"] = list(dict.fromkeys(key for key in current if key in options))
-    selected = st.multiselect("Datasets to analyze", list(options), key="analysis_datasets",
-                              placeholder="Choose one or more saved datasets", disabled=not ready or not options,
-                              format_func=label)
+    if options:
+        apply_dataset_card_theme()
+        is_today, featured = featured_datasets(list(options.values()), datetime.now(local_tz))
+        st.markdown("#### Today's datasets" if is_today else "#### Latest datasets")
+        st.caption((f"{len(featured)} datasets saved today" if is_today else
+                    f"No datasets saved today. Showing the {len(featured)} latest datasets")
+                   + f" · Newest first · Times in {local_tz}")
+        st.caption("Select one or more cards to analyze together. Select a chosen card again to remove it.")
+        render_dataset_cards(featured, "featured", local_tz, key_prefix="analysis_dataset",
+                             on_select=_toggle_analysis_dataset, selected=st.session_state["analysis_datasets"])
+    with st.expander("Choose older datasets or adjust selection"):
+        selected = st.multiselect("Datasets to analyze", list(options), key="analysis_datasets",
+                                  placeholder="Search all saved datasets", disabled=not ready or not options,
+                                  format_func=label,
+                                  help="Includes today's and older datasets from your selected sources. "
+                                       "Type a dataset name, source or date to find it.")
+    if selected:
+        st.caption(f"{len(selected)} dataset{'s' if len(selected) != 1 else ''} selected · "
+                   f"{sum(options[key]['count'] for key in selected):,} records")
+        st.text("Selected: " + ", ".join(options[key]["title"] for key in selected))
     if ready and not options and not catalog.get("error"):
         st.info("No saved datasets match these sources. Save a collection with a Custom title, then refresh datasets.")
     return selected
@@ -1221,16 +1249,59 @@ button[data-testid="stExpandSidebarButton"], [data-testid="stSidebarCollapseButt
 }
 
 /* Step modals: darken and blur the workspace behind the dialog so one step holds attention. */
-div[data-testid="stDialog"] > div {
+div[data-testid="stDialog"] {
   background-color: rgba(9, 13, 20, 0.58) !important;
   backdrop-filter: blur(7px) saturate(85%);
   -webkit-backdrop-filter: blur(7px) saturate(85%);
 }
-div[data-testid="stDialog"] div[role="dialog"] {
+div[data-testid="stDialog"] [role="dialog"] {
   box-shadow: 0 26px 64px rgba(8, 12, 20, 0.45);
 }
+
+/* A brief entrance when content appears; stable widgets keep their DOM nodes.
+   Backwards fill releases the animation after it finishes, so hover effects
+   and positioned children retain their normal behavior. */
+@keyframes sm-load-fade {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+@keyframes sm-load-rise {
+  from { opacity: 0; translate: 0 12px; }
+  to { opacity: 1; translate: 0 0; }
+}
+@media (prefers-reduced-motion: no-preference) {
+  .st-key-sm_views,
+  html.sm-navigation-ready .sm-sidebar {
+    animation: sm-load-fade 320ms cubic-bezier(0.22, 1, 0.36, 1) backwards;
+  }
+
+  .st-key-auth_gateway,
+  .st-key-sm_source_card_facebook,
+  .st-key-sm_source_card_x,
+  .st-key-sm_source_card_news,
+  .st-key-sm_source_card_website {
+    /* Individual translate keeps the existing hover transform independent. */
+    animation: sm-load-rise 460ms cubic-bezier(0.22, 1, 0.36, 1) var(--sm-load-delay, 0ms) backwards;
+  }
+  .st-key-sm_source_card_facebook { --sm-load-delay: 40ms; }
+  .st-key-sm_source_card_x { --sm-load-delay: 80ms; }
+  .st-key-sm_source_card_news { --sm-load-delay: 120ms; }
+  .st-key-sm_source_card_website { --sm-load-delay: 160ms; }
+
+  /* Keyboard users can interact immediately, including during the stagger. */
+  .st-key-sm_views:focus-within,
+  html.sm-navigation-ready .sm-sidebar:focus-within,
+  .st-key-auth_gateway:focus-within,
+  .st-key-sm_source_card_facebook:focus-within,
+  .st-key-sm_source_card_x:focus-within,
+  .st-key-sm_source_card_news:focus-within,
+  .st-key-sm_source_card_website:focus-within {
+    opacity: 1 !important;
+    translate: none !important;
+  }
+}
 @media (prefers-reduced-motion: reduce) {
-  div[data-testid="stDialog"] > div { backdrop-filter: none; -webkit-backdrop-filter: none; }
+  div[data-testid="stDialog"] { backdrop-filter: none; -webkit-backdrop-filter: none; }
   .stApp button,
   .stApp a,
   .stApp summary,
@@ -1294,7 +1365,7 @@ def _render_cloud_save(records: List[Dict[str, Any]], title_key: str, save_key: 
 def _render_auto_save_title(key: str) -> str:
     return st.text_input("Dataset title (optional)", key=key, max_chars=160,
                          placeholder="Leave blank for a name with the source and collection time",
-                         help="Collected records save automatically. This title groups them in Sentiment Analysis and Manage records.")
+                         help="Collected records save automatically. This title groups them in Sentiment Analysis and Clean & manage data.")
 
 
 def _autosave_collection(collection: dict[str, Any], source: str, custom_title: str = "") -> None:
@@ -1341,7 +1412,7 @@ def _render_autosave_status(collection: dict[str, Any], retry_key: str,
     save = collection.get("cloud_save") or {}
     if save.get("state") == "saved":
         st.success(f"Saved {save['count']} record(s) to the cloud.")
-        st.caption(f"Dataset: {save['title']} · Available in Sentiment Analysis and Manage records.")
+        st.caption(f"Dataset: {save['title']} · Available in Sentiment Analysis and Clean & manage data.")
     elif save.get("state") == "error":
         st.error("Cloud saving failed. Some records may already be saved. Your collected data is still in this session; "
                  "keep this page open and retry saving before collecting again.")
@@ -1566,7 +1637,7 @@ def _render_collect_controls(
     facebook_session: FacebookSession, *, use_headless: bool, scroll_times: int,
     reddit_limit: int, reddit_comments: int,
 ) -> None:
-    # Keep each source's results and save controls independent when switching tabs.
+    # Keep each source's results and save controls independent when switching sources.
     result_key = "last_scrape" if platform == "facebook" else "last_reddit_scrape"
     title_key = "custom_title_value" if platform == "facebook" else "reddit_custom_title_value"
     save_key = "save_last_results_btn" if platform == "facebook" else "save_reddit_results_btn"
@@ -2458,6 +2529,31 @@ def _render_analysis_processed_section(picked: Dict[str, Any], status_filter: st
         _render_processed_records(processed_rows)
 
 
+def _select_scrape_source(source: str | None) -> None:
+    st.session_state["scrape_source"] = source
+    _close_focus_modal()
+    if st.session_state.get("x_focus_open"):
+        _close_x_collection_dialog()
+    if source in {"facebook", "website"}:
+        _open_focus_modal(source)
+    elif source == "x":
+        _open_x_collection_dialog()
+
+
+def _render_scrape_workspace(user_email: str, facebook_session: FacebookSession) -> None:
+    render_scrape_navigation(_select_scrape_source)
+    with st.container(key="sm_scrape_panel_facebook"):
+        _render_collection_workspace("facebook", user_email, facebook_session)
+    with st.container(key="sm_scrape_panel_reddit"):
+        _render_collection_workspace("reddit", user_email, facebook_session)
+    with st.container(key="sm_scrape_panel_news"):
+        _render_news_workspace()
+    with st.container(key="sm_scrape_panel_x"):
+        _render_x_workspace(user_email)
+    with st.container(key="sm_scrape_panel_website"):
+        _render_website_workspace(user_email)
+
+
 def main() -> None:
     load_environment()
     _bridge_secrets_to_env()
@@ -2474,20 +2570,13 @@ def main() -> None:
                             _get_facebook_session(_facebook_storage_path()))
     except Exception:
         facebook_session = FacebookSession()
-    scrape_tab, analysis_tab, trends_tab, content_tab, gencite_tab, records_tab, tutorial_tab = dashboard_views(user_email, facebook_session)
+    scrape_tab, records_tab, analysis_tab, trends_tab, content_tab, gencite_tab, tutorial_tab = dashboard_views(user_email, facebook_session)
 
     with scrape_tab:
-        facebook_tab, reddit_tab, news_tab, x_tab, website_tab = st.tabs(["Facebook", "Reddit", "Online news", "X", "Custom website"])
-        with facebook_tab:
-            _render_collection_workspace("facebook", user_email, facebook_session)
-        with reddit_tab:
-            _render_collection_workspace("reddit", user_email, facebook_session)
-        with news_tab:
-            _render_news_workspace()
-        with x_tab:
-            _render_x_workspace(user_email)
-        with website_tab:
-            _render_website_workspace(user_email)
+        _render_scrape_workspace(user_email, facebook_session)
+
+    with records_tab:
+        render_record_management()
 
     with analysis_tab:
         analysis_sources = _render_analysis_tab(user_email)
@@ -2502,9 +2591,6 @@ def main() -> None:
 
     with gencite_tab:
         render_gencite_workspace(user_email)
-
-    with records_tab:
-        render_record_management()
 
     with tutorial_tab:
         render_tutorial_workspace()

@@ -26,11 +26,11 @@ Use the Google account approved by your administrator. A Google login grants acc
 | Workspace | Use it to |
 | --- | --- |
 | Scrape Data | Collect Facebook, Reddit, Online news, X or Custom website material. |
+| Clean & manage data | Find saved records, filter a dataset and delete selected records with a preview. |
 | Sentiment Analysis | Choose and edit datasets, analyze included records, review evidence and export reports. |
 | Sentiment Trends | Compare saved analysis runs and news scans over time. |
 | Content plan | Turn analyzed concerns into keywords, content briefs and drafts. |
 | GenCite | Measure brand mentions in sampled AI answers and explore visibility gaps. |
-| Manage records | Find saved records, filter a dataset and delete selected records with a preview. |
 | Tutorial | Read this guide in the app, browse Contents, move between chapters or search for a control. |
 
 Click the CrisisRadar heading to collapse or expand the sidebar. On small screens it may start collapsed; the icons still open each workspace. Keyboard users can Tab to a workspace, use Up/Down or Home/End to move among navigation buttons, and press Enter to open one. Escape collapses the sidebar.
@@ -39,9 +39,9 @@ Open the top-right app menu, choose **Settings**, then select a light, dark or c
 
 ## Choose sources and save your collection
 
-Choose the tab that matches the material you want to collect. Collection runs when you request it; the platform does not continuously monitor all sources in the background.
+Choose one of the four main cards: **Facebook**, **X**, **Online news** or **Custom website**. Facebook uses blue and X black, each with its brand logo. Online news uses a teal newspaper icon, and Custom website a purple browser icon. Open **Other sources** below the cards to find **Reddit**, with its orange brand logo. **All sources** returns to the cards while keeping your settings and collected results. Collection runs when you request it; the platform does not continuously monitor all sources in the background.
 
-| Source tab | Input and coverage | Connection needed |
+| Source | Input and coverage | Connection needed |
 | --- | --- | --- |
 | Facebook | Your selected saved links; browser-visible posts and available comments. | Your Facebook session; hosted browser setup. |
 | Reddit | The r/cambodia feed, with configurable post and comment limits. | Approved Reddit API access configured by the administrator. |
@@ -49,7 +49,7 @@ Choose the tab that matches the material you want to collect. Collection runs wh
 | X | Recent posts matching your enabled searches, with optional reply samples. | Server bearer token, read access and API credit. |
 | Custom website | Public HTML or plain-text pages at URLs you paste. | No additional API key or social login. |
 
-**Online news, X and Custom website save collected records automatically.** X first asks for a required **Dataset name**, then reveals collection options and a final collection step. For Online news and Custom website, optionally enter a **Dataset title**; a blank title uses the source and collection time. Wait for **Saved … record(s) to the cloud**. All collected records are saved, even if you later filter the preview. They can then be loaded in **Sentiment Analysis** and **Manage records**.
+**Online news, X and Custom website save collected records automatically.** X first asks for a required **Dataset name**, then reveals collection options and a final collection step. For Online news and Custom website, optionally enter a **Dataset title**; a blank title uses the source and collection time. Wait for **Saved … record(s) to the cloud**. All collected records are saved, even if you later filter the preview. They can then be loaded in **Sentiment Analysis** and **Clean & manage data**.
 
 Selecting **X** or **Start X collection** opens a focused window with the surrounding page dimmed and blurred. Escape, the close button or clicking outside closes it; **Resume X collection** restores your draft and current step during the session. After collection and saving, the window closes to show your results.
 
@@ -104,7 +104,7 @@ Facebook comments may be stored with their parent post. Read the evidence source
 
 ### Reddit
 
-Open **Scrape Data → Reddit**. The current collector targets **r/cambodia**. Set **Reddit posts per source** and **Comments per post**, then click **Collect posts**. Review the returned posts/comments, enter a custom title and save the results.
+Open **Scrape Data → Other sources → Reddit**. The current collector targets **r/cambodia**. Set **Reddit posts per source** and **Comments per post**, then click **Collect posts**. Review the returned posts/comments, enter a custom title and save the results.
 
 The collector uses approved Reddit API access. It defaults to newest posts and samples returned comments; it does not guarantee every comment in a thread. Posts and comments are separate records, with parent context retained for comments. If Reddit is not connected, the administrator must configure access before collection can succeed.
 
@@ -133,7 +133,7 @@ X replies are separate records with parent context. If a search fails, completed
 ## Run sentiment analysis
 
 1. Open **Sentiment Analysis** and click **Start sentiment analysis** (or **Continue**) to open the two-step dialog.
-2. In **Choose and edit data**, choose **Manual selection** or **Last scraped data**. For manual selection, choose **Record sources**, then one or more **Datasets to analyze**. Dates and times are shown in UTC. No sources or datasets are preselected in a new session. Reusing a title groups records together; older untitled records appear under **Untitled (older records)**.
+2. In **Choose and edit data**, choose **Manual selection** or **Last scraped data**. For manual selection, choose **Record sources**, then select one or more source-colored dataset cards. All datasets saved today appear first, using your local timezone; if none were saved today, the six latest appear. Open **Choose older datasets or adjust selection** to search all saved datasets from those sources and add earlier ones. Click a selected card again, or remove its picker entry, to deselect it. No sources or datasets are preselected in a new session. Reusing a title groups records together; older untitled records appear under **Untitled (older records)**.
 3. Records appear immediately below your choices. There is no load button or record limit. Only the selected sources and datasets appear. **Last scraped data** includes exactly that collection's records and saves an unsaved collection before opening it. **Refresh datasets** refreshes both the dataset list and its records.
 4. Edit the **Include** checkboxes directly in the table. Eligible records start included unless previously excluded. Unchecking a record saves a reversible exclusion with the shared dataset; check it again to restore it. Source text and saved analysis are kept. Exclusions persist when you reopen the dataset. If saving fails, use **Retry saving changes**; analysis stays blocked until the edits save.
 5. The **Settings** tab contains **Record status** (default **all**), **AI provider**, and the Gemini model controls. Use **pending** or **error** when you want to analyze only those statuses. Gemini and ChatGPT use server credentials.
@@ -235,8 +235,8 @@ Approved users share the cloud source-record library. A **Custom title** labels 
 
 To manage or delete saved records:
 
-1. Open **Manage records** in the sidebar and click **Load / refresh records**.
-2. Choose a **Dataset**, **Source** and/or **Status**, or use **Search records** to find a saved title, page title, URL or record ID. All analysis statuses are available, including pending and error records.
+1. Open **Clean & manage data** in the sidebar. Dataset cards load automatically, showing all datasets saved today in your browser's timezone (UTC when unavailable), newest first. If there are none today, the six latest datasets appear instead. Each card shows its record count, pending count, sources and latest save time. **Refresh datasets** loads changes from the cloud.
+2. Use **Search datasets** below the cards to find a dataset by name, page title, URL or record ID, then click **Open dataset**. Search results also appear as cards. Alternatively, choose **Browse all records**. Inside the dataset, filter by **Source** and/or **Status**, or use **Search records**. All analysis statuses are available, including pending and error records. **Back to datasets** returns to the cards and keeps your dataset search.
 3. Review the table. Choose individual **Records to delete**, or click **Select all records on this page**. Nothing is selected automatically. The displayed count tells you exactly how many records are included.
 4. Click **Review deletion of … record(s)** and check the preview. Click **Permanently delete … record(s)** to proceed, or **Cancel deletion** to keep them. Deletion cannot be undone and affects every user of the shared library.
 5. Read the result. Records changed by another operation after you loaded them are kept; refresh to review their current versions. If a deletion cannot be confirmed, reload the library before retrying.
@@ -247,7 +247,7 @@ If a batch fails, the result shows how many records were confirmed deleted and h
 
 Deleting a record removes its saved sentiment analysis too. Timeline summaries, saved source links, saved GenCite analyses and downloaded exports remain. The current session's collection copies and loaded results are cleared of deleted records. Collecting and saving a URL again can add it back to the library. An analysis already running cannot recreate a source that has been deleted.
 
-The earlier shortcut is also available: in **Sentiment Analysis**, load processed records, expand **Delete processed records**, select records, and review and confirm deletion. This shortcut handles processed records only; **Manage records** covers all statuses.
+The earlier shortcut is also available: in **Sentiment Analysis**, load processed records, expand **Delete processed records**, select records, and review and confirm deletion. This shortcut handles processed records only; **Clean & manage data** covers all statuses.
 
 Removing Facebook source links is different from deleting source records. Sign-out clears the current session's loaded data; saved cloud records remain available subject to access permissions. Save or export work before leaving a session.
 

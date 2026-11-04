@@ -1,5 +1,6 @@
 """Browse and delete reviewed selections from the shared source-record library."""
 
+from datetime import datetime
 from math import ceil
 
 import pandas as pd
@@ -9,6 +10,7 @@ from modules.analysis_library import dataset_date_label, dataset_key, dataset_op
 from modules.client_report import platform_label
 from modules.config import get_setting
 from modules.database import delete_dataset_records, delete_records, init_db, load_record_catalog
+from modules.dataset_cards import apply_dataset_card_theme, featured_datasets, render_dataset_cards, viewer_timezone
 from modules.record_state import purge_record_caches
 
 
@@ -53,6 +55,57 @@ def _clear_selection() -> None:
     st.session_state.pop("dataset_delete_pending", None)
 
 
+def _open_dataset(dataset: str | None) -> None:
+    _clear_selection()
+    st.session_state.update(record_manager_details=True, record_manager_dataset=dataset,
+                            record_manager_platform=None, record_manager_status=None,
+                            record_manager_search="", record_manager_page=1)
+
+
+def _back_to_datasets() -> None:
+    _clear_selection()
+    st.session_state["record_manager_details"] = False
+
+
+def _render_dataset_cards(groups: list[dict], section: str, local_tz) -> None:
+    render_dataset_cards(groups, section, local_tz, key_prefix="record_manager", on_select=_open_dataset)
+
+
+def _render_dataset_browser(rows: list[dict], groups: list[dict]) -> None:
+    local_tz = viewer_timezone()
+    apply_dataset_card_theme()
+    is_today, featured = featured_datasets(groups, datetime.now(local_tz))
+    st.subheader("Today's datasets" if is_today else "Latest datasets")
+    if is_today:
+        st.caption(f"{len(featured)} datasets saved today · Newest first · Times in {local_tz}")
+    else:
+        st.caption(f"No datasets saved today. Showing the {len(featured)} latest datasets · Times in {local_tz}")
+    _render_dataset_cards(featured, "featured", local_tz)
+    st.divider()
+    st.subheader("Find a dataset")
+    search = st.text_input("Search datasets", key="record_manager_dataset_search", max_chars=200,
+                           placeholder="Search by dataset name, page title, URL or record ID")
+    if search.strip():
+        keys = {dataset_key(row) for row in filter_records(rows, None, None, None, search)}
+        matches = [group for group in groups if group["key"] in keys]
+        st.caption(f"{len(matches)} matching datasets · {sum(group['count'] for group in matches):,} records")
+        if not matches:
+            st.info("No datasets match your search. Try a different dataset name, page title or URL.")
+        else:
+            if st.session_state.get("record_manager_dataset_query") != search:
+                st.session_state["record_manager_dataset_page"] = 1
+                st.session_state["record_manager_dataset_query"] = search
+            pages = list(range(1, ceil(len(matches) / 12) + 1))
+            if st.session_state.get("record_manager_dataset_page") not in pages:
+                st.session_state["record_manager_dataset_page"] = 1
+            page = st.selectbox("Search results page", pages, key="record_manager_dataset_page",
+                                format_func=lambda value: f"{value} of {len(pages)}") if len(pages) > 1 else 1
+            _render_dataset_cards(matches[(page - 1) * 12:page * 12], "search", local_tz)
+    else:
+        st.caption(f"Search across all {len(groups)} datasets in the shared library.")
+    st.button("Browse all records", key="record_manager_browse_all", on_click=_open_dataset, args=(None,))
+
+
 def _render_dataset_deletion(rows: list[dict], dataset: str | None) -> None:
     records = [row for row in rows if dataset is not None and dataset_key(row) == dataset]
     versions = {row["_id"]: row["_version"] for row in records}
@@ -85,11 +138,13 @@ def _render_dataset_deletion(rows: list[dict], dataset: str | None) -> None:
                     result = {"deleted": [], "skipped": [], "missing": [], "unconfirmed": list(versions)}
                 purge_record_caches(st.session_state, {**result, "skipped": result["skipped"] + result["unconfirmed"]})
                 st.session_state.pop("record_manager_rows", None)
+                st.session_state["record_manager_needs_refresh"] = True
                 complete = False
                 if not result["unconfirmed"]:
                     try:
                         fresh = load_record_catalog(db)
                         st.session_state["record_manager_rows"] = fresh
+                        st.session_state.pop("record_manager_needs_refresh", None)
                         complete = not any(dataset_key(row) == dataset for row in fresh)
                     except Exception:
                         pass  # Deletion counts are known even if refreshing the catalog failed.
@@ -104,24 +159,32 @@ def _render_dataset_deletion(rows: list[dict], dataset: str | None) -> None:
 
 
 def render_record_management() -> None:
-    st.subheader("Manage records")
-    st.caption("Find and delete saved posts, articles and website pages across all analysis statuses.")
-    st.info("This library is shared by approved users. Deleting a record also removes its saved analysis for everyone. "
-            "Timeline summaries, saved source links, GenCite analyses and downloaded exports are kept.")
+    st.subheader("Clean & manage data")
+    st.caption("Browse your saved datasets. Open a card to review and manage its records.")
+    st.caption("Shared library · Available to all approved users")
+    # Preserve the search when its widget is temporarily hidden by dataset details.
+    if "record_manager_dataset_search" in st.session_state:
+        st.session_state["record_manager_dataset_search"] = st.session_state["record_manager_dataset_search"]
     collection = get_setting("FIREBASE_COLLECTION", "raw_posts") or "raw_posts"
     if st.session_state.get("record_manager_collection") != collection:
         st.session_state.pop("record_manager_rows", None)
+        st.session_state.pop("record_manager_error", None)
+        st.session_state.pop("record_manager_needs_refresh", None)
         _clear_selection()
         st.session_state["record_manager_collection"] = collection
-    if st.button("Load / refresh records", key="record_manager_refresh", type="primary"):
+    refresh = st.button("Refresh datasets", key="record_manager_refresh")
+    if refresh or ("record_manager_rows" not in st.session_state
+                   and not st.session_state.get("record_manager_needs_refresh")
+                   and not st.session_state.get("record_manager_error")):
         _clear_selection()
         st.session_state.pop("record_manager_error", None)
         try:
             with st.spinner("Loading saved records…"):
                 st.session_state["record_manager_rows"] = load_record_catalog(init_db())
+            st.session_state.pop("record_manager_needs_refresh", None)
         except Exception:
             st.session_state.pop("record_manager_rows", None)
-            st.session_state["record_manager_error"] = "Records could not be loaded. Check the connection and try Load / refresh records again."
+            st.session_state["record_manager_error"] = "Datasets could not be loaded. Check the connection and try Refresh datasets again."
     notice = st.session_state.pop("record_manager_notice", None)
     if notice:
         st.success(f"Deleted {len(notice['deleted'])} record(s).")
@@ -149,14 +212,24 @@ def render_record_management() -> None:
         st.session_state["record_manager_dataset"] = None
         _clear_selection()
     if "record_manager_rows" not in st.session_state:
-        st.caption("Load the library to browse records. Nothing is selected or deleted automatically.")
+        st.caption("Choose Refresh datasets to reload the library.")
         return
     rows = st.session_state["record_manager_rows"]
     if not rows:
         st.info("No saved records to manage. Collect and save data, or refresh to check for newly saved records.")
         return
 
-    groups = {group["key"]: group for group in dataset_options(rows, None)}
+    dataset_groups = dataset_options(rows, None)
+    if not st.session_state.get("record_manager_details"):
+        _render_dataset_browser(rows, dataset_groups)
+        return
+    st.button("Back to datasets", key="record_manager_back", on_click=_back_to_datasets)
+    groups = {group["key"]: group for group in dataset_groups}
+    current_dataset = st.session_state.get("record_manager_dataset")
+    st.subheader(groups.get(current_dataset, {}).get("title", "Dataset records" if current_dataset else "All records"))
+    st.caption("Filter and review records below before deleting anything.")
+    st.info("This library is shared by approved users. Deleting a record also removes its saved analysis for everyone. "
+            "Timeline summaries, saved source links, GenCite analyses and downloaded exports are kept.")
     platforms = sorted({source_label(row) for row in rows})
     statuses = sorted({str(row.get("status") or "unknown") for row in rows})
     # Keep the user's scope after deletion, including an emptied dataset. A
@@ -243,11 +316,12 @@ def render_record_management() -> None:
                     purge_record_caches(st.session_state, {"deleted": [], "missing": [], "skipped": list(pending)})
                     st.session_state.pop("record_manager_rows", None)
                     st.session_state["record_manager_error"] = (
-                        "Deletion could not be confirmed. Load / refresh records to check the library before trying again.")
+                        "Deletion could not be confirmed. Refresh datasets to check the library before trying again.")
                 else:
                     purge_record_caches(st.session_state, result)
                     if result["skipped"]:
                         st.session_state.pop("record_manager_rows", None)
+                        st.session_state["record_manager_needs_refresh"] = True
                     st.session_state["record_manager_notice"] = result
                 st.session_state.pop("record_manager_pending", None)
                 st.rerun()

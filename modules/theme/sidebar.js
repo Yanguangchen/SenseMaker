@@ -37,15 +37,6 @@
   };
 
   const click = (event) => {
-    const sourceTab = event.target.closest('[role="tab"]');
-    if (sourceTab?.textContent.trim() === "X") {
-      requestAnimationFrame(() => {
-        if (!document.querySelector('[role="dialog"]')) {
-          document.querySelector('.st-key-open_x_collection button:not(:disabled)')?.click();
-        }
-      });
-      return;
-    }
     const button = event.target.closest(".sm-rail-button");
     if (!button) return;
     if (button.matches(".sm-sidebar-toggle")) {

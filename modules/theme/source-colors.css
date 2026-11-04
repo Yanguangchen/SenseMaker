@@ -1,0 +1,24 @@
+/* Shared source identity for collection cards, saved datasets and source badges. */
+.st-key-sm_source_card_facebook,
+[class*="st-key-sm_dataset_card_facebook_"],
+[data-sm-source="facebook"] { --sm-source-color: #0866ff; --sm-source-ink: #fff; }
+
+.st-key-sm_source_card_x,
+[class*="st-key-sm_dataset_card_x_"],
+[data-sm-source="x"] { --sm-source-color: #111; --sm-source-ink: #fff; }
+
+.st-key-sm_source_card_news,
+[class*="st-key-sm_dataset_card_news_"],
+[data-sm-source="news"] { --sm-source-color: #0f766e; --sm-source-ink: #fff; }
+
+.st-key-sm_source_card_website,
+[class*="st-key-sm_dataset_card_website_"],
+[data-sm-source="website"] { --sm-source-color: #6d28d9; --sm-source-ink: #fff; }
+
+.sm-other-source-reddit,
+[class*="st-key-sm_dataset_card_reddit_"],
+[data-sm-source="reddit"] { --sm-source-color: #ff4500; --sm-source-ink: #fff; }
+
+[class*="st-key-sm_dataset_card_other_"],
+[class*="st-key-sm_dataset_card_mixed_"],
+[data-sm-source="other"] { --sm-source-color: #64748b; --sm-source-ink: #fff; }

@@ -2,10 +2,34 @@
 headless = true
 enableStaticServing = true
 
-# Dark glass theme. Card, tab and background styling lives in modules/theme/glass.css;
-# backgroundColor matches a glass card so dataframes blend into it.
+# Light is the starting theme. Dark stays available from the app menu.
+# Shared type and shape apply to both; each palette overrides the colors.
 [theme]
-base = "dark"
+base = "light"
+primaryColor = "#6A4DF4"
+backgroundColor = "#F4F6FB"
+secondaryBackgroundColor = "#FFFFFF"
+textColor = "#1C2138"
+linkColor = "#4338CA"
+borderColor = "#D5D9EC"
+dataframeBorderColor = "#E2E5F2"
+dataframeHeaderBackgroundColor = "#EEF0F8"
+codeBackgroundColor = "#F7F8FC"
+baseRadius = "14px"
+buttonRadius = "14px"
+showWidgetBorder = true
+font = "Outfit:https://fonts.googleapis.com/css2?family=Outfit:wght@400..700&display=swap"
+headingFont = "Outfit:https://fonts.googleapis.com/css2?family=Outfit:wght@400..700&display=swap"
+codeFont = "JetBrains Mono:https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&display=swap"
+
+[theme.sidebar]
+backgroundColor = "#FFFFFF"
+secondaryBackgroundColor = "#F4F6FB"
+
+[theme.light]
+backgroundColor = "#F4F6FB"
+
+[theme.dark]
 primaryColor = "#8B7BFF"
 backgroundColor = "#0D1129"
 secondaryBackgroundColor = "#161B3D"
@@ -15,13 +39,7 @@ borderColor = "#3D4479"
 dataframeBorderColor = "#353C6F"
 dataframeHeaderBackgroundColor = "#141938"
 codeBackgroundColor = "#11163A"
-baseRadius = "14px"
-buttonRadius = "14px"
-showWidgetBorder = true
-font = "Outfit:https://fonts.googleapis.com/css2?family=Outfit:wght@400..700&display=swap"
-headingFont = "Outfit:https://fonts.googleapis.com/css2?family=Outfit:wght@400..700&display=swap"
-codeFont = "JetBrains Mono:https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&display=swap"
 
-[theme.sidebar]
+[theme.dark.sidebar]
 backgroundColor = "#0A0D22"
 secondaryBackgroundColor = "#151A3A"

@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 from contextlib import ExitStack
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
+from zoneinfo import ZoneInfo
 
 from streamlit.testing.v1 import AppTest
 
@@ -103,6 +104,50 @@ class DatasetSelectionTests(unittest.TestCase):
 
 
 class SourceDatasetUITests(unittest.TestCase):
+    picker_script = ("from dashboard import _render_analysis_datasets\n"
+                     "_render_analysis_datasets(['source:website'], True)\n")
+
+    def test_all_local_today_cards_are_shown_and_older_choices_join_the_selection(self):
+        rows = [record(str(i), f"Today {i}", saved_at="2026-11-03T17:30:00Z") for i in range(8)]
+        rows.append(record("old", "Yesterday", saved_at="2026-11-03T15:59:00Z"))
+        local_tz = ZoneInfo("Asia/Singapore")
+        with patch("dashboard._fetch_analysis_datasets", return_value=dataset_options(rows, None)), \
+             patch("dashboard.viewer_timezone", return_value=local_tz), patch("dashboard.datetime") as clock:
+            clock.now.return_value = datetime(2026, 11, 4, 10, tzinfo=local_tz)
+            app = AppTest.from_string(self.picker_script).run()
+            self.assertFalse(app.exception)
+            cards = [button for button in app.button if button.key.startswith("analysis_dataset_card_")]
+            self.assertEqual(len(cards), 8)
+            self.assertTrue(all("Today" in button.key for button in cards))
+            self.assertEqual(app.multiselect(key="analysis_datasets").value, [])
+            self.assertTrue(any("Today's datasets" in block.value for block in app.markdown))
+            self.assertIn("04 Nov 2026, 01:30:00 +08", app.multiselect(key="analysis_datasets").options[0])
+
+            app.button(key="analysis_dataset_card_featured_title:Today 0").click().run()
+            app.multiselect(key="analysis_datasets").select("title:Yesterday").run()
+            self.assertEqual(app.multiselect(key="analysis_datasets").value, ["title:Today 0", "title:Yesterday"])
+            self.assertEqual(app.button(key="analysis_dataset_card_featured_title:Today 0").label, "✓ Selected · Remove")
+            self.assertTrue(any("Yesterday" in block.value for block in app.text))
+            app.button(key="analysis_dataset_card_featured_title:Today 0").click().run()
+            self.assertEqual(app.multiselect(key="analysis_datasets").value, ["title:Yesterday"])
+            self.assertFalse(app.exception)
+
+    def test_no_today_shows_six_latest_but_all_older_and_undated_datasets_remain_available(self):
+        rows = [record(str(i), f"Older {i}", saved_at=f"2026-11-02T{i:02}:00:00Z") for i in range(8)]
+        rows.append(record("legacy", "", scraped_at=""))
+        with patch("dashboard._fetch_analysis_datasets", return_value=dataset_options(rows, None)), \
+             patch("dashboard.viewer_timezone", return_value=timezone.utc), patch("dashboard.datetime") as clock:
+            clock.now.return_value = datetime(2026, 11, 4, tzinfo=timezone.utc)
+            app = AppTest.from_string(self.picker_script).run()
+            cards = [button for button in app.button if button.key.startswith("analysis_dataset_card_")]
+            self.assertEqual([button.key for button in cards],
+                             [f"analysis_dataset_card_featured_title:Older {i}" for i in range(7, 1, -1)])
+            self.assertTrue(any("Latest datasets" in block.value for block in app.markdown))
+            self.assertEqual(len(app.multiselect(key="analysis_datasets").options), 9)
+            app.multiselect(key="analysis_datasets").set_value(["title:Older 0", "untitled:"]).run()
+            self.assertEqual(app.multiselect(key="analysis_datasets").value, ["title:Older 0", "untitled:"])
+            self.assertFalse(app.exception)
+
     def test_sources_start_empty_and_filter_dated_dataset_choices(self):
         rows = [record("website", "Mixed", saved_at="2026-11-03T12:00:00Z"),
                 record("facebook", "Mixed", source_type="container_post",
@@ -137,7 +182,8 @@ class DatasetUITests(unittest.TestCase):
         self.stack.enter_context(patch("dashboard._get_facebook_session", return_value=FacebookSession()))
         self.stack.enter_context(patch("dashboard.IS_CLOUD", False))
         for name in ("_render_collection_workspace", "_render_news_workspace", "_render_x_workspace",
-                     "_render_website_workspace", "_render_sentiment_history", "_render_news_risk_history", "render_gencite_workspace"):
+                     "_render_website_workspace", "_render_sentiment_history", "_render_news_risk_history",
+                     "render_gencite_workspace", "render_record_management"):
             self.stack.enter_context(patch("dashboard." + name))
         self.stack.enter_context(patch("modules.auth.verify_access", return_value="editor@example.com"))
         self.stack.enter_context(patch("dashboard._render_ai_settings", return_value="openai"))
@@ -174,6 +220,23 @@ class DatasetUITests(unittest.TestCase):
         self.fetch.assert_called_once()
         ui(self.app, "run_analysis_selected_btn").click().run()
         self.assertEqual({row["_id"] for row in self.process.call_args.args[0]}, {"a1", "a2"})
+
+    def test_card_selection_combines_records_survives_steps_and_clears_stale_results_on_removal(self):
+        self.app.button(key="analysis_dataset_card_featured_title:Campaign A").click().run()
+        self.assertEqual(self.ids(), {"a1", "a2"})
+        self.app.button(key="analysis_dataset_card_featured_title:Campaign B").click().run()
+        self.assertEqual(self.ids(), {"a1", "a2", "b1"})
+        self.assertEqual(ui(self.app, "run_analysis_selected_btn").label, "Run ChatGPT on 3 included records")
+        self.assertEqual(ui(self.app, "analysis_datasets").value, ["title:Campaign A", "title:Campaign B"])
+        self.app.session_state["analysis_last_results"] = {"analyses": []}
+        self.app.button(key="analysis_dataset_card_featured_title:Campaign A").click().run()
+        self.assertEqual(self.ids(), {"b1"})
+        self.assertNotIn("analysis_last_results", self.app.session_state)
+        self.app.button(key="analysis_dataset_card_featured_title:Campaign B").click().run()
+        self.assertEqual(self.app.multiselect(key="analysis_datasets").value, [])
+        self.assertNotIn("firestore_rows", self.app.session_state)
+        self.assertFalse(self.app.exception)
+        self.process.assert_not_called()
 
     def test_dataset_picker_shows_dates_and_sources(self):
         labels = ui(self.app, "analysis_datasets").options

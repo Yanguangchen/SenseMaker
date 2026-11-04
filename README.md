@@ -161,11 +161,14 @@ SenseMaker/
 
 In **Sentiment Analysis → Manual selection**, choose **Record sources** first: Facebook,
 Reddit, Online news, X, Custom website or Other saved sources. Nothing is selected automatically
-in a new session. Then choose one or more **Datasets to analyze**. Only the selected sources are
+in a new session. Select one or more source-colored dataset cards: all datasets saved today
+appear first, using your local timezone; if none were saved today, the six latest appear.
+Use **Choose older datasets or adjust selection** to search and select any saved dataset.
+The cards and picker share the same selection. Only the selected sources are
 included, even when a dataset contains more than one platform. Records load newest first,
 with dataset/source filtering applied before the load limit.
 Every dashboard save assigns a common UTC save timestamp to its records. Dataset pickers in
-Sentiment Analysis and Manage records show the latest saved date and time. Older records use
+Sentiment Analysis and Clean & manage data show the latest saved date and time. Older records use
 their collection date or Firestore creation time. Reusing a dataset title still groups records
 together, and its displayed date advances when records are saved to it.
 Changing sources clears loaded records, selections and previous results. The old
@@ -241,9 +244,17 @@ in the current session; download the keyword CSV and full JSON plan to keep a co
 
 ## Manage and delete records
 
-Open **Manage records** in the sidebar and click **Load / refresh records**. Filter the shared
-library by dataset (saved Custom title), source or status, and search by dataset, page title,
-URL or record ID. Pending, processed, error, removed and legacy records are supported.
+Open **Clean & manage data** in the sidebar to see individual dataset cards. The library loads
+automatically and shows every dataset saved today in your browser's timezone (UTC when
+unavailable), newest first. If none were saved today, it shows the six latest datasets.
+Cards show the dataset name, record and pending counts, sources and latest save time.
+Use **Search datasets** below the cards to find any dataset by its name, page title, URL
+or record ID. Search results also appear as cards, with 12 datasets per page.
+Click **Open dataset** to review its records, or **Browse all records** for the shared
+library. Filter by dataset (saved Custom title), source or status, and use **Search records**
+to narrow the table. **Back to datasets** returns to the cards and keeps your dataset search.
+**Refresh datasets** reloads changes from the cloud. Pending, processed, error, removed
+and legacy records are supported.
 
 Select individual **Records to delete**, or **Select all records on this page**, then click
 **Review deletion of … record(s)**. Check the preview before **Permanently delete … record(s)**,
@@ -265,7 +276,7 @@ GenCite analyses and exported files remain. Deleted records are removed from the
 session's analysis and collection copies. Collecting and saving a URL again can create it anew;
 an analysis already in flight cannot recreate a deleted source record.
 
-The management catalog loads metadata only, on request, and does not require an AI API key.
+The management catalog loads metadata only and does not require an AI API key.
 It uses the same approved-user access as the other workspaces; the cloud library is shared.
 
 In **Sentiment Analysis**, load processed records, open **Delete processed records**,
@@ -295,7 +306,7 @@ the collected results without collecting again. Leaving the title blank keeps th
 dataset title. A new title moves these records to that dataset without creating copies;
 reusing an existing title groups them with its other records. If saving fails, use
 **Retry saving collected records** before collecting again.
-Saved pages appear in **Sentiment Analysis** and **Manage records** alongside the other sources. Analyze them with your
+Saved pages appear in **Sentiment Analysis** and **Clean & manage data** alongside the other sources. Analyze them with your
 existing Gemini/OpenAI key, then use those results in **Content recommendations**.
 Recollecting a changed page refreshes its text and resets its old analysis;
 unchanged pages keep their analysis. Website pages have no engagement checks.
@@ -323,7 +334,7 @@ server must have network access to the websites users choose.
 
 ## Reddit collection: r/cambodia
 
-1. Open **Scrape Data → Reddit** to collect directly from **r/cambodia**.
+1. Open **Scrape Data → Other sources → Reddit** to collect directly from **r/cambodia**.
 2. Check the connection and choose up to **500 posts per source** and **0–100 sampled comments per post**.
 3. Click **Collect posts**, inspect the results and save them to Firestore.
 4. Select saved records in **Sentiment Analysis**, set your watchlist and run analysis.
@@ -709,7 +720,12 @@ The dashboard has **four pages**, accessible from the left toolbar:
 
 ### Tab 1 — Scrap data
 
-- Source tabs: **Facebook**, **Reddit**, **Online news** (Google News monitoring), **X**, and **Custom website** (user-provided public page links).
+- Choose one of four source cards: **Facebook** (blue), **X** (black),
+  **Online news** (teal, Google News monitoring), or **Custom website** (purple, public page links).
+  Facebook and X use their brand logos; news and websites use dedicated icons.
+  **Reddit** is available under **Other sources**, with its orange brand logo.
+  Each card opens its collection flow. **All sources** returns to the cards while keeping
+  settings and collected results in the current session.
 - Facebook and Reddit each keep their own source selections, collection settings and results.
 - Facebook auth session capture (opens Chrome for manual login)
 - Save a personal library of links, available on future visits and other devices
@@ -728,7 +744,7 @@ The dashboard has **four pages**, accessible from the left toolbar:
 
 The **Analysis** subtab opens by default. **Start sentiment analysis** opens a focused two-step dialog: **Choose and edit data**, then **Analyze**. Settings remain on their own subtab.
 
-- Choose **Manual selection** or **Last scraped data**. Manual selection requires explicit **Record sources** and **Datasets to analyze**; neither is preselected in a new session. Dataset labels show date/time (UTC), sources and record counts.
+- Choose **Manual selection** or **Last scraped data**. In Manual selection, choose **Record sources**, then select one or more source-colored dataset cards. All datasets saved today appear first; when there are none, the six latest appear. **Choose older datasets or adjust selection** opens a searchable picker for the full source-filtered library. Dates use your local timezone, and cards show sources and record counts. Nothing is preselected in a new session; click a selected card again or remove its picker entry to deselect it.
 - Choosing datasets immediately opens all matching records, newest first. The separate load button and 50/200-record load cap are removed. **Record status** in Settings defaults to **all** and filters the editor and analysis run.
 - Edit **Include** directly in the table. Records start included unless previously excluded. Changes automatically save `analysis_excluded` on the existing records, without changing text, analysis or dataset titles. Exclusions are shared with the dataset and reversible by checking Include again. Save failures block analysis and offer a retry.
 - **Last scraped data** uses the exact IDs from the latest completed collection, even if its title was reused. Unsaved collections save before opening. Empty/failed collections never fall back to an older batch. Use Manual selection after reopening the app.

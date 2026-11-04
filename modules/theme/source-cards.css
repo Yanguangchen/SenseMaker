@@ -1,0 +1,78 @@
+/* Source colors come from source-colors.css, shared with Clean data. */
+.st-key-sm_source_picker_grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 280px), 1fr));
+  gap: 20px;
+  max-width: 760px;
+  align-items: stretch;
+}
+[class*="st-key-sm_source_card_"] {
+  min-width: 0;
+  border-top: 4px solid var(--sm-source-color) !important;
+  border-radius: 22px !important;
+  padding: 24px !important;
+  background-image: linear-gradient(145deg, color-mix(in srgb, var(--sm-source-color) 7%, transparent), transparent 65%);
+  box-shadow: 0 6px 18px -8px rgb(15 23 42 / .24), 0 2px 6px rgb(15 23 42 / .07);
+  transition: transform 180ms ease, box-shadow 180ms ease;
+}
+[class*="st-key-sm_source_card_"]:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 14px 28px -12px rgb(15 23 42 / .3), 0 4px 12px color-mix(in srgb, var(--sm-source-color) 15%, transparent);
+}
+html[data-sm-theme="dark"] [class*="st-key-sm_source_card_"] {
+  box-shadow: 0 10px 28px rgb(0 0 0 / .28), 0 2px 8px rgb(0 0 0 / .18);
+}
+.sm-source-logo {
+  display: grid;
+  place-items: center;
+  width: 58px;
+  height: 58px;
+  margin-bottom: 24px;
+  border-radius: 16px;
+  color: var(--sm-source-color);
+  background: color-mix(in srgb, var(--sm-source-color) 10%, transparent);
+}
+.sm-source-logo svg { width: 34px; height: 34px; fill: currentColor; }
+.sm-source-label { margin: 0 0 8px; font-size: .69rem; font-weight: 650; letter-spacing: .08em; opacity: .72; }
+.sm-source-card h3 { margin: 0 0 12px; padding: 0; font-size: 1.5rem; line-height: 1.3; }
+.sm-source-description { min-height: 4.6em; margin: 0 0 16px; font-size: .94rem; line-height: 1.55; opacity: .8; }
+[class*="st-key-sm_source_card_"] [data-testid="stButton"] button {
+  min-height: 44px;
+  border: 1px solid var(--sm-source-color);
+  border-radius: 12px;
+  color: var(--sm-source-ink);
+  background: var(--sm-source-color);
+  box-shadow: none;
+}
+[class*="st-key-sm_source_card_"] [data-testid="stButton"] button:hover {
+  color: var(--sm-source-ink);
+  border-color: var(--sm-source-color);
+  background: var(--sm-source-color);
+  filter: brightness(.94);
+}
+[class*="st-key-sm_source_card_"] [data-testid="stButton"] button:focus-visible {
+  outline: 3px solid var(--sm-source-color);
+  outline-offset: 3px;
+}
+.st-key-sm_source_card_x {
+  color: #fff;
+  background: #111 !important;
+  border-color: #111 !important;
+}
+.st-key-sm_source_card_x .sm-source-logo { color: #111; background: #fff; }
+.st-key-sm_source_card_x .sm-source-card h3 { color: #fff; -webkit-text-fill-color: #fff; }
+.st-key-sm_source_card_x [data-testid="stButton"] button {
+  --sm-source-color: #fff;
+  --sm-source-ink: #111;
+}
+.sm-other-source-reddit { display: flex; align-items: center; gap: 16px; }
+.sm-other-source-reddit .sm-source-logo { flex: 0 0 46px; width: 46px; height: 46px; margin: 0; border-radius: 12px; }
+.sm-other-source-reddit h4 { margin: 0 0 4px; padding: 0; font-size: 1rem; }
+.sm-other-source-reddit p { margin: 0; font-size: .88rem; opacity: .75; }
+@media (max-width: 640px) {
+  .sm-source-description { min-height: 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+  [class*="st-key-sm_source_card_"] { transition: none; }
+  [class*="st-key-sm_source_card_"]:hover { transform: none; }
+}

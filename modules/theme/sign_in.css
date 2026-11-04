@@ -7,19 +7,29 @@
   max-width: 480px;
   margin-inline: auto;
   padding: clamp(24px, 5vw, 44px) !important;
-  border: 1px solid rgb(190 184 255 / .2) !important;
+  border: 1px solid #d5d9ec !important;
   border-radius: 28px !important;
+  background: #ffffff !important;
+  box-shadow: 0 24px 60px rgb(28 33 56 / .08) !important;
+}
+.sm-login-brand { display: flex; align-items: center; gap: 12px; margin: 0 0 42px; color: #1c2138; font-size: 19px; font-weight: 650; }
+.sm-login-mark { display: grid; place-items: center; width: 42px; height: 42px; border-radius: 13px;
+  font-size: 24px; color: white; background: linear-gradient(145deg, #987bff, #4e65dc); box-shadow: 0 8px 28px rgb(116 92 245 / .28); }
+.st-key-auth_gateway .sm-login-kicker { color: #5b4ed4; font-size: 11px; font-weight: 650; letter-spacing: .14em; margin: 0 0 12px; }
+.st-key-auth_gateway h1 { color: #1c2138; font-size: clamp(29px, 6vw, 36px); line-height: 1.15; letter-spacing: -.035em;
+  margin: 0 0 16px; padding: 0; background: none; -webkit-text-fill-color: initial; }
+.st-key-auth_gateway .sm-login-description { color: #4b5168; font-size: 16px; line-height: 1.65; margin: 0 0 20px; }
+.st-key-auth_gateway [data-testid="stCaptionContainer"] { color: #6b728c; text-align: center; font-size: 12px; }
+html[data-sm-theme="dark"] .st-key-auth_gateway {
+  border-color: rgb(190 184 255 / .2) !important;
   background: linear-gradient(155deg, rgb(32 35 70 / .9), rgb(15 19 43 / .94)) !important;
   box-shadow: 0 28px 100px rgb(0 0 0 / .3), inset 0 1px rgb(255 255 255 / .06) !important;
 }
-.sm-login-brand { display: flex; align-items: center; gap: 12px; margin: 0 0 42px; color: #eceeff; font-size: 19px; font-weight: 650; }
-.sm-login-mark { display: grid; place-items: center; width: 42px; height: 42px; border-radius: 13px;
-  font-size: 24px; color: white; background: linear-gradient(145deg, #987bff, #4e65dc); box-shadow: 0 8px 28px rgb(116 92 245 / .28); }
-.st-key-auth_gateway .sm-login-kicker { color: #b7aaff; font-size: 11px; font-weight: 650; letter-spacing: .14em; margin: 0 0 12px; }
-.st-key-auth_gateway h1 { color: #f6f5ff; font-size: clamp(29px, 6vw, 36px); line-height: 1.15; letter-spacing: -.035em;
-  margin: 0 0 16px; padding: 0; background: none; -webkit-text-fill-color: initial; }
-.st-key-auth_gateway .sm-login-description { color: #b5b9d1; font-size: 16px; line-height: 1.65; margin: 0 0 20px; }
-.st-key-auth_gateway [data-testid="stCaptionContainer"] { color: #9ca4c7; text-align: center; font-size: 12px; }
+html[data-sm-theme="dark"] .sm-login-brand { color: #eceeff; }
+html[data-sm-theme="dark"] .st-key-auth_gateway .sm-login-kicker { color: #b7aaff; }
+html[data-sm-theme="dark"] .st-key-auth_gateway h1 { color: #f6f5ff; }
+html[data-sm-theme="dark"] .st-key-auth_gateway .sm-login-description { color: #b5b9d1; }
+html[data-sm-theme="dark"] .st-key-auth_gateway [data-testid="stCaptionContainer"] { color: #9ca4c7; }
 /* Some browsers defer hidden iframes. Keep the signed-out component visible
    while it initializes so Streamlit can receive its readiness handshake. */
 .st-key-auth_gateway iframe[data-testid="stCustomComponentV1"] {

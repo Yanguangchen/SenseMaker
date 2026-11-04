@@ -4,11 +4,13 @@ import unittest
 from datetime import datetime, timezone
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
+from zoneinfo import ZoneInfo
 
 from streamlit.testing.v1 import AppTest
 
 from modules.database import delete_dataset_records, delete_records, get_post_id, load_record_catalog
-from modules.record_management_ui import filter_records
+from modules.analysis_library import dataset_options
+from modules.record_management_ui import featured_datasets, filter_records
 from modules.record_state import purge_record_caches
 
 
@@ -112,6 +114,29 @@ class RecordDatabaseTests(unittest.TestCase):
 
 
 class RecordFilterAndCacheTests(unittest.TestCase):
+    def test_today_uses_local_save_date_and_includes_every_dataset(self):
+        rows = [record(str(i), custom_title=f"Today {i}", saved_at="2026-11-03T17:30:00Z") for i in range(8)]
+        rows += [record("old", custom_title="Yesterday", saved_at="2026-11-03T15:59:00Z"),
+                 record("resaved", custom_title="Today 0", saved_at="2026-11-04T01:00:00Z")]
+        now = datetime(2026, 11, 4, 10, tzinfo=ZoneInfo("Asia/Singapore"))
+        is_today, groups = featured_datasets(dataset_options(rows, None), now)
+        self.assertTrue(is_today)
+        self.assertEqual(len(groups), 8)
+        self.assertEqual(groups[0]["title"], "Today 0")
+        self.assertEqual(groups[0]["count"], 2)
+        self.assertNotIn("Yesterday", [group["title"] for group in groups])
+
+    def test_no_today_falls_back_to_six_latest_and_keeps_undated_legacy_data(self):
+        rows = [record(str(i), custom_title=f"Dataset {i}", saved_at=f"2026-11-02T{i:02}:00:00Z") for i in range(8)]
+        rows += [record("legacy", custom_title="", scraped_at="invalid")]
+        now = datetime(2026, 11, 4, tzinfo=timezone.utc)
+        is_today, groups = featured_datasets(dataset_options(rows, None), now)
+        self.assertFalse(is_today)
+        self.assertEqual([group["title"] for group in groups], [f"Dataset {i}" for i in range(7, 1, -1)])
+        self.assertEqual(featured_datasets([], now), (False, []))
+        self.assertEqual(featured_datasets(dataset_options(rows[-1:], None), now)[1][0]["title"],
+                         "Untitled (older records)")
+
     def test_filters_compose_and_untitled_remains_distinct_from_a_literal_title(self):
         rows = [record("a"), record("b", status="processed"), record("c", custom_title="Campaign B"),
                 record("d", custom_title=""), record("e", custom_title="Untitled (older records)"),
@@ -164,6 +189,8 @@ class RecordManagementUITests(unittest.TestCase):
 
     def loaded(self):
         self.app.button(key="record_manager_refresh").click().run()
+        if "record_manager_details" not in self.app.session_state or not self.app.session_state["record_manager_details"]:
+            self.app.button(key="record_manager_browse_all").click().run()
         self.assertFalse(self.app.exception)
 
     def review(self, ids=("a",)):
@@ -171,12 +198,60 @@ class RecordManagementUITests(unittest.TestCase):
         self.app.button(key="record_manager_review").click().run()
         self.assertFalse(self.app.exception)
 
-    def test_no_automatic_database_read_selection_or_deletion(self):
-        self.load.assert_not_called()
-        self.loaded()
+    def test_automatically_loads_cards_without_selecting_or_deleting_records(self):
+        self.load.assert_called_once_with("db")
+        self.assertEqual(len(self.app.dataframe), 0)
+        self.assertEqual(len([button for button in self.app.button if "card_featured" in button.key]), 2)
+        self.assertFalse(self.app.multiselect)
+        self.app.run()
+        self.load.assert_called_once_with("db")
+        self.app.button(key="record_manager_browse_all").click().run()
         self.assertEqual(self.app.multiselect(key="record_manager_selection").value, [])
         self.assertTrue(self.app.button(key="record_manager_review").disabled)
         self.delete.assert_not_called()
+
+    def test_card_opens_just_its_dataset_and_back_clears_deletion_review(self):
+        self.app.button(key="record_manager_card_featured_title:Campaign A").click().run()
+        self.assertFalse(self.app.exception)
+        self.assertEqual(self.app.selectbox(key="record_manager_dataset").value, "title:Campaign A")
+        self.assertEqual(set(self.app.dataframe[0].value["ID"]), {"a", "b"})
+        self.review()
+        self.app.button(key="record_manager_back").click().run()
+        self.assertNotIn("record_manager_pending", self.app.session_state)
+        self.assertFalse(self.app.dataframe)
+        self.app.button(key="record_manager_card_featured_title:Campaign B").click().run()
+        self.assertEqual(self.app.dataframe[0].value["ID"].tolist(), ["c"])
+        self.assertEqual(self.app.multiselect(key="record_manager_selection").value, [])
+        self.delete.assert_not_called()
+
+    def test_dataset_search_finds_older_data_and_opens_the_complete_dataset(self):
+        self.rows += [record(f"new-{i}", custom_title=f"New {i}", saved_at="2026-11-04T01:00:00Z") for i in range(8)]
+        self.app.button(key="record_manager_refresh").click().run()
+        self.app.text_input(key="record_manager_dataset_search").set_value("EXAMPLE.com/a").run()
+        buttons = [button.key for button in self.app.button if "card_search" in button.key]
+        self.assertEqual(buttons, ["record_manager_card_search_title:Campaign A"])
+        self.app.button(key=buttons[0]).click().run()
+        self.assertFalse(self.app.exception)
+        self.assertEqual(set(self.app.dataframe[0].value["ID"]), {"a", "b"})
+        self.assertEqual(self.app.text_input(key="record_manager_search").value, "")
+        self.app.button(key="record_manager_back").click().run()
+        self.assertEqual(self.app.text_input(key="record_manager_dataset_search").value, "EXAMPLE.com/a")
+        self.app.text_input(key="record_manager_dataset_search").set_value("not-found").run()
+        self.assertTrue(any("No datasets match" in info.value for info in self.app.info))
+        self.app.text_input(key="record_manager_dataset_search").set_value("   ").run()
+        self.assertFalse([button for button in self.app.button if "card_search" in button.key])
+
+    def test_search_paginates_datasets_and_resets_on_a_new_query(self):
+        self.rows = [record(str(i), custom_title=f"Campaign {i:02}") for i in range(25)]
+        self.app.button(key="record_manager_refresh").click().run()
+        self.app.text_input(key="record_manager_dataset_search").set_value("campaign").run()
+        self.assertEqual(len([button for button in self.app.button if "card_search" in button.key]), 12)
+        self.app.selectbox(key="record_manager_dataset_page").select(3).run()
+        self.assertEqual(len([button for button in self.app.button if "card_search" in button.key]), 1)
+        self.app.text_input(key="record_manager_dataset_search").set_value("campaign 00").run()
+        self.assertEqual([button.key for button in self.app.button if "card_search" in button.key],
+                         ["record_manager_card_search_title:Campaign 00"])
+        self.assertFalse(self.app.exception)
 
     def test_entire_dataset_covers_all_pages_and_statuses_despite_empty_search_results(self):
         self.rows += [record(f"extra-{i}") for i in range(250)]

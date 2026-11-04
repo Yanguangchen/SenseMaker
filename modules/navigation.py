@@ -65,6 +65,10 @@ def dashboard_views(email: str, facebook_session: FacebookSession | None = None)
             'aria-label="Scrape Data" title="Scrape Data">'
             f'<span class="sm-rail-icon">{collect}</span>'
             '<span class="sm-rail-label">Scrape Data</span></button>'
+            '<button class="sm-rail-button" type="button" data-sm-view="Clean & manage data" '
+            'aria-label="Clean & manage data" title="Clean & manage data">'
+            f'<span class="sm-rail-icon">{records}</span>'
+            '<span class="sm-rail-label">Clean & manage data</span></button>'
             '<button class="sm-rail-button" type="button" data-sm-view="Sentiment Analysis" '
             'aria-label="Sentiment Analysis" title="Sentiment Analysis">'
             f'<span class="sm-rail-icon">{chart}</span>'
@@ -81,10 +85,6 @@ def dashboard_views(email: str, facebook_session: FacebookSession | None = None)
             'aria-label="GenCite: AI share of voice" title="GenCite: AI share of voice">'
             f'<span class="sm-rail-icon">{voice}</span>'
             '<span class="sm-rail-label">GenCite</span></button>'
-            '<button class="sm-rail-button" type="button" data-sm-view="Manage records" '
-            'aria-label="Manage records" title="Manage records">'
-            f'<span class="sm-rail-icon">{records}</span>'
-            '<span class="sm-rail-label">Manage records</span></button>'
             '<button class="sm-rail-button" type="button" data-sm-view="Tutorial" '
             'aria-label="Tutorial" title="Tutorial">'
             f'<span class="sm-rail-icon">{guide}</span>'
@@ -104,7 +104,7 @@ def dashboard_views(email: str, facebook_session: FacebookSession | None = None)
 
     st.html(THEME_DIR / "sidebar.css")
     with st.container(key="sm_views"):
-        views = st.tabs(["Scrap data", "Sentiment Analysis", "Sentiment Trends", "Content recommendations", "GenCite", "Manage records", "Tutorial"])
+        views = st.tabs(["Scrap data", "Clean & manage data", "Sentiment Analysis", "Sentiment Trends", "Content recommendations", "GenCite", "Tutorial"])
 
     script = (THEME_DIR / "sidebar.js").read_text(encoding="utf-8")
     version = hashlib.sha256(script.encode()).hexdigest()[:12]
