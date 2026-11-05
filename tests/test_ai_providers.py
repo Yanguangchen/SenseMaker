@@ -157,10 +157,10 @@ class ProviderUITests(unittest.TestCase):
     def test_switching_providers_never_renders_or_stores_keys_in_widgets(self):
         with patch.dict(os.environ, {"AI_PROVIDER": "gemini", "GEMINI_KEY": "private-gemini", "OPENAI_API_KEY": "private-openai"}):
             app = AppTest.from_string(self.script).run()
-            self.assertEqual(app.selectbox(key="ai_provider").value, "gemini")
-            self.assertEqual(app.selectbox(key="ai_provider").options, ["Gemini", "ChatGPT"])
+            self.assertEqual(app.radio(key="ai_provider").value, "gemini")
+            self.assertEqual(app.radio(key="ai_provider").options, ["Gemini", "ChatGPT"])
             for provider in ("openai", "gemini"):
-                app.selectbox(key="ai_provider").select(provider).run()
+                app.radio(key="ai_provider").set_value(provider).run()
                 self.assertFalse(list(app.exception))
                 self.assertEqual(len(app.text_input), 0)
                 visible = str(app) + repr(app.session_state.filtered_state)
@@ -182,7 +182,7 @@ class ProviderUITests(unittest.TestCase):
             ui(app, "analysis_datasets").select("untitled:").run()
             app.session_state["firestore_rows"] = [{"_id": "a", "raw_text": "Hello", "status": "pending"}]
             app.run()
-            app.selectbox(key="ai_provider").select("openai").run()
+            app.radio(key="ai_provider").set_value("openai").run()
             self.assertEqual(ui(app, "run_analysis_selected_btn").label, "Run ChatGPT on 1 included record")
             ui(app, "run_analysis_selected_btn").click().run()
             self.assertFalse(list(app.exception))
