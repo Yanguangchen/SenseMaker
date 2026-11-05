@@ -137,14 +137,18 @@ def _render_dataset_browser(rows: list[dict], groups: list[dict]) -> None:
     local_tz = viewer_timezone()
     apply_dataset_card_theme()
     is_today, featured = featured_datasets(groups, datetime.now(local_tz))
-    st.subheader("Today's datasets" if is_today else "Latest datasets")
-    if is_today:
-        st.caption(f"{len(featured)} datasets saved today · Newest first · Times in {local_tz}")
-    else:
-        st.caption(f"No datasets saved today. Showing the {len(featured)} latest datasets · Times in {local_tz}")
-    _render_dataset_cards(featured, "featured", local_tz)
-    st.divider()
-    st.subheader("Find a dataset")
+    latest_tab, find_tab = st.tabs(["Today's datasets" if is_today else "Latest datasets", "Find a dataset"])
+    with latest_tab:
+        if is_today:
+            st.caption(f"{len(featured)} datasets saved today · Newest first · Times in {local_tz}")
+        else:
+            st.caption(f"No datasets saved today. Showing the {len(featured)} latest datasets · Times in {local_tz}")
+        _render_dataset_cards(featured, "featured", local_tz)
+    with find_tab:
+        _render_dataset_search(rows, groups, local_tz)
+
+
+def _render_dataset_search(rows: list[dict], groups: list[dict], local_tz) -> None:
     search = st.text_input("Search datasets", key="record_manager_dataset_search", max_chars=200,
                            placeholder="Search by dataset name, page title, URL or record ID")
     if search.strip():
@@ -220,9 +224,8 @@ def _render_dataset_deletion(rows: list[dict], dataset: str | None) -> None:
 
 
 def render_record_management() -> None:
-    st.subheader("Clean & manage data")
-    st.caption("Browse your saved datasets. Open a card to review and manage its records.")
-    st.caption("Shared library · Available to all approved users")
+    title, refresh_col = st.columns([12, 1], vertical_alignment="center")
+    title.subheader("Clean & manage data")
     # Preserve the search when its widget is temporarily hidden by dataset details.
     if "record_manager_dataset_search" in st.session_state:
         st.session_state["record_manager_dataset_search"] = st.session_state["record_manager_dataset_search"]
@@ -233,7 +236,7 @@ def render_record_management() -> None:
         st.session_state.pop("record_manager_needs_refresh", None)
         _clear_selection()
         st.session_state["record_manager_collection"] = collection
-    refresh = st.button("Refresh datasets", key="record_manager_refresh")
+    refresh = refresh_col.button("", icon=":material/refresh:", key="record_manager_refresh", help="Refresh datasets")
     if refresh or ("record_manager_rows" not in st.session_state
                    and not st.session_state.get("record_manager_needs_refresh")
                    and not st.session_state.get("record_manager_error")):
@@ -245,7 +248,7 @@ def render_record_management() -> None:
             st.session_state.pop("record_manager_needs_refresh", None)
         except Exception:
             st.session_state.pop("record_manager_rows", None)
-            st.session_state["record_manager_error"] = "Datasets could not be loaded. Check the connection and try Refresh datasets again."
+            st.session_state["record_manager_error"] = "Datasets could not be loaded. Check the connection and click the refresh icon to try again."
     notice = st.session_state.pop("record_manager_notice", None)
     if notice:
         st.success(f"Deleted {len(notice['deleted'])} record(s).")
@@ -273,7 +276,7 @@ def render_record_management() -> None:
         st.session_state["record_manager_dataset"] = None
         _clear_selection()
     if "record_manager_rows" not in st.session_state:
-        st.caption("Choose Refresh datasets to reload the library.")
+        st.caption("Click the refresh icon to reload the library.")
         return
     rows = st.session_state["record_manager_rows"]
     if not rows:

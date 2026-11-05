@@ -206,7 +206,8 @@ def _render_analysis_datasets(source_urls: list[str] | None, ready: bool) -> lis
         st.session_state.pop("analysis_dataset_catalog", None)
         _clear_loaded_analysis()
 
-    st.button("Refresh datasets", key="refresh_analysis_datasets", on_click=refresh, disabled=not ready)
+    st.button("", icon=":material/refresh:", key="refresh_analysis_datasets", help="Refresh datasets",
+              on_click=refresh, disabled=not ready)
     if ready and "analysis_dataset_catalog" not in st.session_state:
         try:
             st.session_state["analysis_dataset_catalog"] = {"rows": _fetch_analysis_datasets(source_urls), "error": False}
@@ -214,7 +215,7 @@ def _render_analysis_datasets(source_urls: list[str] | None, ready: bool) -> lis
             st.session_state["analysis_dataset_catalog"] = {"rows": [], "error": True}
     catalog = st.session_state.get("analysis_dataset_catalog", {}) if ready else {}
     if catalog.get("error"):
-        st.error("Datasets could not be loaded. Click Refresh datasets to retry.")
+        st.error("Datasets could not be loaded. Click the refresh icon to retry.")
     options = {row["key"]: row for row in catalog.get("rows", [])}
     local_tz = viewer_timezone()
     def label(key: str) -> str:
@@ -441,8 +442,8 @@ def _render_gemini_settings() -> None:
 def _render_ai_settings() -> str:
     if "ai_provider" not in st.session_state:
         st.session_state["ai_provider"] = get_ai_provider()
-    provider = st.selectbox("AI provider", list(AI_PROVIDERS), key="ai_provider",
-                            format_func=AI_PROVIDERS.get)
+    provider = st.radio("AI provider", list(AI_PROVIDERS), key="ai_provider", horizontal=True,
+                        format_func=AI_PROVIDERS.get)
     if not get_ai_key(provider):
         st.warning(f"{AI_PROVIDERS[provider]} is not configured yet. Choose another provider or contact the app administrator.")
     if provider == "gemini":
