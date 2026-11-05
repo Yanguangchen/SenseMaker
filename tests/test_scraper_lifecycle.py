@@ -7,6 +7,33 @@ from modules import scraper
 
 
 class ScraperLifecycleTests(unittest.IsolatedAsyncioTestCase):
+    async def test_strict_scroll_limit_stops_at_two_or_three_even_if_more_posts_keep_loading(self):
+        from modules.facebook_search import OYOSHI_SEARCH_URL
+
+        for limit in (2, 3):
+            with self.subTest(limit=limit):
+                page = MagicMock(evaluate=AsyncMock(), mouse=MagicMock(wheel=AsyncMock()))
+                context = MagicMock(new_page=AsyncMock(return_value=page))
+                @asynccontextmanager
+                async def remote(*args, **kwargs):
+                    yield context
+                sdk = MagicMock(__aenter__=AsyncMock(), __aexit__=AsyncMock(return_value=False))
+                async def harvest(**kwargs):
+                    url = f"https://www.facebook.com/example/posts/{len(kwargs['seen_urls'])}"
+                    kwargs["seen_urls"].add(url)
+                    return [{"url": url, "raw_text": "New Oyoshi post", "source_type": "container_post"}]
+                with patch("modules.scraper.async_playwright", return_value=sdk), \
+                     patch("modules.facebook_remote.remote_facebook_context", side_effect=remote), \
+                     patch("modules.scraper._goto_with_resilient_wait", new_callable=AsyncMock) as goto, \
+                     patch("modules.scraper._harvest_visible_posts", side_effect=harvest), \
+                     patch("modules.scraper._click_expand_controls", new_callable=AsyncMock), \
+                     patch("modules.scraper._wait_for_feed_settle", new_callable=AsyncMock):
+                    rows = await scraper.scrape_group(OYOSHI_SEARCH_URL, scroll_min=limit, scroll_max=limit,
+                                                      strict_scroll_limit=True, facebook_owner="owner@example.com")
+                goto.assert_awaited_once_with(page, target_url=OYOSHI_SEARCH_URL, timeout_ms=60_000)
+                self.assertEqual(page.mouse.wheel.await_count, limit)
+                self.assertEqual(len(rows), limit * 2 + 1)
+
     async def test_stalled_collection_preserves_posts_and_releases_the_remote_context(self):
         context = MagicMock(new_page=AsyncMock())
         released = False

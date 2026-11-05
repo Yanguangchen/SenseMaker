@@ -42,15 +42,15 @@ class DashboardAccessTests(unittest.TestCase):
             app = self.run_dashboard()
             self.assertEqual([tab.label for tab in app.tabs], ["Scrap data", "Clean & manage data", "Sentiment Analysis", "Analysis", "Settings", "Sentiment Trends", "Content recommendations", "GenCite", "Analyze", "Recommendations", "Saved analyses", "Tutorial"])
             self.assertEqual([button.label for button in app.button if button.key and button.key.startswith("scrape_open_")],
-                             ["Open Facebook →", "Open X →", "Open Online news →", "Open Custom website →", "Open Reddit"])
+                             ["Open Facebook →", "Open Oyoshi on Facebook →", "Open X →", "Open Online news →", "Open Custom website →", "Open Reddit"])
             verify.assert_called_once_with("signed-token", {"editor@example.com"})
 
-    @patch.dict(os.environ, {"SENSEMAKER_HOSTED": "1"})
     def test_hosted_deployment_enables_configured_remote_login_and_keeps_collection_headless(self):
         self.component.return_value = lambda **kwargs: {"id_token": "signed-token", "event_id": "login"}
         from modules.facebook_session import FacebookSession
-        with patch("modules.auth.verify_access", return_value="editor@example.com"), \
-             patch("dashboard.IS_CLOUD", True), \
+        with patch("dashboard.IS_CLOUD", True), \
+             patch.dict(os.environ, {"SENSEMAKER_HOSTED": "1"}), \
+             patch("modules.auth.verify_access", return_value="editor@example.com"), \
              patch("modules.facebook_remote.remote_facebook_configured", return_value=True), \
              patch("modules.facebook_remote.remote_facebook_session", return_value=FacebookSession()):
             app = self.run_dashboard()

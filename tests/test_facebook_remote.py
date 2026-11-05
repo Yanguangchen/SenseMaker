@@ -6,10 +6,24 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import httpx
+from browserbase import APIStatusError, NotFoundError
 from streamlit.testing.v1 import AppTest
 
 from modules.facebook_session import FacebookLoginError, FacebookSession
 from modules import facebook_remote as remote
+
+
+class ConfigurationTests(unittest.TestCase):
+    def test_api_key_alone_enables_hosted_browser(self):
+        with patch("modules.facebook_remote.get_setting", side_effect=lambda key: {
+            "BROWSERBASE_API_KEY": "server-key",
+        }.get(key, "")):
+            self.assertTrue(remote.remote_facebook_configured())
+
+    def test_missing_api_key_disables_hosted_browser(self):
+        with patch("modules.facebook_remote.get_setting", return_value=""):
+            self.assertFalse(remote.remote_facebook_configured())
 
 
 class HostedLoginUITests(unittest.TestCase):
@@ -141,6 +155,109 @@ class ProfileTests(unittest.TestCase):
         self.assertNotIn("verified_at", updates)
 
 
+class ProfileRecoveryTests(unittest.TestCase):
+    def setUp(self):
+        self.addCleanup(patch.stopall)
+        self.ref = MagicMock()
+        self.record = {"context_id": "old-profile", "user_id": "123", "name": "Alex",
+                       "verified_at": time.time(), "needs_login": False}
+        self.ref.get.return_value.to_dict.side_effect = lambda: dict(self.record)
+        patch("modules.facebook_remote._profile_ref", return_value=self.ref).start()
+        self.db = patch("modules.facebook_remote.init_db").start().return_value
+        self.transaction = self.db.transaction.return_value
+        patch("modules.facebook_remote.firestore.transactional", side_effect=lambda function: function).start()
+        patch("modules.facebook_remote.get_setting", return_value="server-key").start()
+        self.bb = MagicMock()
+        self.bb.contexts.create.return_value = SimpleNamespace(id="new-profile")
+        patch("modules.facebook_remote.Browserbase").start().return_value.__enter__.return_value = self.bb
+
+    @staticmethod
+    def provider_error(status):
+        response = httpx.Response(status, request=httpx.Request("GET", "https://api.browserbase.com/v1/contexts/old-profile"))
+        error_type = NotFoundError if status == 404 else APIStatusError
+        return error_type("Provider error", response=response, body={})
+
+    def test_valid_saved_context_is_reused_without_changing_login(self):
+        self.assertEqual(remote._ensure_profile("editor@example.com"), "old-profile")
+        self.bb.contexts.retrieve.assert_called_once_with("old-profile")
+        self.bb.contexts.create.assert_not_called()
+        self.transaction.set.assert_not_called()
+
+    def test_missing_context_is_replaced_and_old_identity_requires_a_new_login(self):
+        self.bb.contexts.retrieve.side_effect = self.provider_error(404)
+        self.assertEqual(remote._ensure_profile("editor@example.com"), "new-profile")
+        args, kwargs = self.transaction.set.call_args
+        self.assertIs(args[0], self.ref)
+        self.assertTrue(kwargs["merge"])
+        updates = args[1]
+        self.assertEqual(updates["context_id"], "new-profile")
+        self.assertIs(updates["user_id"], remote.firestore.DELETE_FIELD)
+        self.assertIs(updates["name"], remote.firestore.DELETE_FIELD)
+        self.assertTrue(updates["needs_login"])
+        self.assertEqual(updates["verified_at"], 0)
+        self.bb.contexts.create.assert_called_once_with()
+        self.bb.contexts.delete.assert_not_called()
+
+    def test_first_login_and_incomplete_records_can_create_a_profile(self):
+        for record in ({}, {"needs_login": True}):
+            with self.subTest(record=record):
+                self.record = record
+                self.assertEqual(remote._ensure_profile("editor@example.com"), "new-profile")
+        self.bb.contexts.retrieve.assert_not_called()
+
+    def test_authentication_outages_and_usage_limits_never_replace_saved_context(self):
+        for error in (self.provider_error(401), self.provider_error(403), self.provider_error(429),
+                      self.provider_error(500), TimeoutError("Temporary timeout")):
+            with self.subTest(error=error):
+                self.bb.contexts.retrieve.side_effect = error
+                with self.assertRaises(type(error)):
+                    remote._ensure_profile("editor@example.com")
+        self.bb.contexts.create.assert_not_called()
+        self.transaction.set.assert_not_called()
+
+    def test_busy_profile_is_not_replaced(self):
+        self.record["busy_until"] = time.time() + 120
+        with self.assertRaisesRegex(FacebookLoginError, "already open"):
+            remote._ensure_profile("editor@example.com")
+        self.bb.contexts.retrieve.assert_not_called()
+        self.bb.contexts.create.assert_not_called()
+
+    def test_newly_acquired_lease_prevents_replacement_and_cleans_up_unused_context(self):
+        self.bb.contexts.retrieve.side_effect = self.provider_error(404)
+        def create():
+            self.record["busy_until"] = time.time() + 120
+            return SimpleNamespace(id="new-profile")
+        self.bb.contexts.create.side_effect = create
+        with self.assertRaisesRegex(FacebookLoginError, "already open"):
+            remote._ensure_profile("editor@example.com")
+        self.transaction.set.assert_not_called()
+        self.bb.contexts.delete.assert_called_once_with("new-profile")
+
+    def test_concurrent_recovery_reuses_winner_and_only_removes_unused_new_context(self):
+        self.bb.contexts.retrieve.side_effect = self.provider_error(404)
+        def create():
+            self.record["context_id"] = "concurrent-profile"
+            return SimpleNamespace(id="new-profile")
+        self.bb.contexts.create.side_effect = create
+        self.assertEqual(remote._ensure_profile("editor@example.com"), "concurrent-profile")
+        self.transaction.set.assert_not_called()
+        self.bb.contexts.delete.assert_called_once_with("new-profile")
+
+    def test_failed_save_cleans_up_new_context_and_preserves_original_error(self):
+        self.bb.contexts.retrieve.side_effect = self.provider_error(404)
+        self.transaction.set.side_effect = RuntimeError("Database unavailable")
+        self.bb.contexts.delete.side_effect = RuntimeError("Cleanup unavailable")
+        with self.assertRaisesRegex(RuntimeError, "Database unavailable"):
+            remote._ensure_profile("editor@example.com")
+        self.bb.contexts.delete.assert_called_once_with("new-profile")
+
+    def test_changed_profile_cannot_be_leased_using_a_stale_context(self):
+        with patch("modules.facebook_remote._ensure_profile", return_value="stale-profile"):
+            with self.assertRaisesRegex(FacebookLoginError, "profile changed"):
+                remote._acquire("editor@example.com", 240)
+        self.transaction.update.assert_not_called()
+
+
 class BrowserLifecycleTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         self.addCleanup(patch.stopall)
@@ -177,6 +294,7 @@ class BrowserLifecycleTests(unittest.IsolatedAsyncioTestCase):
             async with remote.remote_facebook_context(self.playwright, "editor@example.com", on_ready=urls.append) as context:
                 self.assertIs(context, self.context)
         settings = self.bb.sessions.create.call_args.kwargs["browser_settings"]
+        self.assertNotIn("project_id", self.bb.sessions.create.call_args.kwargs)
         self.assertEqual(settings["context"], {"id": "private-profile", "persist": True})
         self.assertFalse(settings["record_session"])
         self.assertFalse(settings["log_session"])
@@ -184,7 +302,7 @@ class BrowserLifecycleTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(urls[0].startswith("https://www.browserbase.com/"))
         self.assertNotIn("private-key", urls[0])
         self.browser.close.assert_awaited_once()
-        self.bb.sessions.update.assert_awaited_once()
+        self.bb.sessions.update.assert_awaited_once_with("remote-session", status="REQUEST_RELEASE")
         self.release.assert_called_once_with("editor@example.com", "lease", identity)
 
     async def test_failed_cdp_connection_still_terminates_the_remote_session_without_leaking_its_url(self):

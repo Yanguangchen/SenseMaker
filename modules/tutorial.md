@@ -1,298 +1,222 @@
 # CrisisRadar tutorial
 
-Use CrisisRadar to collect source material, understand sentiment and Thailand-related signals, track changes, and plan useful content. GenCite adds a separate view of how often AI answers mention your brand.
+Use CrisisRadar to collect source material, analyze sentiment and Thailand-related signals, track trends over time, and plan evidence-backed content.
 
-## Quick start: your first analysis
+## Quick start
 
-This walkthrough uses a public website article. You need an approved Google account, working cloud storage and a configured Gemini or ChatGPT provider. The website collector itself needs no API key.
+Run your first end-to-end analysis with a public website article (no social login required):
 
-1. Sign in with your approved Google account.
-2. Open **Scrape Data → Custom website** from the sidebar.
-3. Paste one public article URL into **Website links (one per line)**. Use a page you can read without signing in.
-4. Optionally enter a **Dataset title**, such as `Delivery feedback — November baseline`. Leave it blank to use the source and collection time.
-5. Click **Collect website pages**. The pages save automatically. Wait for the cloud-save confirmation, then check that the extracted text matches the article.
-6. Open **Sentiment Analysis** and click **Start sentiment analysis**. Choose **Manual selection**, your record sources and saved datasets, or choose **Last scraped data** for the latest collection. Records appear automatically.
-7. Review the table and uncheck **Include** for any unwanted records. Exclusions save with the dataset and can be reversed. Choose an **AI provider** in Settings if needed, then continue to **Analyze** and add relevant watch terms.
-8. Check the included-record count and click **Run Gemini** or **Run ChatGPT**. Successful analyses are saved automatically.
-9. Open **Evidence by record** in the results. Read the original excerpt, translation, signal and supporting quotes before drawing conclusions.
-10. Open **Content plan**, choose **Latest analysis**, enter a brand/topic and goal, and click **Generate content plan**. Review the drafts and export the plan if you want to keep it.
+1. **Sign in** with your approved Google account.
+2. Open **Scrape Data → Custom website**, paste a public article URL into **Website links (one per line)**, and click **Next →**.
+3. Optionally enter a **Dataset title**, then click **Collect website pages**. Wait for **Saved … record(s) to the cloud**.
+4. Open **Sentiment Analysis** and click **Start sentiment analysis**.
+5. In **Choose and edit data**, select **Last scraped data** (or **Manual selection** → choose **Custom website** and your dataset card). Keep **Include** checked for the records you want to analyze, then click **Next →**.
+6. In **Analyze**, add any Thai watch terms if needed and click **Run Gemini** or **Run ChatGPT**.
+7. Review the report and **Evidence by record** on the page, then open **Content plan** to generate keyword and content recommendations from **Latest analysis**.
 
-**What you should have:** a saved source record, a saved analysis, a point on the sentiment timeline, and a draft content plan. Automatic cloud saving does not run AI analysis.
+### Workspaces at a glance
 
-## Sign in and find your way around
-
-Use the Google account approved by your administrator. A Google login grants access to CrisisRadar; connecting Facebook is an additional step used only for Facebook collection. An access-denied message usually means the account is outside the approved-user list.
-
-| Workspace | Use it to |
+| Workspace | Purpose |
 | --- | --- |
-| Scrape Data | Collect Facebook, Reddit, Online news, X or Custom website material. |
-| Clean & manage data | Find saved records, filter a dataset and delete selected records with a preview. |
-| Sentiment Analysis | Choose and edit datasets, analyze included records, review evidence and export reports. |
-| Sentiment Trends | Compare saved analysis runs and news scans over time. |
-| Content plan | Turn analyzed concerns into keywords, content briefs and drafts. |
-| GenCite | Measure brand mentions in sampled AI answers and explore visibility gaps. |
-| Tutorial | Read this guide in the app, browse Contents, move between chapters or search for a control. |
+| **Scrape Data** | Collect posts, articles, and pages from Facebook, Oyoshi on Facebook, X, Online news, Custom website, or Reddit. |
+| **Clean & manage data** | Browse saved datasets, filter records, and delete individual records, bulk selections, or entire datasets. |
+| **Sentiment Analysis** | Select and curate datasets, run Gemini or ChatGPT analysis, inspect evidence, and export HTML/PDF/CSV reports. |
+| **Sentiment Trends** | Track sentiment scores and Thailand–Cambodia border tension risk over time. |
+| **Content plan** | Turn analyzed customer concerns into target keywords, content outlines, and drafts. |
+| **GenCite** | Measure brand share of voice in sampled AI answers and close visibility gaps. |
+| **Tutorial** | Browse or search this guide by chapter. |
 
-Click the CrisisRadar heading to collapse or expand the sidebar. On small screens it may start collapsed; the icons still open each workspace. Keyboard users can Tab to a workspace, use Up/Down or Home/End to move among navigation buttons, and press Enter to open one. Escape collapses the sidebar.
+- **Sidebar & theme:** Click the **CrisisRadar** header (or press `Escape`) to collapse/expand the sidebar. Use the top-right menu (**Settings**) to switch between light and dark themes, and **Sign out** in the sidebar when finished.
 
-Open the top-right app menu, choose **Settings**, then select a light, dark or custom theme. Use **Sign out** in the sidebar when finished. Switching workspaces keeps current form values and results in the session; a reload, sign-out, server restart or new device can lose unsaved work.
+## Scrape Data: overview & Facebook
 
-## Choose sources and save your collection
+Open **Scrape Data** to choose from five main source cards—**Facebook**, **Oyoshi on Facebook**, **X**, **Online news**, and **Custom website**—or expand **Other sources** for **Reddit**. Click **← All sources** at any time to return to the cards without losing your current settings or results.
 
-Choose one of the four main cards: **Facebook**, **X**, **Online news** or **Custom website**. Facebook uses blue and X black, each with its brand logo. Online news uses a teal newspaper icon, and Custom website a purple browser icon. Open **Other sources** below the cards to find **Reddit**, with its orange brand logo. **All sources** returns to the cards while keeping your settings and collected results. Collection runs when you request it; the platform does not continuously monitor all sources in the background.
-
-| Source | Input and coverage | Connection needed |
+| Source | What it collects | Cloud saving |
 | --- | --- | --- |
-| Facebook | Your selected saved links; browser-visible posts and available comments. | Your Facebook session; hosted browser setup. |
-| Reddit | The r/cambodia feed, with configurable post and comment limits. | Approved Reddit API access configured by the administrator. |
-| Online news | Google News searches for the enabled watch categories. | No separate news API key. |
-| X | Recent posts matching your enabled searches, with optional reply samples. | Server bearer token, read access and API credit. |
-| Custom website | Public HTML or plain-text pages at URLs you paste. | No additional API key or social login. |
+| **Facebook** | Posts and visible comments from your selected Facebook group, page, or post links. | Manual (**Save data to cloud**) |
+| **Oyoshi on Facebook** | Direct Facebook search results for `oyoshi` (or a custom Facebook search URL) with 2–3 scrolls. | Manual (**Save data to cloud**) |
+| **X** | Recent posts (last ~7 days, excluding reposts) and optional reply samples for enabled searches. | Automatic |
+| **Online news** | Google News headlines and snippets across enabled watch categories and editions. | Automatic |
+| **Custom website** | Main text extracted from up to 100 public web pages per run. | Automatic (plus **Save dataset** to rename) |
+| **Reddit** | Newest posts and sampled comments from `r/cambodia`. | Manual (**Save data to cloud**) |
 
-**Online news, X and Custom website save collected records automatically.** X first asks for a required **Dataset name**, then reveals collection options and a final collection step. For Online news and Custom website, optionally enter a **Dataset title**; a blank title uses the source and collection time. Wait for **Saved … record(s) to the cloud**. All collected records are saved, even if you later filter the preview. They can then be loaded in **Sentiment Analysis** and **Clean & manage data**.
+### Facebook (groups, pages & posts)
 
-Selecting **X** or **Start X collection** opens a focused window with the surrounding page dimmed and blurred. Escape, the close button or clicking outside closes it; **Resume X collection** restores your draft and current step during the session. After collection and saving, the window closes to show your results.
+1. **Connect Facebook:** Open **Scrape Data → Facebook**. If not connected yet, click **Log in to Facebook**, complete sign-in in the browser window, and click **Save Facebook login**. If your status is **Saved**, you can use **Check Facebook connection** to verify it before collecting.
+2. **Your links:** Select saved URLs in **Sources** (or **Select all**), or paste direct group, page, or post URLs into **Add links (one per line)**. Valid pasted URLs save and select automatically when you finish editing. Click **Next →**.
+3. **Collect posts:** Set **Scroll Iterations** (1–50), click **Collect posts**, then enter a **Custom title** and click **Save data to cloud**.
 
-If cloud saving fails, keep the page open and click **Retry saving collected records**. The collected data and original title are retained; retrying does not scrape again or incur another X collection request. New collection is paused until these records are saved. A reload, sign-out or server restart can still lose data that has not reached the cloud.
+- **Direct navigation:** The collector opens each selected Facebook URL directly rather than typing into Facebook's search bar.
+- **Link management:** **Clear** deselects links and clears pasted input while keeping your saved library. **Remove … saved links** deletes selected URLs from your account library without deleting previously saved posts.
+- **Background progress:** On hosted deployments, Facebook collection continues if you switch tabs. Use **Cancel collection** to stop early and keep completed posts.
 
-For **Facebook and Reddit**, review the results, add a descriptive **Custom title**, then click **Save data to cloud**. A title such as `Brand A — customer questions — 03 Nov` makes a dataset easier to recognize later.
+### Oyoshi on Facebook (direct search)
 
-**Collected** means the result is available in the current session. **Saved** means it is in the cloud library. **Processed** means it has a saved AI analysis. Collecting material alone does not run AI analysis.
+Open **Scrape Data → Oyoshi on Facebook** to collect directly from the preconfigured Facebook search for `oyoshi` (including its saved filter), reusing your Facebook login without altering your saved link selection:
 
-An unavailable source may produce a warning while other sources succeed. Warnings are not saved as content records. Source coverage and comment samples can be incomplete, so record the limits you used when comparing runs.
+- **Skips link selection:** Opens straight to **Collect posts** (or **Connect Facebook** first if you are not signed in).
+- **Strict scroll budget:** Defaults to **3** scroll iterations (adjustable between **2** and **3**) with a strict limit—no extra adaptive scroll cycles are added.
+- **Custom search URLs:** Replace **Oyoshi Facebook search URL** with any filtered Facebook search link (`/search/…` containing a `q=` query). Your custom URL and scroll count stay saved in the session when switching sources.
+- **Preview & save:** Click **Open this search on Facebook** to inspect the live search page, or click **Collect posts**, enter a **Custom title**, and click **Save data to cloud**.
 
-## Collect custom website pages
+### Saved Facebook links
 
-Use **Scrape Data → Custom website** for ordinary articles, blogs, company pages and other public websites.
+Click **Saved Facebook links** on the **Scrape Data** source-card screen or inside the Facebook workspace (or expand **Inspect all saved Facebook links** in **Your links**):
 
-1. Paste URLs into **Website links (one per line)**. You can enter up to 100 unique links per run; a missing scheme is treated as HTTPS.
-2. Optionally enter a **Dataset title**, then click **Collect website pages**. Only the supplied pages and their redirects are requested; links inside each page are not crawled.
-3. Check **Pages collected** and any per-link notices. Open each result to read the extracted text and use **Open source page** to compare it with the original.
-4. Confirm **Saved … record(s) to the cloud**. If saving failed, use **Retry saving collected records** while keeping the page open.
-5. To save after reviewing, edit **Dataset title** above and click **Save dataset** below the results. This saves the collected pages without collecting again. A blank title keeps the current title; a new title moves these records to that dataset without creating copies. Reusing a title groups them with its other records.
-6. In **Sentiment Analysis**, load the saved records and select the pages you want to analyze.
+- **Search & inspect:** Filter your entire personal library with **Find a saved Facebook link** and click any URL to open it in Facebook.
+- **Delete saved links:** Tick **Delete** beside the unwanted URLs, then click **Delete … selected links**. Deleted links are removed from your saved library and pending scrape selection. Previously collected posts and analyses stay intact.
+- **Refresh & export:** Click **Refresh saved Facebook links** to sync changes from other sessions, or **Download all saved Facebook links** to export a `.txt` list.
+- **No browser needed:** Viewing or refreshing your link library does not open a remote Facebook browser or start collection.
 
-**Reuse URL lists with presets:** After pasting links, enter a **New preset name** under **URL presets**
-and click **Save preset**. Choose a **Saved URL preset** and click **Load preset** to replace the URL
-input with that list. Edit the URLs and use **Update preset** to change the selected list, or give it
-a different name and **Save preset** to create another. **Delete preset** asks for confirmation and
-only removes the saved list; the current input and collected records are kept. Use **Refresh presets**
-to see changes from another device. Presets are private to your account and survive refreshes and
-sign-outs. Saving or loading a preset does not collect pages or run analysis.
+## Scrape Data: X, News, Websites & Reddit
 
-The collector prefers article/main text and removes common navigation, scripts and hidden elements. It supports HTML and plain text. It does not render JavaScript, sign in, solve CAPTCHA challenges, read PDFs, download media or transcribe audio. A page that works in your browser may still be unavailable to the collector.
+**X**, **Online news**, and **Custom website** save collected records to the cloud automatically. If a cloud write fails, keep the page open and click **Retry saving collected records** to save the cached results without scraping again.
 
-Up to 5 pages are collected at once. The limits are 2 MB per page, 60,000 extracted characters per page, up to 5 redirects, 30 seconds per page and a 10-minute batch budget. Each failed or unattempted link has its own notice; completed pages are kept. Long text is marked as truncated. AI analysis has its own excerpt limits, so review any truncation notes in the findings too.
+### X (recent posts)
 
-Duplicate input links are removed, and links ending at the same final URL produce one page record in a run. Recollecting and saving a changed website page refreshes its text and resets its earlier analysis to pending; unchanged text keeps its saved analysis. Private/local network links, nonstandard web ports and social media URLs are rejected.
+Click **Scrape Data → X** (or **Start X collection** / **Resume X collection**) to open the 3-step modal:
 
-## Collect Facebook posts
+1. **Name your dataset:** Enter a required **Dataset name** and click **Continue to options**.
+2. **Choose collection options:** Toggle watch searches, edit queries, set **Posts per search** (10–100) and **Replies per post** (0–10), check the estimated read count/cost, and click **Continue to collect**.
+3. **Collect posts:** Review the summary and click **Collect posts**. Results save automatically under your dataset name.
 
-1. Open **Scrape Data → Facebook** and click **Log in to Facebook**. On the hosted platform, complete Facebook sign-in and any verification in the embedded browser, then click **Save Facebook login**. Keep that browser open until saving finishes.
-2. If the connection says **Saved**, use **Check Facebook connection** before collecting. A saved login may need renewal.
-3. In **Your links**, paste URLs into **Add links (one per line)**. Valid links are saved and selected when you finish editing. Use **Sources** or **Select all** to choose the links for this run.
-4. Set **Scroll Iterations**. More scrolling may expose more posts but takes longer and does not guarantee complete coverage. Hosted collection uses the headless setting shown in the interface.
-5. Click **Collect posts**, wait for results, then enter a custom title and **Save data to cloud**.
+### Online news (Google News)
 
-During hosted Facebook collection, you can switch workspaces and return to its progress. **Cancel collection** stops the run and keeps completed results where available. An expired Facebook connection can stop the remaining sources; reconnect and retry those links.
+1. Open **Scrape Data → Online news**, enable watch categories, and customize their search queries if needed.
+2. Choose the **Published** time window, **Google News editions**, **Articles per search**, and an optional **Dataset title**.
+3. Click **Search Google News**. Both the collected articles and the border-tension risk point save automatically.
+4. Filter the on-screen preview by **Show** (`All articles`, `Flagged articles`, `Boycott`, `Border tension & escalation`) or **Category**—all collected articles remain saved in the dataset.
 
-**Clear** deselects sources and clears pasted input; saved links remain. **Remove … saved links** removes the selected links from your source library, while previously collected posts remain saved. **Refresh** reloads your saved links.
+### Custom website
 
-Facebook comments may be stored with their parent post. Read the evidence source label to distinguish the post author's words from a comment. Collection depends on what Facebook exposes to the connected account.
+1. Open **Scrape Data → Custom website** and paste up to 100 public HTTP/HTTPS URLs into **Website links (one per line)** (social media and private-network links are rejected). Click **Next →**.
+2. In **Collect pages**, enter an optional **Dataset title** and click **Collect website pages**.
+3. Expand any collected page to inspect its extracted text or click **Open source page**. To rename or move the batch to another dataset title without re-scraping, update **Dataset title** and click **Save dataset**.
 
-## Collect Reddit, Online news and X
+- **URL presets:** In **Your links**, save reusable URL lists under **URL presets** (**Save preset**, **Load preset**, **Update preset**, **Delete preset**, **Refresh presets**). Presets are private to your account.
+- **Extraction scope:** Extracts main HTML/plain-text content (up to 60,000 characters and 2 MB per page, 5 pages concurrently). Does not execute JavaScript, sign in, read PDFs, or bypass CAPTCHAs.
 
-### Reddit
+### Reddit (`r/cambodia`)
 
-Open **Scrape Data → Other sources → Reddit**. The current collector targets **r/cambodia**. Set **Reddit posts per source** and **Comments per post**, then click **Collect posts**. Review the returned posts/comments, enter a custom title and save the results.
+1. Open **Scrape Data → Other sources → Reddit**.
+2. Set **Reddit posts per source** (1–500) and **Comments per post** (0–100), then click **Collect posts**.
+3. Enter a **Custom title** and click **Save data to cloud**.
 
-The collector uses approved Reddit API access. It defaults to newest posts and samples returned comments; it does not guarantee every comment in a thread. Posts and comments are separate records, with parent context retained for comments. If Reddit is not connected, the administrator must configure access before collection can succeed.
+## Clean & manage data
 
-### Online news
+Open **Clean & manage data** in the sidebar to inspect datasets and permanently remove unwanted records from the shared library.
 
-Open **Scrape Data → Online news**. Enable the categories you want, edit their search terms, choose **Published**, select **Google News editions**, set **Articles per search**, optionally enter a **Dataset title**, and click **Search Google News**.
+### Browse and filter
 
-Review the cloud-save confirmation, article counts, keyword flags, risk indicator and publication-day chart. The entire collected article set saves automatically. The **Show** and **Category** controls only filter the preview.
+- **Dataset cards:** Shows all datasets saved today in your local timezone (or the 6 latest datasets if none were saved today). Click **Refresh datasets** to reload from the cloud.
+- **Find older datasets:** Use **Search datasets** to match a dataset title, page title, URL, or record ID, then click **Open dataset**—or click **Browse all records**.
+- **Filter inside a dataset:** Narrow records by **Dataset**, **Source**, **Status** (`pending`, `processed`, `error`), or **Search records**. Click **Back to datasets** to return to the card view.
 
-A news record contains the returned headline/snippet and source metadata; it is not necessarily the full publisher article. For full page text, use a direct publisher URL in **Custom website**. The articles and the timeline snapshot are saved separately and each reports its save result. Recollecting an article updates its dataset and metadata; unchanged text keeps its saved analysis, while changed text returns to pending analysis.
+### Delete records or datasets
 
-### X
+All deletions require confirmation, apply across all users of the shared library, and automatically clear deleted records from active session caches:
 
-Open **Scrape Data → X** and follow three steps:
+- **Delete a single record:** Click **Delete** beside any row in **Records**, then click **Permanently delete record** (or **Cancel deletion**). Expand **View record table** to inspect full metadata.
+- **Delete multiple records:** Under **Delete multiple records**, pick items in **Records to delete** or click **Select all records on this page** (up to 200 per batch). Click **Review deletion of … record(s)**, verify the preview table, and click **Permanently delete … record(s)**.
+- **Delete an entire dataset:** Select a single title in **Dataset**, expand **Delete an entire dataset**, click **Review dataset deletion**, and confirm with **Permanently delete dataset**. This removes all reviewed records in that dataset across all pages, sources, and statuses.
 
-1. **Name your dataset:** Enter a **Dataset name** and click **Continue to options**. The name is required; collection options appear only after you continue.
-2. **Choose collection options:** Enable the searches you want and edit their terms. Set **Posts per search** and **Replies per post**, review the read/cost estimate, then click **Continue to collect**. At least one enabled search needs search terms.
-3. **Collect posts:** Review the dataset name and collection summary, then use the separate **Collect posts** button to start. Posts and collected replies save automatically under your chosen name; check the cloud-save confirmation.
+## Sentiment Analysis & reports
 
-Use **Back to options** or **Back to dataset name** to revise your choices without losing them. Moving between steps does not collect posts. If cloud saving fails, **Retry saving collected records** stays available even while you edit an earlier step, and uses the original collection's name.
+### 1. Configure settings (optional)
 
-Recent search covers about the last seven days. Reposts are excluded. Replies are optional, capped samples and are off by default. The API may return more records than the app retains because its smallest reply page is larger than some requested samples. The displayed estimate is a guide; actual access, rates and credit depend on the provider account.
+Open the **Settings** tab in **Sentiment Analysis** to adjust:
+- **Record status:** `all` (default), `pending`, `processed`, or `error`.
+- **AI provider:** **Gemini** (with model selector) or **ChatGPT**, using server-configured API keys.
 
-X replies are separate records with parent context. If a search fails, completed records remain available and the collection notice explains the problem.
+### 2. Choose data and run analysis
 
-## Run sentiment analysis
+Click **Start sentiment analysis** (or **Continue**) on the **Analysis** tab to open the 2-step guided modal:
 
-1. Open **Sentiment Analysis** and click **Start sentiment analysis** (or **Continue**) to open the two-step dialog.
-2. In **Choose and edit data**, choose **Manual selection** or **Last scraped data**. For manual selection, choose **Record sources**, then select one or more source-colored dataset cards. All datasets saved today appear first, using your local timezone; if none were saved today, the six latest appear. Open **Choose older datasets or adjust selection** to search all saved datasets from those sources and add earlier ones. Click a selected card again, or remove its picker entry, to deselect it. No sources or datasets are preselected in a new session. Reusing a title groups records together; older untitled records appear under **Untitled (older records)**.
-3. Records appear immediately below your choices. There is no load button or record limit. Only the selected sources and datasets appear. **Last scraped data** includes exactly that collection's records and saves an unsaved collection before opening it. **Refresh datasets** refreshes both the dataset list and its records.
-4. Edit the **Include** checkboxes directly in the table. Eligible records start included unless previously excluded. Unchecking a record saves a reversible exclusion with the shared dataset; check it again to restore it. Source text and saved analysis are kept. Exclusions persist when you reopen the dataset. If saving fails, use **Retry saving changes**; analysis stays blocked until the edits save.
-5. The **Settings** tab contains **Record status** (default **all**), **AI provider**, and the Gemini model controls. Use **pending** or **error** when you want to analyze only those statuses. Gemini and ChatGPT use server credentials.
-6. Click **Next** to **Analyze**, enter any Thai projects, companies or brands to watch, and check the included count on **Run Gemini** or **Run ChatGPT**. Only those included records are sent when you click Run. The dialog closes after the run and the processed/error summary appears on the page. Successful analyses are saved automatically.
+1. **Choose and edit data:**
+   - Select **Manual selection** (pick **Record sources**, then click one or more dataset cards or use **Choose older datasets or adjust selection**) or **Last scraped data** (the most recent collection from this browser session).
+   - Review the loaded table and uncheck **Include** on any record you want to exclude. Exclusions save to the cloud immediately and persist across sessions. Click **Next →**.
+2. **Analyze:**
+   - Enter any Thai projects, companies, or brands to watch (one per line).
+   - Click **Run Gemini on … included records** or **Run ChatGPT on … included records**. When finished, the modal closes and displays the results on the page.
 
-The results include original text, an English translation, topics, a sentiment label, a priority/risk score and an evidence-backed Thailand monitoring assessment. The current sentiment categories are **Joy**, **Anger**, **Anxiety** and **Neutral**. Sentiment and Thailand relevance are separate: negative language alone does not establish a Thailand-related signal.
+### 3. Signals, evidence & exports
 
-| Signal | How to read it |
+Each analyzed record receives an English translation, topics, a sentiment label (**Joy**, **Anger**, **Anxiety**, or **Neutral**), a risk score (1–10), and a Thailand monitoring signal:
+
+| Signal | Meaning |
 | --- | --- |
-| Negative sentiment | Supported criticism or negative feelings about a relevant target. |
-| Reported tension | Supported disputes, protests or escalation. |
-| Explicit boycott call | The source itself advocates refusing to buy, support or participate. |
-| Reporting a boycott | The source describes someone else's boycott. |
-| Opposing a boycott | The source argues against a boycott. |
-| Needs review / unclear | The connection, intent or evidence is insufficient or ambiguous. |
+| **Negative sentiment** | Evidence-backed criticism or negative sentiment toward a relevant target. |
+| **Reported tension** | Reports of disputes, protests, or escalation. |
+| **Explicit boycott call** | Directly urges others not to buy, support, or participate. |
+| **Reporting a boycott** | Describes or reports on a boycott without calling for one. |
+| **Opposing a boycott** | Argues against a boycott. |
+| **Needs review / unclear** | Ambiguous intent or insufficient evidence. |
 
-Confidence is a model assessment, not a calibrated probability. Check exact source quotes and validation notes. A comment should not inherit the parent's position merely because it appears under that post. Long inputs may be excerpted; a translation is not a substitute for the original evidence.
+- **Report tabs:** Inspect **Comment Sentiment Analysis**, **Velocity Tracker**, **Negative Post Reports**, and **Evidence by record**.
+- **Filter & export:** In **Evidence by record**, filter by **Show findings** and click **Export findings CSV**. Above the report, use **Download report (HTML)** or **Create PDF** → **Download PDF**.
+- **Reopen saved analyses:** Under **View processed records**, saved analyses for the included records in your selected datasets appear automatically without re-running the AI model.
 
-To reopen work later, choose your sources and datasets in **Manual selection**. Their included records' saved analyses appear automatically under **View processed records**, without another model run. Changing datasets, sources, selection mode or record status refreshes the view and clears previous run results; saved exclusions remain. The sentiment timeline summarizes runs within the selected sources. **Last scraped data** is available only for the current browser session and shows the full timeline.
+## Sentiment Trends & risk timeline
 
-## Review evidence and export reports
+Open **Sentiment Trends** to compare runs over time:
 
-Both the latest results and loaded processed records offer report views:
+- **Sentiment over time:** Plots each saved AI analysis run and Online News scan from **−100** (all negative) to **+100** (all positive), with a dashed equal-weight average and red rings marking boycott or border-tension signals. Use **Refresh timeline** to reload recent runs.
+- **Border tension risk over time:** Tracks headline risk scores (`Low < 20 ≤ Elevated < 45 ≤ High`) and boycott article counts from Google News scans. Use **Refresh risk timeline** to update.
+- **Velocity Tracker:** To measure engagement growth (`Live`, `Slowing`, `Dead`) in Sentiment Analysis reports, recollect and save the same eligible Facebook/Reddit/X posts at a later time so at least two snapshots exist.
 
-- **Comment Sentiment Analysis** summarizes sentiment, signals and the selected sample.
-- **Velocity Tracker** shows engagement changes for eligible posts with saved collection checks.
-- **Negative Post Reports** gives an individual report for each negative or flagged record.
-- **Evidence by record** lets you inspect translations, original excerpts, exact quotes and assessment details.
+## Content plan
 
-In **Evidence by record**, use **Show findings** to inspect flagged signals, boycott calls, boycott reports, negative sentiment, tensions or records needing review. **Export findings CSV** exports the findings matching that filter. Record counts describe the collected sample; they do not measure unique people or population-wide opinion.
+Open **Content plan** in the sidebar to turn analyzed customer concerns into keyword-led content briefs and drafts:
 
-Use **Download report (HTML)** for a shareable report, or click **Create PDF** and then **Download PDF** when it is ready. Reports use the result set loaded into that report view; the evidence filter does not narrow the whole report download. To change the report's scope, change which records you analyze or load.
+1. **Choose source records:** Select **Loaded processed records** or **Latest analysis**, then pick up to 30 records in **Records to use**.
+2. **Define the brief:** Enter **Brand or topic**, **What should the content improve?**, and an optional **Focus keyword or concern**.
+3. **Select language & model:** Choose **English**, **Khmer**, or **Thai** and a configured **Recommendation provider** (**Gemini** or **ChatGPT**).
+4. **Generate & verify:** Click **Generate content plan**. Review each card's primary/supporting keywords, concern, outline, and draft, and open **Source evidence and facts to verify** to check quotes and factual claims before publishing.
+5. **Export:** Click **Download keywords (CSV)** or **Download content plan (JSON)** to save a copy (plans are kept only for the current session).
 
-PDF export depends on the server's browser installation. If it is unavailable, download the HTML report and use your browser's print/save-as-PDF feature. Exports are copies: later corrections or deletions in the app do not update downloaded files.
+## GenCite (AI share of voice)
 
-## Read trends and repeat checks
+Open **GenCite** to measure how often AI models mention your brand when answering customer questions:
 
-Open **Sentiment Trends** after running an analysis or a news search. Use **Refresh timeline** if a recent result is missing, and expand **History** to inspect the saved points.
+- **Analyze:** Enter a **Query or topic**, click **Generate query variations** (or edit the table directly, up to 50 checked queries), enter **Brand to track** (plus optional aliases, competitors, market, and region), choose **Providers**, and click **Run analysis on … queries**. Use **Run again** to add another sampling round, or enter an **Analysis name** and click **Save analysis**.
+- **Recommendations:** Generate content briefs or keyword ideas targeting low-visibility queries. Open **View brief** / **View evidence**, or select **Queue for testing** → **Test … queued keywords** to run those keywords as a new query set.
+- **Saved analyses:** Open, rename, refresh, or delete your private saved GenCite runs. Use **Check provider access → Run check** in **Analyze** to test server AI keys.
 
-**Sentiment over time** has one point per saved AI analysis or Online News scan. The scale runs from −100 to +100: higher is more positive. AI points count Joy as positive and Anger/Anxiety as negative, using successfully analyzed records. News points use positive minus negative headline classifications from a keyword scan. These are different methods; check the point's source before comparing them. The dashed average gives each point equal weight, regardless of sample size.
+## Troubleshooting & admin setup
 
-Red rings mark border-tension or boycott signals. **Border tension risk over time** is a separate news-scan indicator, with its own **Refresh risk timeline** control. Its levels and alerts are keyword-derived leads for review, not predictions or confirmation that an event occurred.
+### Where data is stored
 
-For meaningful comparisons, repeat collection using similar sources, date windows, limits and AI provider/model. A change in the source mix or sample size can move the result even when underlying sentiment has not changed. Source scope in **Sentiment Analysis** also affects which analysis runs appear in the timeline.
-
-To build a **Velocity Tracker** history, recollect the same eligible posts at later times and save each collection. Running AI again on an unchanged saved snapshot does not create a new engagement observation. Two observations are needed to compare change; Live/Slowing/Dead describe measured growth between checks. Missing counts are not zero. Standalone comments, news articles and custom website pages are not engagement-tracked posts.
-
-## Create a sentiment-based content plan
-
-The sidebar's **Content plan** workspace is titled **Content recommendations**. It uses analyzed source records to suggest ways to address recurring concerns.
-
-1. In **Sentiment Analysis**, choose a dataset with saved analyses or run an analysis.
-2. Open **Content plan** and choose **Latest analysis** or **Loaded processed records** under **Use sentiment records from**.
-3. Select up to 30 records in **Records to use**. Include the concerns you want the plan to address.
-4. Enter **Brand or topic** and **What should the content improve?**. Optionally add a **Focus keyword or concern**.
-5. Choose **Content language** (English, Khmer or Thai) and a configured **Recommendation provider**.
-6. Click **Generate content plan**. Review each primary keyword, supporting keywords, concern, format, outline and suggested draft.
-7. Open **Source evidence and facts to verify**. Check the quoted records and verify operational facts before publishing. Use **Download keywords (CSV)** and **Download content plan (JSON)** to keep the results.
-
-**Example inputs:** Brand/topic: `Example Brand delivery service`. Goal: `Explain delivery timelines and answer refund questions using verified policies.` Focus: `delivery delays`. Use actual analyzed customer concerns as evidence; the example inputs do not supply company facts.
-
-The plan's baseline counts describe selected records. Keywords are suggested phrases without measured search volume, and suggested content does not guarantee improved sentiment. Some incomplete or unsupported suggestions may be omitted. Change the source selection, brief or provider/model to generate a plan for a new context; an old plan can disappear when that context changes.
-
-Plans stay in the session unless exported. The platform generates drafts; publishing them is a separate action. After publishing through your normal channels, collect comparable feedback and compare subsequent sentiment runs.
-
-## Use GenCite for AI share of voice
-
-GenCite tests how often model answers mention your brand. It starts from customer queries and can be used without collecting social posts or website records first.
-
-1. Open **GenCite → Analyze** and enter a **Query or topic**, such as `best delivery services for small businesses`.
-2. Click **Generate query variations**, or add/edit rows in **Queries to test**. Tick the **Test** column for the queries you want. Start with a small set; up to 50 queries can be selected.
-3. Enter **Brand to track**. Add comma-separated aliases and competitors if useful, plus an optional market and region.
-4. Select the configured **Providers**. Each selected provider generates five sampled answers per query per round.
-5. Click **Run analysis on … queries**. Review overall share of voice, answers mentioning the brand, the provider breakdown and the per-query table.
-6. Enter an **Analysis name** and click **Save analysis** to keep the result in your account. Use **Saved analyses → Open** to restore it later.
-
-Share of voice is the percentage of sampled AI answers that mention your brand or an alias, using case-insensitive matching. For example, 6 mentions in 10 returned answers is 60%. It is not market share, verified source citation coverage or a search-engine ranking. Failed provider requests can reduce the sample; read any provider notices.
-
-**Run again** adds another sampling round to the result's totals. Save again if you want to preserve that updated result; saving creates a new copy. Samples can vary even with the same queries.
-
-In **Recommendations**, generate content recommendations or keyword ideas based on measured query gaps. Competitor inputs help reveal those gaps. Open **View brief** or **View evidence** to inspect the supporting queries. **Mark as published** records a tracking status; it does not publish content to an external site. **Queue for testing**, followed by **Test … queued keywords**, runs those keywords as a new query set; review the resulting analysis in **Analyze**.
-
-**Saved analyses** offers Refresh, Open, Rename and Delete. Deleting requires confirmation. Saved GenCite analyses are private to your account. Use **Check provider access → Run check** if a configured model cannot answer.
-
-## Save, share and manage your work
-
-| Item | How to keep it | Where it lives |
+| Item | Scope | How it is saved |
 | --- | --- | --- |
-| Facebook source links | Add valid links in Your links. | Your account's saved source library. |
-| Website URL presets | Enter a New preset name and Save preset; use Update preset after editing. | Your account's saved URL presets, available on any device. |
-| Collected posts, articles and pages | Online news, X and Custom website save automatically; Facebook and Reddit use Save data to cloud. | The shared cloud record library. |
-| Successful sentiment analysis | Saved automatically after processing. | With the source record; choose the dataset to view its saved analyses. |
-| Trend points | Saved automatically when an analysis/news scan succeeds and storage is available. | Sentiment/news history. |
-| Sentiment content plans | Download keywords CSV and/or content-plan JSON. | Exported files; the on-screen plan is session-only. |
-| GenCite results | Give the result a name and click Save analysis. | Your account's Saved analyses. |
-| Reports | Download HTML, PDF or findings CSV. | Your downloaded copies. |
+| **Facebook links & Website presets** | Private to your account | Saved in **Your links** / **URL presets**; inspect or export in **Saved Facebook links**. |
+| **Collected records & AI analyses** | Shared across approved users | Auto-saved (X, News, Websites) or via **Save data to cloud** (Facebook, Reddit). |
+| **Exclusions (`Include` toggle)** | Shared with the dataset | Saved immediately when toggled in **Choose and edit data**. |
+| **GenCite saved analyses** | Private to your account | Saved via **Save analysis** in **GenCite → Analyze**. |
+| **Content plans & downloaded reports** | Session / local download | Exported as CSV, JSON, HTML, or PDF files. |
 
-Approved users share the cloud source-record library. A **Custom title** labels a record; it does not create a private project or restrict access. Facebook source-link libraries and saved GenCite analyses are account-specific.
+### Common issues
 
-To manage or delete saved records:
-
-1. Open **Clean & manage data** in the sidebar. Dataset cards load automatically, showing all datasets saved today in your browser's timezone (UTC when unavailable), newest first. If there are none today, the six latest datasets appear instead. Each card shows its record count, pending count, sources and latest save time. **Refresh datasets** loads changes from the cloud.
-2. Use **Search datasets** below the cards to find a dataset by name, page title, URL or record ID, then click **Open dataset**. Search results also appear as cards. Alternatively, choose **Browse all records**. Inside the dataset, filter by **Source** and/or **Status**, or use **Search records**. All analysis statuses are available, including pending and error records. **Back to datasets** returns to the cards and keeps your dataset search.
-3. Review the records. To remove one, click **Delete** beside that row, then **Permanently delete record** in its inline confirmation. **Cancel deletion** keeps it. Expand **View record table** to see all metadata.
-4. To remove several records, choose **Records to delete** or **Select all records on this page** under **Delete multiple records**, then click **Review deletion of … record(s)**. Check the preview and click **Permanently delete … record(s)**, or **Cancel deletion**. Nothing is selected automatically. Deletion cannot be undone and affects every user of the shared library.
-5. Read the result. Records changed by another operation after you loaded them are kept; refresh to review their current versions. If a deletion cannot be confirmed, reload the library before retrying.
-
-To delete a whole dataset, choose its title under **Dataset**, expand **Delete an entire dataset**, click **Review dataset deletion**, inspect the full preview, then click **Permanently delete dataset**. **Cancel dataset deletion** keeps the data. This action includes all reviewed records under that title, across all pages, sources and statuses; table search and source/status filters do not restrict it. Large datasets are processed in batches under one confirmation, so you do not need to select each page. Records changed or added since loading are kept, and you can refresh and review them again. A dataset disappears from the list when no records remain.
-
-If a batch fails, the result shows how many records were confirmed deleted and how many remaining deletions could not be confirmed. Refresh the library before retrying. Individual-record deletion still supports up to 200 selected records per confirmation. Changing a filter, search or page cancels the previous deletion review.
-
-Deleting a record removes its saved sentiment analysis too. Timeline summaries, saved source links, saved GenCite analyses and downloaded exports remain. The current session's collection copies and loaded results are cleared of deleted records. Collecting and saving a URL again can add it back to the library. An analysis already running cannot recreate a source that has been deleted.
-
-The earlier shortcut is also available: in **Sentiment Analysis**, load processed records, expand **Delete processed records**, select records, and review and confirm deletion. This shortcut handles processed records only; **Clean & manage data** covers all statuses.
-
-Removing Facebook source links is different from deleting source records. Sign-out clears the current session's loaded data; saved cloud records remain available subject to access permissions. Save or export work before leaving a session.
-
-## Troubleshooting and common questions
-
-| What you see | What to do |
+| Issue | Resolution |
 | --- | --- |
-| Access denied at Google sign-in | Use the approved account. Ask the administrator to check the allowed-user list if needed. |
-| Facebook login is Saved or disconnected | Click Check Facebook connection. If renewal is requested, Log in to Facebook, finish verification and Save Facebook login. |
-| A source is not configured | Ask the administrator to enable that source's credentials. Other configured collectors remain usable. |
-| Website link rejected | Use a public HTTP/HTTPS page on a standard web port. Social media and private-network links are not accepted here. |
-| No readable website text, HTTP 403, or verification page | Try a direct public article URL. JavaScript-only, login and CAPTCHA pages may be unavailable. |
-| Website collection reaches a size/time limit | Try fewer links or shorter pages. Save completed results before starting another run. |
-| Cloud saving failed after collection | Keep the page open and click Retry saving collected records. The original data/title are reused; collection stays paused until saving succeeds. |
-| No records in Sentiment Analysis | Choose sources and datasets in Manual selection, or Last scraped data. Records open automatically; check Record status, Refresh datasets, or use Retry opening dataset after a connection failure. |
-| No included records | Check Include beside the records you want to analyze in Choose and edit data, then continue to Analyze. |
-| Source library could not be loaded | Refresh Your links in the Facebook tab, then retry loading. If storage still fails, contact the administrator. |
-| AI run control disabled | Check the selected provider's configuration and that eligible records are selected. Credentials are managed on the server. |
-| Provider timeout, quota or rate-limit notice | Try a smaller batch or retry later. The administrator may need to check provider access or billing. |
-| Incomplete plan or unsupported source evidence | Retry with fewer relevant analyzed records and a clear goal. Read any detailed validation notice; switch to another configured provider if it persists. |
-| Content plan shows no records | Choose a dataset with saved analyses or run sentiment analysis first, then choose the matching source mode in Content plan. |
-| A plan disappeared | Its source selection, brief, provider or model may have changed, or the session restarted. Regenerate it and export a copy. |
-| Trends are empty or stale | Complete an analysis or news scan, refresh the timeline and check source scope. A failed history write may need an administrator's help. |
-| PDF creation fails | Download the HTML report; ask the administrator to check the server's Playwright/Chromium installation. |
-| GenCite run button is disabled | Enter a brand, select at least one query and choose a configured provider. |
-| GenCite score changes between runs | Sampling varies. Check queries, aliases, providers, completed answers and whether Run again added a round. |
+| **Access denied at sign-in** | Sign in with an email listed in `FAQ_EDITOR_EMAILS`. |
+| **Facebook login is Saved or expired** | Open **Scrape Data → Facebook**, click **Check Facebook connection**, or **Log in to Facebook** → **Save Facebook login**. |
+| **Oyoshi Facebook search URL rejected** | Use a valid Facebook search URL (`/search/…` with a non-empty `q=` query), or restore the default Oyoshi URL. |
+| **Saved Facebook links could not load** | Click **Refresh** in **Your links** or **Refresh saved Facebook links** in the link inspector. |
+| **Cloud saving failed after collection** | Keep the tab open and click **Retry saving collected records**—cached results save without re-scraping. |
+| **No records in Sentiment Analysis** | Select sources and datasets in **Manual selection** (or **Last scraped data**), check **Record status** in **Settings**, or click **Refresh datasets**. |
+| **Run Gemini / ChatGPT button disabled** | Ensure at least one record has **Include** checked, edits have finished saving, and the provider key is configured. |
+| **PDF export unavailable** | Use **Download report (HTML)** and print to PDF in your browser, or install Playwright Chromium on the server. |
 
-When reporting a problem, include the workspace, action, provider/source, error message and approximate time. Avoid including API keys, passwords or login cookies. You can describe a sensitive source instead of sharing its full contents.
+### Administrator configuration
 
-## Administrator setup and maintenance
+Configure secrets in your hosting environment (e.g., Railway Variables or `.env.local`):
 
-Users do not enter API secrets in collection or analysis forms. Configure credentials in the hosting service's secret settings; for Railway, use the service's Variables panel. The repository README contains the detailed deployment instructions.
-
-| Capability | Administrator configuration |
+| Feature | Required settings |
 | --- | --- |
-| Google sign-in | Firebase web configuration and the approved-user list (`FAQ_EDITOR_EMAILS`). |
-| Cloud library | Firebase project, collection and server Admin SDK credentials with appropriate access. |
-| Gemini | `GEMINI_KEY` or `GEMINI_API_KEY`; optional model configuration. |
-| ChatGPT | `OPENAI_API_KEY`; optional model configuration. |
-| Hosted Facebook browser | `BROWSERBASE_API_KEY` and `BROWSERBASE_PROJECT_ID`; users then connect their own Facebook sessions. |
-| Reddit | Approved Reddit app credentials and user agent; a refresh token when the approved app uses it. |
-| X | `X_BEARER_TOKEN`, recent-search access and available API credit. |
-| Custom websites and news | Server network access to the requested sites; no separate collection API key. |
-| PDF export | Playwright and its compatible Chromium browser installed on the server. |
-
-The same Gemini/OpenAI server keys support sentiment analysis, Content plan and GenCite. Providers, hosted browsers and X reads may incur charges; review usage in their respective accounts. A configured credential does not by itself guarantee model access, quota or provider credit.
-
-After configuration or deployment, verify sign-in, a small collection/save, one-record analysis and report export. Keep an eye on storage errors and provider notices. Only enable sources that are ready to use; no tutorial action automatically deploys the application or changes server settings.
+| **Google sign-in** | `FIREBASE_API_KEY`, `FIREBASE_AUTH_DOMAIN`, `FIREBASE_PROJECT_ID`, `FIREBASE_APP_ID`, `FAQ_EDITOR_EMAILS` |
+| **Firestore library** | `FIREBASE_PROJECT_ID`, `FIREBASE_COLLECTION`, `FIREBASE_CREDENTIALS` |
+| **Gemini / ChatGPT** | `GEMINI_KEY` (or `GEMINI_API_KEY`), optional `GEMINI_MODEL`; `OPENAI_API_KEY`, optional `OPENAI_MODEL` |
+| **Hosted Facebook** | `BROWSERBASE_API_KEY` |
+| **Reddit / X** | `REDDIT_CLIENT_ID`, `REDDIT_CLIENT_SECRET`, `REDDIT_USER_AGENT` (optional `REDDIT_REFRESH_TOKEN`); `X_BEARER_TOKEN` |
+| **PDF reports** | Server Playwright + Chromium (`playwright install chromium`) |

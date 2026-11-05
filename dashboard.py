@@ -31,7 +31,7 @@ from modules.dataset_cards import (
 )
 from modules.record_state import purge_record_caches
 from modules.navigation import dashboard_views
-from modules.scrape_navigation import render_scrape_navigation
+from modules.scrape_navigation import FACEBOOK_USAGE_WARNING, render_scrape_navigation
 from modules.content_recommendations_ui import render_content_workspace
 from modules.tutorial_ui import render_tutorial_workspace
 from modules.ai_errors import AIError, redact
@@ -55,6 +55,8 @@ from modules.facebook_session import (
 from modules.facebook_remote import (
     forget_login, login_job, remote_facebook_configured, remote_facebook_session, start_login,
 )
+from modules.facebook_links_ui import forget_removed_facebook_links, render_facebook_link_list, render_saved_facebook_links
+from modules.facebook_search import OYOSHI_SEARCH_URL, validate_facebook_search_url
 from modules.collection_jobs import active_collection, cancel_collection, collection_job, start_collection
 from modules.processor import analyze_posts
 from modules.gemini import AUTO_MODEL, GeminiError, list_text_models, normalize_model_name
@@ -63,7 +65,7 @@ from modules.x import READ_PRICE_USD, X_SEARCHES, XClient, XError, collect_x, es
 from modules.websites import MAX_LINKS as MAX_WEBSITE_LINKS, WebsiteError, collect_websites, parse_website_links
 from modules.website_presets_ui import render_website_presets
 from modules.signals import NON_CONTENT_TYPES, SIGNAL_LABELS, is_analyzable, is_flagged, watch_terms
-from modules.saved_links import library_owner_id, load_saved_links, parse_links, remove_saved_links, save_links
+from modules.saved_links import is_facebook_link, library_owner_id, load_saved_links, parse_links, remove_saved_links, save_links
 from modules.sentiment_history import (
     NEWS_SOURCE, chart_spec, combined_history, load_history, news_sentiment_rows, persist_analysis_run,
 )
@@ -473,6 +475,7 @@ async def _run_multi_scrape_async(
     reddit_limit: int = 50, reddit_comments: int = 20,
     facebook_owner: str | None = None,
     on_results: Optional[Callable[[List[Dict[str, Any]]], None]] = None,
+    strict_scroll_limit: bool = False,
 ) -> List[Dict[str, Any]]:
     # Persistent remote profiles must not be opened concurrently.
     semaphore = asyncio.Semaphore(1 if facebook_owner else max(1, concurrency))
@@ -487,6 +490,7 @@ async def _run_multi_scrape_async(
                 scroll_max=scroll_times,
                 reddit_limit=reddit_limit, reddit_comments=reddit_comments,
                 **({"facebook_owner": facebook_owner} if facebook_owner else {}),
+                **({"strict_scroll_limit": True} if strict_scroll_limit else {}),
             )
             # Preserve which input URL produced each row.
             for row in rows:
@@ -709,8 +713,7 @@ def _render_link_workspace(user_email: str, platform: str | None = None) -> tupl
         if platform == "reddit":
             return is_reddit_url(url)
         if platform == "facebook":
-            host = (urlsplit(url).hostname or "").lower()
-            return host in {"facebook.com", "fb.com"} or host.endswith(".facebook.com")
+            return is_facebook_link(url)
         return True
 
     def parse_sources(text: str) -> tuple[list[str], list[str]]:
@@ -759,17 +762,21 @@ def _render_link_workspace(user_email: str, platform: str | None = None) -> tupl
         st.session_state[input_key] = ""
         st.session_state.pop(save_error_key, None)
 
-    def remove_selected() -> None:
+    def remove_selected() -> bool:
         removable = [url for url in st.session_state.get(selection_key, []) if url != CAMBODIA_URL]
         try:
             remove_saved_links(init_db(), user_email, removable)
             removed = set(removable)
             st.session_state[library_key]["urls"] = [url for url in saved if url not in removed]
-            st.session_state[selection_key] = [
+            st.session_state[memo_key] = [
                 url for url in st.session_state.get(selection_key, []) if url not in removed]
+            if platform == "facebook":
+                forget_removed_facebook_links(user_email, removable)
             st.session_state[message_key] = f"Removed {len(removable)} saved links."
+            return True
         except Exception:
             st.session_state[save_error_key] = "Some links couldn’t be removed. Refresh your library and try again."
+            return False
 
     def save_pasted_links() -> None:
         pasted, invalid = parse_sources(st.session_state.get(input_key, ""))
@@ -822,14 +829,19 @@ def _render_link_workspace(user_email: str, platform: str | None = None) -> tupl
             "Refresh", key=widget_key("refresh_saved_links"), use_container_width=True, on_click=refresh,
         )
 
+        if platform == "facebook":
+            with st.expander("Inspect all saved Facebook links"):
+                render_facebook_link_list(library["urls"], key_prefix=f"facebook_link_list_{owner}",
+                                         user_email=user_email if not library["error"] else None)
+
         removable = [url for url in selected if url != CAMBODIA_URL]
         if removable:
-            st.button(
+            if st.button(
                 f"Remove {len(removable)} saved link{'s' if len(removable) != 1 else ''}",
                 key=widget_key("remove_selected_links"), use_container_width=True,
                 help="Removes these links from your library. Collected posts are kept.",
-                on_click=remove_selected,
-            )
+            ) and remove_selected():
+                st.rerun()
 
         text = st.text_area(
             "Add links (one per line)", key=input_key, height=160,
@@ -1458,6 +1470,15 @@ def _render_facebook_collection_progress(email: str, job_id: str) -> None:
 FACEBOOK_STEP_KEY = "facebook_wizard_step"
 FACEBOOK_TARGETS_KEY = "facebook_wizard_targets"
 FACEBOOK_LINKS_VALID_KEY = "facebook_wizard_links_valid"
+FACEBOOK_SEARCH_STEP_KEY = "facebook_search_wizard_step"
+
+
+def _remember_facebook_search_settings() -> None:
+    settings = st.session_state.setdefault("facebook_search_settings", {})
+    for field in ("url", "scroll_times"):
+        key = f"facebook_search_{field}"
+        if key in st.session_state:
+            settings[field] = st.session_state[key]
 
 
 def _facebook_ready(session: FacebookSession) -> bool:
@@ -1555,30 +1576,40 @@ def _render_collection_workspace(
 
 def _render_facebook_workspace(user_email: str, session: FacebookSession) -> None:
     """Open the guided steps in a focused modal: connect (only when needed), links, then collect."""
-    session = _auto_check_facebook(user_email, session)
-    labels = ([] if _facebook_ready(session) else ["Connect Facebook"]) + ["Your links", "Collect posts"]
+    if _focus_modal_open("facebook_links"):
+        return  # Inspecting the saved library does not need a remote Facebook session.
+    search = st.session_state.get("scrape_source") == "facebook_search"
+    if st.session_state.get("scrape_source") in {"facebook", "facebook_search"} or _focus_modal_open("facebook"):
+        session = _auto_check_facebook(user_email, session)
+    labels = ([] if _facebook_ready(session) else ["Connect Facebook"]) + (
+        ["Collect posts"] if search else ["Your links", "Collect posts"])
+    step_key = FACEBOOK_SEARCH_STEP_KEY if search else FACEBOOK_STEP_KEY
     active_job = active_collection(user_email) if IS_CLOUD else None
     if active_job:
         st.session_state["facebook_collection_job"] = active_job.id
     # A running or just-finished hosted collection belongs to the final step.
     collecting = IS_CLOUD and (bool(active_job) or bool(st.session_state.get("facebook_collection_job")))
-    current = st.session_state.get(FACEBOOK_STEP_KEY, labels[0])
+    current = st.session_state.get(step_key, labels[0])
     if collecting or current not in labels:
         current = labels[-1] if collecting else labels[0]
-    st.session_state[FACEBOOK_STEP_KEY] = current
+    st.session_state[step_key] = current
     index = labels.index(current)
     if _focus_modal_open("facebook"):
-        _facebook_steps_modal(user_email, session, labels, index)
+        _facebook_steps_modal(user_email, session, labels, index, search=search)
         return
     with st.container(border=True, key="facebook_overview"):
-        st.subheader("Facebook")
-        st.caption("Collect posts and comments from the Facebook groups and pages you choose.")
+        st.subheader("Oyoshi on Facebook" if search else "Facebook")
+        st.caption("Open Oyoshi search results directly and collect posts with 2–3 scrolls." if search else
+                   "Collect posts and comments from the Facebook groups and pages you choose.")
+        if not search:
+            st.warning(FACEBOOK_USAGE_WARNING, icon="⚠️")
         if _facebook_ready(session):
             st.caption(f"Connection ready{' · ' + session.name if session.name else ''}.")
         else:
             st.caption("Not connected yet. The first step signs you in to Facebook.")
-        selected = st.session_state.get(FACEBOOK_TARGETS_KEY, [])
-        st.caption(f"{len(selected)} link{'s' if len(selected) != 1 else ''} selected.")
+        if not search:
+            selected = st.session_state.get(FACEBOOK_TARGETS_KEY, [])
+            st.caption(f"{len(selected)} link{'s' if len(selected) != 1 else ''} selected.")
         if collecting:
             _render_facebook_collection_progress(user_email, st.session_state["facebook_collection_job"])
         _render_focus_trigger("facebook", labels, index, "Start collecting Facebook posts")
@@ -1586,7 +1617,7 @@ def _render_facebook_workspace(user_email: str, session: FacebookSession) -> Non
 
 @st.dialog("Collect Facebook posts", width="large", on_dismiss=_close_focus_modal)
 def _facebook_steps_modal(user_email: str, session: FacebookSession,
-                          labels: List[str], index: int) -> None:
+                          labels: List[str], index: int, *, search: bool = False) -> None:
     # Dialog widgets rerun independently of main(), including its sign-in gate.
     if user_email:
         from modules.auth import allowed_emails, verify_access
@@ -1597,13 +1628,18 @@ def _facebook_steps_modal(user_email: str, session: FacebookSession,
             _close_focus_modal()
             st.rerun()
     current = labels[index]
+    if search:
+        st.subheader("Oyoshi on Facebook")
+    else:
+        st.warning(FACEBOOK_USAGE_WARNING, icon="⚠️")
     _render_step_header(labels, index)
 
     if current == "Connect Facebook":
         session = _render_facebook_connection(session, user_email=user_email)
         can_continue = _facebook_ready(session)
         if can_continue:
-            st.success("Facebook is connected. Continue to choose your links.")
+            st.success("Facebook is connected. Continue to collect Oyoshi search results." if search else
+                       "Facebook is connected. Continue to choose your links.")
     elif current == "Your links":
         targets, links_valid = _render_link_workspace(user_email, platform="facebook")
         st.session_state[FACEBOOK_TARGETS_KEY] = targets
@@ -1612,30 +1648,51 @@ def _facebook_steps_modal(user_email: str, session: FacebookSession,
         if links_valid and not targets:
             st.caption("Select a saved link or add one above to continue.")
     else:
-        targets = list(st.session_state.get(FACEBOOK_TARGETS_KEY, []))
-        links_valid = bool(st.session_state.get(FACEBOOK_LINKS_VALID_KEY, True))
+        if search:
+            saved_settings = st.session_state.get("facebook_search_settings", {})
+            raw_url = st.text_input("Oyoshi Facebook search URL", value=saved_settings.get("url", OYOSHI_SEARCH_URL),
+                                    key="facebook_search_url", on_change=_remember_facebook_search_settings)
+            try:
+                targets, links_valid = [validate_facebook_search_url(raw_url)], True
+            except ValueError as exc:
+                targets, links_valid = [], False
+                st.error(str(exc))
+            if links_valid:
+                st.link_button("Open this search on Facebook", targets[0])
+            st.caption("The collector opens this search link directly. Choose 2 or 3 scroll iterations below.")
+        else:
+            targets = list(st.session_state.get(FACEBOOK_TARGETS_KEY, []))
+            links_valid = bool(st.session_state.get(FACEBOOK_LINKS_VALID_KEY, True))
+            st.caption(f"Collecting from {len(targets)} selected link{'s' if len(targets) != 1 else ''}. "
+                       "Go back to change them.")
         can_continue = False
-        st.caption(f"Collecting from {len(targets)} selected link{'s' if len(targets) != 1 else ''}. "
-                   "Go back to change them.")
         if not _facebook_ready(session):
             st.info("Your Facebook connection needs attention. Go back to the first step to reconnect.")
         settings = st.columns(2)
         use_headless = settings[0].checkbox("Headless Browser", value=True, disabled=IS_CLOUD,
-                                            key="facebook_headless")
-        scroll_times = settings[1].slider("Scroll Iterations", min_value=1, max_value=50, value=10,
-                                          key="facebook_scroll_times")
+                                            key="facebook_search_headless" if search else "facebook_headless")
+        if search:
+            scroll_times = settings[1].slider("Scroll Iterations", min_value=2, max_value=3,
+                                              value=saved_settings.get("scroll_times", 3),
+                                              key="facebook_search_scroll_times",
+                                              on_change=_remember_facebook_search_settings)
+        else:
+            scroll_times = settings[1].slider("Scroll Iterations", min_value=1, max_value=50, value=10,
+                                              key="facebook_scroll_times")
         _render_collect_controls(
             "facebook", user_email, targets, links_valid, session,
             use_headless=use_headless, scroll_times=scroll_times,
             reddit_limit=50, reddit_comments=20,
+            strict_scroll_limit=search,
         )
-    _render_step_nav(FACEBOOK_STEP_KEY, labels, index, can_continue)
+    _render_step_nav(FACEBOOK_SEARCH_STEP_KEY if search else FACEBOOK_STEP_KEY, labels, index, can_continue)
 
 
 def _render_collect_controls(
     platform: str, user_email: str, target_urls: List[str], links_valid: bool,
     facebook_session: FacebookSession, *, use_headless: bool, scroll_times: int,
     reddit_limit: int, reddit_comments: int,
+    strict_scroll_limit: bool = False,
 ) -> None:
     # Keep each source's results and save controls independent when switching sources.
     result_key = "last_scrape" if platform == "facebook" else "last_reddit_scrape"
@@ -1650,8 +1707,8 @@ def _render_collect_controls(
         _render_facebook_collection_progress(user_email, collection_id)
     if st.button(
         "Collect posts", key=f"collect_{platform}_posts", type="primary", use_container_width=True,
-        disabled=platform == "facebook" and IS_CLOUD and (
-            facebook_session.status != "connected" or bool(st.session_state.get("facebook_login_job")) or bool(active_job)),
+        disabled=not links_valid or not target_urls or (platform == "facebook" and IS_CLOUD and (
+            facebook_session.status != "connected" or bool(st.session_state.get("facebook_login_job")) or bool(active_job))),
     ):
         if not links_valid:
             st.error("Correct the invalid links above before collecting posts.")
@@ -1667,6 +1724,7 @@ def _render_collect_controls(
                     return await _run_multi_scrape_async(
                         urls=list(target_urls), headless=True, scroll_times=scroll_times,
                         facebook_owner=user_email, on_progress=progress, on_results=partial,
+                        strict_scroll_limit=strict_scroll_limit,
                     )
                 st.session_state["facebook_collection_job"] = start_collection(user_email, target_urls, run)
                 st.rerun()
@@ -1679,6 +1737,7 @@ def _render_collect_controls(
                         scroll_times=scroll_times,
                         reddit_limit=int(reddit_limit), reddit_comments=int(reddit_comments),
                         facebook_owner=user_email if platform == "facebook" and IS_CLOUD else None,
+                        strict_scroll_limit=strict_scroll_limit,
                         on_progress=lambda done, total, _url: progress.progress(
                             done / total, text=f"Processed {done} of {total} links"
                         ),
@@ -2534,14 +2593,33 @@ def _select_scrape_source(source: str | None) -> None:
     _close_focus_modal()
     if st.session_state.get("x_focus_open"):
         _close_x_collection_dialog()
-    if source in {"facebook", "website"}:
-        _open_focus_modal(source)
+    if source in {"facebook", "facebook_search", "website"}:
+        _open_focus_modal("facebook" if source == "facebook_search" else source)
     elif source == "x":
         _open_x_collection_dialog()
 
 
+def _open_facebook_link_inspector() -> None:
+    _open_focus_modal("facebook_links")
+
+
+@st.dialog("Saved Facebook links", width="large", on_dismiss=_close_focus_modal)
+def _facebook_link_inspector(user_email: str) -> None:
+    # Dialog interactions rerun separately from main() and its access check.
+    from modules.auth import allowed_emails, verify_access
+    try:
+        if verify_access(st.session_state.get("auth_token", ""), allowed_emails()) != user_email:
+            raise PermissionError()
+    except Exception:
+        _close_focus_modal()
+        st.rerun()
+    render_saved_facebook_links(user_email)
+
+
 def _render_scrape_workspace(user_email: str, facebook_session: FacebookSession) -> None:
-    render_scrape_navigation(_select_scrape_source)
+    render_scrape_navigation(_select_scrape_source, on_inspect_facebook_links=_open_facebook_link_inspector)
+    if _focus_modal_open("facebook_links"):
+        _facebook_link_inspector(user_email)
     with st.container(key="sm_scrape_panel_facebook"):
         _render_collection_workspace("facebook", user_email, facebook_session)
     with st.container(key="sm_scrape_panel_reddit"):

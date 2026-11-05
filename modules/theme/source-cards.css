@@ -6,11 +6,22 @@
   max-width: 760px;
   align-items: stretch;
 }
-[class*="st-key-sm_source_card_"] {
+.st-key-sm_source_picker_grid > [data-testid="stLayoutWrapper"] {
+  display: grid;
+}
+.st-key-sm_source_picker_grid > [data-testid="stLayoutWrapper"]::before {
   /* Standard poker card: 2.5 × 3.5 inches. Grow if enlarged text needs room. */
-  box-sizing: border-box;
+  content: "";
+  grid-area: 1 / 1;
+  width: 100%;
+  align-self: start;
   aspect-ratio: 5 / 7;
-  height: auto;
+  pointer-events: none;
+}
+[class*="st-key-sm_source_card_"] {
+  grid-area: 1 / 1;
+  box-sizing: border-box;
+  height: 100%;
   min-height: min-content;
   min-width: 0;
   color: var(--sm-source-ink);
@@ -42,7 +53,7 @@ html[data-sm-theme="dark"] [class*="st-key-sm_source_card_"] {
   color: var(--sm-source-color);
   background: var(--sm-source-ink);
 }
-.sm-source-logo svg { width: 34px; height: 34px; fill: currentColor; }
+.sm-source-logo svg, .sm-source-logo img { width: 34px; height: 34px; fill: currentColor; }
 .sm-source-label { margin: 0 0 8px; font-size: .69rem; font-weight: 650; letter-spacing: .08em; opacity: 1; }
 .sm-source-card h3 { color: var(--sm-source-ink); -webkit-text-fill-color: var(--sm-source-ink); margin: 0 0 12px; padding: 0; font-size: 1.5rem; line-height: 1.3; }
 .sm-source-description { min-height: 4.6em; margin: 0 0 16px; font-size: .94rem; line-height: 1.55; opacity: 1; }
@@ -63,6 +74,31 @@ html [class*="st-key-sm_source_card_"] [data-testid="stButton"] button:hover {
 [class*="st-key-sm_source_card_"] [data-testid="stButton"] button:focus-visible {
   outline: 3px solid var(--sm-source-ink);
   outline-offset: 3px;
+}
+html [class*="st-key-sm_source_card_"]:has([data-testid="stAlert"]) {
+  gap: 10px;
+}
+html [class*="st-key-sm_source_card_"]:has([data-testid="stAlert"]) .sm-source-description {
+  min-height: 0;
+  margin-bottom: 4px;
+}
+html [class*="st-key-sm_source_card_"] [data-testid="stAlertContainer"] {
+  padding: 10px 12px !important;
+  border: 1px solid rgb(255 255 255 / .28) !important;
+  border-radius: 12px !important;
+  background: rgb(15 23 42 / .22) !important;
+  color: var(--sm-source-ink) !important;
+}
+html [class*="st-key-sm_source_card_"] [data-testid="stAlertContainer"] [data-testid="stAlertDynamicIcon"] {
+  font-size: 1rem !important;
+  line-height: 1.35 !important;
+}
+html [class*="st-key-sm_source_card_"] [data-testid="stAlertContainer"] [data-testid="stMarkdownContainer"],
+html [class*="st-key-sm_source_card_"] [data-testid="stAlertContainer"] [data-testid="stMarkdownContainer"] p {
+  margin: 0 !important;
+  color: var(--sm-source-ink) !important;
+  font-size: .76rem !important;
+  line-height: 1.35 !important;
 }
 .sm-other-source-reddit { display: flex; align-items: center; gap: 16px; }
 .sm-other-source-reddit .sm-source-logo { flex: 0 0 46px; width: 46px; height: 46px; margin: 0; border-radius: 12px; }

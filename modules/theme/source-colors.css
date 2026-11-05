@@ -1,5 +1,6 @@
 /* Shared source identity for collection cards, saved datasets and source badges. */
 .st-key-sm_source_card_facebook,
+.st-key-sm_source_card_facebook_search,
 [class*="st-key-sm_dataset_card_facebook_"],
 [data-sm-source="facebook"] { --sm-source-color: #0866ff; --sm-source-ink: #fff; }
 

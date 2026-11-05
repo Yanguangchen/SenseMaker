@@ -8,6 +8,17 @@ from typing import Any
 from urllib.parse import urlsplit, urlunsplit
 
 
+def is_facebook_link(url: str) -> bool:
+    """Use the same Facebook source boundary for collecting and inspecting links."""
+    try:
+        parts = urlsplit(url)
+        host = (parts.hostname or "").lower()
+        return parts.scheme in {"http", "https"} and (
+            host in {"facebook.com", "fb.com"} or host.endswith(".facebook.com"))
+    except ValueError:
+        return False
+
+
 def normalize_link(value: str) -> str:
     value = value.strip()
     if not value or any(character.isspace() for character in value):

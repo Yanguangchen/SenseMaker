@@ -16,9 +16,8 @@ from typing import Any, Callable
 from urllib.parse import urlsplit
 from uuid import uuid4
 
-from browserbase import AsyncBrowserbase, Browserbase
+from browserbase import AsyncBrowserbase, Browserbase, NotFoundError
 from firebase_admin import firestore
-from google.api_core.exceptions import AlreadyExists
 
 from modules.config import get_setting
 from modules.database import init_db
@@ -32,7 +31,7 @@ _jobs_lock = threading.Lock()
 
 
 def remote_facebook_configured() -> bool:
-    return all(get_setting(key) for key in ("BROWSERBASE_API_KEY", "BROWSERBASE_PROJECT_ID"))
+    return bool(get_setting("BROWSERBASE_API_KEY"))
 
 
 def _profile_ref(email: str):
@@ -54,21 +53,58 @@ def remote_facebook_session(email: str) -> FacebookSession:
 
 
 def _ensure_profile(email: str) -> str:
+    """Recover deleted or inaccessible contexts without discarding a usable login."""
     ref = _profile_ref(email)
     record = ref.get(timeout=15).to_dict() or {}
-    if record.get("context_id"):
-        return record["context_id"]
+    old_context_id = record.get("context_id")
+    _check_profile_available(record)
     with Browserbase(api_key=get_setting("BROWSERBASE_API_KEY"), max_retries=0, timeout=20) as bb:
-        context = bb.contexts.create(project_id=get_setting("BROWSERBASE_PROJECT_ID"))
+        if old_context_id:
+            try:
+                bb.contexts.retrieve(old_context_id)
+                return old_context_id
+            except NotFoundError:
+                # A deleted context or changed Browserbase project cannot reuse
+                # the old login. Other provider failures must keep it intact.
+                logging.getLogger(__name__).warning("Saved Facebook browser context was not found; creating a new profile")
+        context = bb.contexts.create()
+
+        @firestore.transactional
+        def save(transaction):
+            current = ref.get(transaction=transaction).to_dict() or {}
+            _check_profile_available(current)
+            if current.get("context_id") != old_context_id:
+                if current.get("context_id"):
+                    return current["context_id"]
+                raise FacebookLoginError("Facebook’s saved browser profile changed. Please try again.")
+            transaction.set(ref, {
+                "context_id": context.id,
+                "user_id": firestore.DELETE_FIELD,
+                "name": firestore.DELETE_FIELD,
+                "verified_at": 0,
+                "needs_login": True,
+                "verification_pending": False,
+            }, merge=True)
+            return context.id
+
+        saved_context_id = None
         try:
-            ref.create({"context_id": context.id}, timeout=15)
-        except AlreadyExists:
-            bb.contexts.delete(context.id)
-            return _record(email)["context_id"]
-        except Exception:
-            bb.contexts.delete(context.id)
-            raise
-    return context.id
+            saved_context_id = save(init_db().transaction())
+            return saved_context_id
+        finally:
+            if saved_context_id != context.id:
+                # Only remove our unused new context, never the previous login
+                # or the profile installed by a concurrent request.
+                try:
+                    bb.contexts.delete(context.id)
+                except Exception:
+                    logging.getLogger(__name__).warning("Unused Facebook browser context could not be removed")
+
+
+def _check_profile_available(record: dict) -> None:
+    if record.get("busy_until", 0) > time.time():
+        raise FacebookLoginError("Facebook is already open in another login or collection. "
+                                 "Finish that task, or wait a few minutes and try again.")
 
 
 def _acquire(email: str, seconds: int) -> tuple[str, str]:
@@ -80,9 +116,9 @@ def _acquire(email: str, seconds: int) -> tuple[str, str]:
     @firestore.transactional
     def acquire(transaction):
         record = ref.get(transaction=transaction).to_dict() or {}
-        if record.get("busy_until", 0) > time.time():
-            raise FacebookLoginError("Facebook is already open in another login or collection. "
-                                     "Finish that task, or wait a few minutes and try again.")
+        _check_profile_available(record)
+        if record.get("context_id") != context_id:
+            raise FacebookLoginError("Facebook’s saved browser profile changed. Please try again.")
         transaction.update(ref, {"lease": lease, "busy_until": time.time() + seconds + 30})
 
     acquire(init_db().transaction())
@@ -116,7 +152,8 @@ def _safe_error(exc: Exception) -> str:
         return str(exc)
     if getattr(exc, "status_code", 0) in {402, 429}:
         return "The remote browser usage limit has been reached. Please try again later or check your Browserbase plan."
-    logging.getLogger(__name__).error("Remote Facebook browser failed (%s)", type(exc).__name__)
+    logging.getLogger(__name__).error("Remote Facebook browser failed (%s, status=%s)",
+                                     type(exc).__name__, getattr(exc, "status_code", "unknown"))
     return "Facebook’s remote browser could not connect. Please try again."
 
 
@@ -136,7 +173,7 @@ async def remote_facebook_context(playwright, email: str, *, timeout_seconds: in
         async with AsyncBrowserbase(api_key=get_setting("BROWSERBASE_API_KEY"), max_retries=0, timeout=20) as bb:
             try:
                 session = await bb.sessions.create(
-                    project_id=get_setting("BROWSERBASE_PROJECT_ID"), api_timeout=timeout_seconds + 15,
+                    api_timeout=timeout_seconds + 15,
                     browser_settings={"context": {"id": context_id, "persist": True},
                                       "record_session": False, "log_session": False, "solve_captchas": False},
                 )
@@ -182,8 +219,7 @@ async def remote_facebook_context(playwright, email: str, *, timeout_seconds: in
                     if session:
                         # Also terminate when connecting failed or the viewer was abandoned.
                         try:
-                            await bb.sessions.update(session.id, project_id=get_setting("BROWSERBASE_PROJECT_ID"),
-                                                     status="REQUEST_RELEASE")
+                            await bb.sessions.update(session.id, status="REQUEST_RELEASE")
                         except Exception:
                             pass
                         # Browserbase flushes profile changes asynchronously after close.

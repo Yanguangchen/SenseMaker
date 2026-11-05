@@ -5,6 +5,7 @@ from contextlib import ExitStack
 from unittest.mock import patch
 
 from streamlit.testing.v1 import AppTest
+from modules.scrape_navigation import FACEBOOK_USAGE_WARNING
 
 
 class ScrapeNavigationTests(unittest.TestCase):
@@ -22,16 +23,27 @@ class ScrapeNavigationTests(unittest.TestCase):
         ).run()
         self.assertFalse(self.app.exception)
 
-    def test_four_main_cards_and_reddit_under_other_sources_do_not_start_collection(self):
+    def test_five_main_cards_and_reddit_under_other_sources_do_not_start_collection(self):
         self.assertFalse(self.app.tabs)
         self.assertIsNone(self.app.session_state["scrape_source"])
         self.assertEqual([button.label for button in self.app.button
                           if button.key.startswith("scrape_open_") and button.key != "scrape_open_reddit"],
-                         ["Open Facebook →", "Open X →", "Open Online news →", "Open Custom website →"])
+                         ["Open Facebook →", "Open Oyoshi on Facebook →", "Open X →", "Open Online news →", "Open Custom website →"])
         other_sources = next(expander for expander in self.app.expander if expander.label == "Other sources")
         self.assertEqual([button.label for button in other_sources.button], ["Open Reddit"])
+        self.assertIn(FACEBOOK_USAGE_WARNING, [warning.value for warning in self.app.warning])
         for collector in self.collectors:
             collector.assert_not_called()
+
+    def test_usage_warning_appears_in_original_facebook_flow_but_not_oyoshi(self):
+        self.app.button(key="scrape_open_facebook").click().run()
+        self.assertFalse(self.app.exception)
+        self.assertIn(FACEBOOK_USAGE_WARNING, [warning.value for warning in self.app.warning])
+        self.app.button(key="scrape_all_sources").click().run()
+        self.app.run()
+        self.app.button(key="scrape_open_facebook_search").click().run()
+        self.assertFalse(self.app.exception)
+        self.assertNotIn(FACEBOOK_USAGE_WARNING, [warning.value for warning in self.app.warning])
 
     def test_switching_sources_preserves_news_and_reddit_settings_and_collected_results(self):
         self.app.button(key="scrape_open_news").click().run()

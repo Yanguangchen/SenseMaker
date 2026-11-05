@@ -95,7 +95,7 @@ class CollectionProgressUITests(unittest.TestCase):
             self.assertFalse(list(app.exception))
             self.assertTrue(app.button(key="collect_facebook_posts").disabled)
             self.assertFalse(app.button(key="cancel_facebook_collection").disabled)
-            self.assertFalse(list(app.warning))
+            self.assertFalse(any("Old busy error" in warning.value for warning in app.warning))
             self.assertEqual(app.session_state["facebook_collection_job"], "existing")
 
     def test_new_collection_clears_the_previous_error_and_attaches_to_worker(self):
@@ -116,7 +116,7 @@ class CollectionProgressUITests(unittest.TestCase):
             self.assertFalse(list(app.exception))
             launch.assert_called_once()
             self.assertIsNone(app.session_state["last_scrape_results"])
-            self.assertFalse(list(app.warning))
+            self.assertFalse(any("Old busy error" in warning.value for warning in app.warning))
             self.assertTrue(app.button(key="collect_facebook_posts").disabled)
 
     def test_cancel_button_requests_owner_cleanup(self):

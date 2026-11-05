@@ -487,8 +487,8 @@ sessions are excluded by `.railwayignore`, `.dockerignore` and explicit Dockerfi
    Use `FIREBASE_CLIENT_EMAIL` and `FIREBASE_PRIVATE_KEY` for server credentials;
    leave `FIREBASE_CREDENTIALS` unset because local credential files are not uploaded.
    The private key accepts real newlines or literal `\n` escapes.
-3. Set `GEMINI_KEY`, `OPENAI_API_KEY`, any configured Reddit credentials, `X_BEARER_TOKEN`, and both
-   Browserbase variables. These are runtime variables, not Docker build arguments.
+3. Set `GEMINI_KEY`, `OPENAI_API_KEY`, any configured Reddit credentials, `X_BEARER_TOKEN`, and
+   `BROWSERBASE_API_KEY`. These are runtime variables, not Docker build arguments.
 4. Install the infrastructure SDK, link the CLI to the project, review and apply the
    infrastructure plan using the commands below. Railway builds `Yanguangchen/SenseMaker`
    from `main`, with the repository root as its source directory. Commit and push the
@@ -528,8 +528,8 @@ New services cannot use the retired `railway.json`/`railway.toml` format.
 Credentials remain managed in Railway Variables and are preserved by infrastructure changes.
 Only run this project's infrastructure plan against the dedicated SenseMaker project.
 
-Hosted Facebook login uses Browserbase. Set `BROWSERBASE_API_KEY` and
-`BROWSERBASE_PROJECT_ID` explicitly in Railway Variables; Marketplace-provided
+Hosted Facebook login uses Browserbase. Set `BROWSERBASE_API_KEY` in Railway Variables;
+Browserbase resolves the project automatically from the key. Marketplace-provided
 settings from the previous host are not copied automatically. **Log in to Facebook** opens an interactive browser in
 the app; finish Facebook's sign-in and any verification there, then click
 **Save Facebook login**. The viewer stays open if verification is incomplete.
@@ -725,15 +725,25 @@ The dashboard has **four pages**, accessible from the left toolbar:
 
 ### Tab 1 — Scrap data
 
-- Choose one of four source cards: **Facebook** (blue), **X** (black),
+- Choose one of five source cards: **Facebook** (blue), **Oyoshi on Facebook** (blue), **X** (black),
   **Online news** (teal, Google News monitoring), or **Custom website** (purple, public page links).
   Facebook and X use their brand logos; news and websites use dedicated icons.
   **Reddit** is available under **Other sources**, with its orange brand logo.
   Each card opens its collection flow. **All sources** returns to the cards while keeping
   settings and collected results in the current session.
+- **Oyoshi on Facebook** opens the configured direct search for `oyoshi`, including its saved filters, reusing your Facebook login
+  and collection results. It skips saved-link selection and defaults to 3 scroll iterations,
+  adjustable to 2. This preset has a strict scroll limit without the normal extra adaptive cycles.
+  You can replace its search URL with a filtered Facebook search link; those filters are preserved.
 - Facebook and Reddit each keep their own source selections, collection settings and results.
 - Facebook auth session capture (opens Chrome for manual login)
 - Save a personal library of links, available on future visits and other devices
+- Open **Saved Facebook links** from the source cards or Facebook workspace to inspect your
+  entire personal library, search URLs, open them in Facebook, refresh, or download the full list.
+  Tick **Delete** beside unwanted URLs and click **Delete … selected links** to remove them
+  from your library and pending scrape selection. Previously collected posts and analyses are kept.
+  This view does not require a Facebook connection or start collection. The same list appears
+  under **Your links → Inspect all saved Facebook links** when setting up a Facebook collection.
 - Select saved links, select all, remove links, or paste any number of new links
 - Collect large batches with progress tracking; three sources run at a time
 - Headless browser toggle + scroll iterations slider (1-50)
@@ -846,6 +856,8 @@ Use this sequence for the most reliable results:
    - select saved Facebook links or add new URLs, one per line
    - `Headless Browser` as needed
    - `Scroll Iterations` between `10` and `30` for feed-heavy pages
+   Use direct group, page or post URLs to skip Facebook search. The collector navigates
+   directly to each selected URL; it does not type into Facebook's search bar.
 5) New valid links are saved and selected automatically when you finish editing. Click **Collect posts** and inspect results. Use **Clear** to deselect all sources and clear pasted links.
 6) Enter a **Custom title** and click **Save data to cloud** to persist to Firestore.
 7) Switch to the **Sentiment Analysis** tab:

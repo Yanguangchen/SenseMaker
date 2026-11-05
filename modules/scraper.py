@@ -423,6 +423,7 @@ async def scrape_group(
     reddit_limit: int = 50,
     reddit_comments: int = 20,
     facebook_owner: str | None = None,
+    strict_scroll_limit: bool = False,
 ) -> List[PostData]:
     """Route Reddit to its API; use browser collection for existing web sources."""
     if is_reddit_url(target_url):
@@ -479,7 +480,7 @@ async def scrape_group(
                 await _goto_with_resilient_wait(page, target_url=target_url, timeout_ms=60_000)
 
                 min_cycles = max(1, scroll_min)
-                max_cycles = max(min_cycles, scroll_max + 6)
+                max_cycles = max(min_cycles, scroll_max if strict_scroll_limit else scroll_max + 6)
                 no_growth_cycles = 0
 
                 for cycle in range(max_cycles):
