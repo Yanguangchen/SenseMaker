@@ -4,12 +4,14 @@ from __future__ import annotations
 
 import html
 import json
+from contextlib import contextmanager
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Dict, Iterator, List
 from urllib.parse import urlsplit
 
 import streamlit as st
 import streamlit.components.v1 as components
+from streamlit.delta_generator import DeltaGenerator
 
 THEME_DIR = Path(__file__).parent / "theme"
 
@@ -36,6 +38,25 @@ def apply_theme() -> None:
         f"s.textContent = {script}; doc.head.appendChild(s); }}</script>",
         height=0,
     )
+
+
+def show_running_glow() -> DeltaGenerator:
+    """Frame the window with a pulsating gradient until the returned placeholder is emptied or the run ends."""
+    marker = st.empty()
+    # Streamlit drops <style> mixed with markup, so the stylesheet is its own element.
+    with marker.container():
+        st.html(THEME_DIR / "running-glow.css")
+        st.html('<span class="sm-running" aria-hidden="true"></span>')
+    return marker
+
+
+@contextmanager
+def running_glow() -> Iterator[None]:
+    marker = show_running_glow()
+    try:
+        yield
+    finally:
+        marker.empty()
 
 
 def apply_brand() -> None:
