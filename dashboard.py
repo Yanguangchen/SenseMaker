@@ -438,11 +438,20 @@ def _render_gemini_settings() -> None:
     st.caption("Automatic checks the available models before analysis. Model availability does not guarantee remaining quota.")
 
 
+PROVIDER_LOGOS = {"gemini": "/app/static/gemini.svg", "openai": "/app/static/chatgpt.svg"}
+PROVIDER_RADIO_CSS = """<style>
+.st-key-ai_provider [data-testid="stRadio"] [role="radiogroup"] { gap: 1.5rem; }
+.st-key-ai_provider [data-testid="stRadioOption"] p { display: flex; align-items: center; gap: 0.5rem; }
+.st-key-ai_provider [data-testid="stRadioOption"] img { width: 1.5rem; height: 1.5rem; max-height: none; margin: 0; }
+</style>"""
+
+
 def _render_ai_settings() -> str:
+    st.html(PROVIDER_RADIO_CSS)
     if "ai_provider" not in st.session_state:
         st.session_state["ai_provider"] = get_ai_provider()
     provider = st.radio("AI provider", list(AI_PROVIDERS), key="ai_provider", horizontal=True,
-                        format_func=AI_PROVIDERS.get)
+                        format_func=lambda key: f"![]({PROVIDER_LOGOS[key]}) {AI_PROVIDERS[key]}")
     if not get_ai_key(provider):
         st.warning(f"{AI_PROVIDERS[provider]} is not configured yet. Choose another provider or contact the app administrator.")
     if provider == "gemini":
