@@ -350,7 +350,6 @@ def _load_sentiment_history() -> list[dict[str, Any]]:
 
 def _render_sentiment_history(source_urls: list[str] | None = None) -> None:
     with st.container(border=True, key="sentiment_history"):
-        st.subheader("Sentiment over time")
         if st.button("Refresh timeline", key="refresh_sentiment_history"):
             _load_sentiment_history.clear()
             _load_news_history.clear()
@@ -1938,7 +1937,6 @@ def _render_news_workspace() -> None:
 
 def _render_news_risk_history() -> None:
     with st.container(border=True, key="news_risk_history"):
-        st.subheader("Border tension risk over time")
         if st.button("Refresh risk timeline", key="refresh_news_history"):
             _load_news_history.clear()
         try:
@@ -2662,8 +2660,11 @@ def main() -> None:
 
     # Render after processing so the trends page includes the latest saved run.
     with trends_tab:
-        _render_sentiment_history(source_urls=analysis_sources)
-        _render_news_risk_history()
+        sentiment_trend_tab, risk_trend_tab = st.tabs(["Sentiment over time", "Border tension risk over time"])
+        with sentiment_trend_tab:
+            _render_sentiment_history(source_urls=analysis_sources)
+        with risk_trend_tab:
+            _render_news_risk_history()
 
     with content_tab:
         render_content_workspace()
