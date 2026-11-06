@@ -158,7 +158,8 @@ class ProviderUITests(unittest.TestCase):
         with patch.dict(os.environ, {"AI_PROVIDER": "gemini", "GEMINI_KEY": "private-gemini", "OPENAI_API_KEY": "private-openai"}):
             app = AppTest.from_string(self.script).run()
             self.assertEqual(app.radio(key="ai_provider").value, "gemini")
-            self.assertEqual(app.radio(key="ai_provider").options, ["Gemini", "ChatGPT"])
+            self.assertEqual(app.radio(key="ai_provider").options,
+                             ["![](/app/static/gemini.svg) Gemini", "![](/app/static/chatgpt.svg) ChatGPT"])
             for provider in ("openai", "gemini"):
                 app.radio(key="ai_provider").set_value(provider).run()
                 self.assertFalse(list(app.exception))
