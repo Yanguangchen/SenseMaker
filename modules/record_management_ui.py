@@ -149,26 +149,29 @@ def _render_dataset_browser(rows: list[dict], groups: list[dict]) -> None:
 
 
 def _render_dataset_search(rows: list[dict], groups: list[dict], local_tz) -> None:
-    search = st.text_input("Search datasets", key="record_manager_dataset_search", max_chars=200,
-                           placeholder="Search by dataset name, page title, URL or record ID")
-    if search.strip():
+    with st.expander("Show / hide filters", expanded=False):
+        search = st.text_input("Search datasets", key="record_manager_dataset_search", max_chars=200,
+                               placeholder="Search by dataset name, page title, URL or record ID")
+    query = search.strip()
+    if query:
         keys = {dataset_key(row) for row in filter_records(rows, None, None, None, search)}
         matches = [group for group in groups if group["key"] in keys]
-        st.caption(f"{len(matches)} matching datasets · {sum(group['count'] for group in matches):,} records")
-        if not matches:
-            st.info("No datasets match your search. Try a different dataset name, page title or URL.")
-        else:
-            if st.session_state.get("record_manager_dataset_query") != search:
-                st.session_state["record_manager_dataset_page"] = 1
-                st.session_state["record_manager_dataset_query"] = search
-            pages = list(range(1, ceil(len(matches) / 12) + 1))
-            if st.session_state.get("record_manager_dataset_page") not in pages:
-                st.session_state["record_manager_dataset_page"] = 1
-            page = st.selectbox("Search results page", pages, key="record_manager_dataset_page",
-                                format_func=lambda value: f"{value} of {len(pages)}") if len(pages) > 1 else 1
-            _render_dataset_cards(matches[(page - 1) * 12:page * 12], "search", local_tz)
     else:
-        st.caption(f"Search across all {len(groups)} datasets in the shared library.")
+        matches = groups
+    if st.session_state.get("record_manager_dataset_query") != query:
+        st.session_state["record_manager_dataset_page"] = 1
+        st.session_state["record_manager_dataset_query"] = query
+    scope = "matching datasets" if query else "datasets"
+    st.caption(f"{len(matches)} {scope} · {sum(group['count'] for group in matches):,} records · Newest first")
+    if not matches:
+        st.info("No datasets match your search. Open Show / hide filters to change or clear your search.")
+    else:
+        pages = list(range(1, ceil(len(matches) / 12) + 1))
+        if st.session_state.get("record_manager_dataset_page") not in pages:
+            st.session_state["record_manager_dataset_page"] = 1
+        page = st.selectbox("Datasets page", pages, key="record_manager_dataset_page",
+                            format_func=lambda value: f"{value} of {len(pages)}") if len(pages) > 1 else 1
+        _render_dataset_cards(matches[(page - 1) * 12:page * 12], "search", local_tz)
     st.button("Browse all records", key="record_manager_browse_all", on_click=_open_dataset, args=(None,))
 
 

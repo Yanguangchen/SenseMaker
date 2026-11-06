@@ -14,17 +14,22 @@ class ScrapeNavigationTests(unittest.TestCase):
         self.addCleanup(stack.close)
         stack.enter_context(patch("dashboard.IS_CLOUD", False))
         stack.enter_context(patch("dashboard.init_db"))
+        stack.enter_context(patch("modules.database.init_db"))
+        stack.enter_context(patch("modules.facebook_links_ui.init_db"))
+        stack.enter_context(patch("modules.auth.verify_access", return_value="owner@example.com"))
+        stack.enter_context(patch("modules.auth.allowed_emails", return_value={"owner@example.com"}))
         self.collectors = [stack.enter_context(patch(f"dashboard.{name}")) for name in
                            ("collect_news", "collect_x", "collect_websites", "_run_multi_scrape_sync")]
         self.app = AppTest.from_string(
             "from dashboard import _render_scrape_workspace\n"
             "from modules.facebook_session import FacebookSession\n"
-            "_render_scrape_workspace('', FacebookSession())"
+            "_render_scrape_workspace('owner@example.com', FacebookSession())"
         ).run()
         self.assertFalse(self.app.exception)
 
     def test_five_main_cards_and_reddit_under_other_sources_do_not_start_collection(self):
-        self.assertFalse(self.app.tabs)
+        self.assertEqual([tab.label for tab in self.app.tabs], ["Collect data", "Saved Facebook links"])
+        self.assertNotIn("scrape_inspect_facebook_links", [button.key for button in self.app.button])
         self.assertIsNone(self.app.session_state["scrape_source"])
         self.assertEqual([button.label for button in self.app.button
                           if button.key.startswith("scrape_open_") and button.key != "scrape_open_reddit"],

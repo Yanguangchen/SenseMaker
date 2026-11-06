@@ -6,7 +6,7 @@ from unittest.mock import MagicMock, patch
 
 from streamlit.testing.v1 import AppTest
 
-from modules.analysis_library import select_history, select_records, source_key
+from modules.analysis_library import SOURCE_LABELS, select_history, select_records, source_key
 from modules.reddit import CAMBODIA_URL
 from modules.saved_links import library_owner_id
 from analysis_steps import ui
@@ -119,6 +119,10 @@ class ScopeUITests(unittest.TestCase):
         app.session_state["analysis_source_scope"] = "Current sources"
         self.seed_stale_data(app)
         app.run()
+        self.assertTrue(any("Filter by record sources" in block.value for block in app.markdown))
+        self.assertEqual(list(app.multiselect), [])
+        self.assertEqual({box.key: box.label for box in app.checkbox},
+                         {f"analysis_source_{key}": label for key, label in SOURCE_LABELS.items()})
         self.assertEqual(ui(app, "analysis_sources").value, [])
         self.assert_cleared(app)
         self.seed_stale_data(app)
@@ -130,11 +134,11 @@ class ScopeUITests(unittest.TestCase):
 
     def test_saved_facebook_links_do_not_control_source_choices(self):
         app = self.app(error=True).run()
-        ui(app, "analysis_sources").set_value(["source:website", "source:news"]).run()
+        ui(app, "analysis_sources").set_value(["source:news", "source:website"]).run()
         self.seed_stale_data(app)
         app.session_state[self.library_key] = {"urls": [GROUP + "another"], "error": False}
         app.run()
-        self.assertEqual(ui(app, "analysis_sources").value, ["source:website", "source:news"])
+        self.assertEqual(ui(app, "analysis_sources").value, ["source:news", "source:website"])
         self.assertIn("firestore_rows", app.session_state)
         self.assertFalse(list(app.warning))
         ui(app, "analysis_sources").set_value([]).run()

@@ -37,6 +37,7 @@ class FacebookSearchUITests(unittest.TestCase):
         self.addCleanup(self.stack.close)
         self.stack.enter_context(patch("dashboard.IS_CLOUD", False))
         self.stack.enter_context(patch("dashboard.init_db", return_value=MemoryDB()))
+        self.stack.enter_context(patch("modules.facebook_links_ui.init_db", return_value=MemoryDB()))
         self.stack.enter_context(patch("modules.auth.verify_access", return_value="owner@example.com"))
         self.stack.enter_context(patch("modules.auth.allowed_emails", return_value={"owner@example.com"}))
         self.collect = self.stack.enter_context(patch("dashboard._run_multi_scrape_sync", return_value=[{
@@ -138,6 +139,43 @@ class FacebookSearchUITests(unittest.TestCase):
             self.assertFalse(app.button(key="capture_fb_session_btn").disabled)
             self.assertNotIn("collect_facebook_posts", [button.key for button in app.button])
             self.collect.assert_not_called()
+
+
+    def test_scroll_slider_allows_up_to_five_scrolls(self):
+        app = self.open_search()
+        app.slider(key="facebook_search_scroll_times").set_value(5).run()
+        self.assertEqual(app.slider(key="facebook_search_scroll_times").value, 5)
+        app.button(key="collect_facebook_posts").click().run()
+        self.assertEqual(self.collect.call_args.kwargs["scroll_times"], 5)
+
+    def test_collected_screen_hides_next_and_previous_and_save_closes_window(self):
+        app = self.open_search()
+        app.button(key="collect_facebook_posts").click().run()
+        self.assertFalse(app.exception)
+        # Next and previous are hidden after posts are collected:
+        self.assertNotIn("facebook_search_wizard_step_previous", [button.key for button in app.button])
+        self.assertNotIn("facebook_search_wizard_step_next", [button.key for button in app.button])
+        self.assertTrue(any(button.key == "save_last_results_btn" for button in app.button))
+        self.assertEqual(app.session_state.get("focus_workspace_modal"), "facebook")
+
+        # Blank title keeps window open with error:
+        app.button(key="save_last_results_btn").click().run()
+        self.assertTrue(app.error)
+        self.assertEqual(app.session_state.get("focus_workspace_modal"), "facebook")
+
+        # Firestore failure keeps window open:
+        app.text_input(key="custom_title_value").set_value("Oyoshi dataset").run()
+        with patch("dashboard._write_results_to_firestore", side_effect=RuntimeError("write failed")):
+            app.button(key="save_last_results_btn").click().run()
+        self.assertTrue(any("Firestore write failed: write failed" in e.value for e in app.error))
+        self.assertEqual(app.session_state.get("focus_workspace_modal"), "facebook")
+
+        # Successful save closes window and shows confirmation on workspace:
+        with patch("dashboard._write_results_to_firestore", return_value={"inserted": 1, "skipped": 0}):
+            app.button(key="save_last_results_btn").click().run()
+        self.assertFalse(app.exception)
+        self.assertIsNone(app.session_state.get("focus_workspace_modal"))
+        self.assertTrue(any("Saved to Firestore" in s.value for s in app.success))
 
 
 class FacebookSearchCollectorTests(unittest.IsolatedAsyncioTestCase):

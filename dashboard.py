@@ -259,10 +259,29 @@ def _sync_analysis_datasets(datasets: list[str], status: str, limit: int | None 
         st.session_state["analysis_dataset_context"] = context
 
 
+def _analysis_source_checkbox_key(source: str) -> str:
+    return f"analysis_source_{source}"
+
+
+def _selected_analysis_sources(fallback: list[str] | None = None) -> list[str]:
+    if any(_analysis_source_checkbox_key(source) in st.session_state for source in SOURCE_LABELS):
+        return [source for source in SOURCE_LABELS if st.session_state.get(_analysis_source_checkbox_key(source))]
+    return list(st.session_state.get("analysis_sources", fallback or []))
+
+
 def _render_analysis_sources(user_email: str) -> tuple[list[str] | None, bool]:
     st.session_state.pop("analysis_source_scope", None)
-    sources = st.multiselect("Record sources", list(SOURCE_LABELS), key="analysis_sources",
-                             format_func=SOURCE_LABELS.get, placeholder="Choose the sources to analyze")
+    saved = set(st.session_state.get("analysis_sources") or [])
+    for source in SOURCE_LABELS:
+        st.session_state.setdefault(_analysis_source_checkbox_key(source), source in saved)
+    st.markdown("**Filter by record sources**")
+    columns = st.columns(3)
+    sources = [
+        source
+        for index, (source, label) in enumerate(SOURCE_LABELS.items())
+        if columns[index % len(columns)].checkbox(label, key=_analysis_source_checkbox_key(source))
+    ]
+    st.session_state["analysis_sources"] = sources
     ready = bool(sources)
     if not ready:
         st.info("Choose at least one record source to see its saved datasets.")
@@ -350,6 +369,8 @@ def _load_sentiment_history() -> list[dict[str, Any]]:
 
 def _render_sentiment_history(source_urls: list[str] | None = None) -> None:
     with st.container(border=True, key="sentiment_history"):
+        if source_urls is None:
+            st.caption("Showing saved history from all record sources.")
         if st.button("Refresh timeline", key="refresh_sentiment_history"):
             _load_sentiment_history.clear()
             _load_news_history.clear()
@@ -409,7 +430,7 @@ def _render_gemini_settings() -> None:
         st.session_state["gemini_catalog_key"] = fingerprint
         st.session_state.pop("gemini_available_models", None)
         st.session_state.pop("gemini_catalog_error", None)
-    if st.button("Refresh available models", key="refresh_gemini_models", use_container_width=True,
+    if st.button("", icon=":material/refresh:", key="refresh_gemini_models", help="Refresh available models",
                  disabled=not api_key):
         try:
             with st.spinner("Checking available Gemini models…"):
@@ -1251,6 +1272,24 @@ a[href]:hover { opacity: 0.78; }
 
 /* Comfortable tap targets and a persistent Facebook connection card. */
 .stButton > button, .stLinkButton > a { min-height: 48px; border-radius: 12px; font-weight: 600; }
+
+/* Destructive actions beside individual records in Clean & manage data. */
+.stApp :is([class*="st-key-record_manager_delete_"], [class*="st-key-record_manager_row_confirm_"]) button {
+  background: #dc2626;
+  border-color: #dc2626;
+  color: #fff;
+}
+.stApp :is([class*="st-key-record_manager_delete_"], [class*="st-key-record_manager_row_confirm_"]) button:hover:not(:disabled),
+.stApp :is([class*="st-key-record_manager_delete_"], [class*="st-key-record_manager_row_confirm_"]) button:active:not(:disabled) {
+  background: #b91c1c;
+  border-color: #b91c1c;
+  color: #fff;
+}
+.stApp :is([class*="st-key-record_manager_delete_"], [class*="st-key-record_manager_row_confirm_"]) button:focus-visible {
+  outline: 3px solid #ef4444;
+  outline-offset: 3px;
+}
+
 button[data-testid="stExpandSidebarButton"], [data-testid="stSidebarCollapseButton"] button { min-width: 48px; min-height: 48px; }
 [data-baseweb="tab"] { min-height: 48px; padding-inline: 20px; }
 .stTextInput input, .stTextArea textarea { font-size: 16px; }
@@ -1373,11 +1412,17 @@ def _render_cloud_save(records: List[Dict[str, Any]], title_key: str, save_key: 
                 st.error("Please enter a custom title before saving.")
             else:
                 write_summary = _write_results_to_firestore(records, custom_title=custom_title)
-                st.success(
+                confirmation = (
                     "Saved to Firestore: "
                     f"{write_summary['inserted']} {noun} "
                     f"(skipped: {write_summary['skipped']})."
                 )
+                if _focus_modal_open("facebook"):
+                    st.session_state["facebook_save_confirmation"] = confirmation
+                    _close_focus_modal()
+                    st.rerun()
+                else:
+                    st.success(confirmation)
         except Exception as exc:
             error_text = str(exc).strip() or repr(exc)
             st.error(f"Firestore write failed: {error_text}")
@@ -1586,8 +1631,6 @@ def _render_collection_workspace(
 
 def _render_facebook_workspace(user_email: str, session: FacebookSession) -> None:
     """Open the guided steps in a focused modal: connect (only when needed), links, then collect."""
-    if _focus_modal_open("facebook_links"):
-        return  # Inspecting the saved library does not need a remote Facebook session.
     search = st.session_state.get("scrape_source") == "facebook_search"
     if st.session_state.get("scrape_source") in {"facebook", "facebook_search"} or _focus_modal_open("facebook"):
         session = _auto_check_facebook(user_email, session)
@@ -1609,8 +1652,11 @@ def _render_facebook_workspace(user_email: str, session: FacebookSession) -> Non
         return
     with st.container(border=True, key="facebook_overview"):
         st.subheader("Oyoshi on Facebook" if search else "Facebook")
-        st.caption("Open Oyoshi search results directly and collect posts with 2–3 scrolls." if search else
+        st.caption("Open Oyoshi search results directly and collect posts with 2–5 scrolls." if search else
                    "Collect posts and comments from the Facebook groups and pages you choose.")
+        save_confirmation = st.session_state.pop("facebook_save_confirmation", None)
+        if save_confirmation:
+            st.success(save_confirmation)
         if not search:
             st.warning(FACEBOOK_USAGE_WARNING, icon="⚠️")
         if _facebook_ready(session):
@@ -1669,7 +1715,7 @@ def _facebook_steps_modal(user_email: str, session: FacebookSession,
                 st.error(str(exc))
             if links_valid:
                 st.link_button("Open this search on Facebook", targets[0])
-            st.caption("The collector opens this search link directly. Choose 2 or 3 scroll iterations below.")
+            st.caption("The collector opens this search link directly. Choose between 2 and 5 scroll iterations below.")
         else:
             targets = list(st.session_state.get(FACEBOOK_TARGETS_KEY, []))
             links_valid = bool(st.session_state.get(FACEBOOK_LINKS_VALID_KEY, True))
@@ -1682,7 +1728,7 @@ def _facebook_steps_modal(user_email: str, session: FacebookSession,
         use_headless = settings[0].checkbox("Headless Browser", value=True, disabled=IS_CLOUD,
                                             key="facebook_search_headless" if search else "facebook_headless")
         if search:
-            scroll_times = settings[1].slider("Scroll Iterations", min_value=2, max_value=3,
+            scroll_times = settings[1].slider("Scroll Iterations", min_value=2, max_value=5,
                                               value=saved_settings.get("scroll_times", 3),
                                               key="facebook_search_scroll_times",
                                               on_change=_remember_facebook_search_settings)
@@ -1695,7 +1741,10 @@ def _facebook_steps_modal(user_email: str, session: FacebookSession,
             reddit_limit=50, reddit_comments=20,
             strict_scroll_limit=search,
         )
-    _render_step_nav(FACEBOOK_SEARCH_STEP_KEY if search else FACEBOOK_STEP_KEY, labels, index, can_continue)
+    posts = [r for r in (st.session_state.get("last_scrape_results") or [])
+             if r.get("source_type") not in NON_CONTENT_TYPES]
+    if not (index >= len(labels) - 1 and bool(posts)):
+        _render_step_nav(FACEBOOK_SEARCH_STEP_KEY if search else FACEBOOK_STEP_KEY, labels, index, can_continue)
 
 
 def _render_collect_controls(
@@ -2319,7 +2368,7 @@ def _analysis_selection() -> Dict[str, Any]:
         return {"mode": mode, "use_recent": True, "recent": recent, "recent_ids": recent_ids,
                 "datasets": ["recent:" + recent["id"]] if recent else [], "sources": None,
                 "ready": bool(recent_ids)}
-    sources = list(st.session_state.get("analysis_sources", memo.get("sources") or []))
+    sources = _selected_analysis_sources(memo.get("sources"))
     datasets = list(st.session_state.get("analysis_datasets", memo.get("datasets") or []))
     return {"mode": mode, "use_recent": False, "recent": None, "recent_ids": set(),
             "datasets": datasets, "sources": sources, "ready": bool(sources) and bool(datasets)}
@@ -2610,37 +2659,24 @@ def _select_scrape_source(source: str | None) -> None:
         _open_x_collection_dialog()
 
 
-def _open_facebook_link_inspector() -> None:
-    _open_focus_modal("facebook_links")
-
-
-@st.dialog("Saved Facebook links", width="large", on_dismiss=_close_focus_modal)
-def _facebook_link_inspector(user_email: str) -> None:
-    # Dialog interactions rerun separately from main() and its access check.
-    from modules.auth import allowed_emails, verify_access
-    try:
-        if verify_access(st.session_state.get("auth_token", ""), allowed_emails()) != user_email:
-            raise PermissionError()
-    except Exception:
-        _close_focus_modal()
-        st.rerun()
-    render_saved_facebook_links(user_email)
-
-
 def _render_scrape_workspace(user_email: str, facebook_session: FacebookSession) -> None:
-    render_scrape_navigation(_select_scrape_source, on_inspect_facebook_links=_open_facebook_link_inspector)
-    if _focus_modal_open("facebook_links"):
-        _facebook_link_inspector(user_email)
-    with st.container(key="sm_scrape_panel_facebook"):
-        _render_collection_workspace("facebook", user_email, facebook_session)
-    with st.container(key="sm_scrape_panel_reddit"):
-        _render_collection_workspace("reddit", user_email, facebook_session)
-    with st.container(key="sm_scrape_panel_news"):
-        _render_news_workspace()
-    with st.container(key="sm_scrape_panel_x"):
-        _render_x_workspace(user_email)
-    with st.container(key="sm_scrape_panel_website"):
-        _render_website_workspace(user_email)
+    st.subheader("Scrape Data")
+    collect_tab, saved_links_tab = st.tabs(["Collect data", "Saved Facebook links"])
+    with collect_tab:
+        render_scrape_navigation(_select_scrape_source)
+        with st.container(key="sm_scrape_panel_facebook"):
+            _render_collection_workspace("facebook", user_email, facebook_session)
+        with st.container(key="sm_scrape_panel_reddit"):
+            _render_collection_workspace("reddit", user_email, facebook_session)
+        with st.container(key="sm_scrape_panel_news"):
+            _render_news_workspace()
+        with st.container(key="sm_scrape_panel_x"):
+            _render_x_workspace(user_email)
+        with st.container(key="sm_scrape_panel_website"):
+            _render_website_workspace(user_email)
+    with saved_links_tab:
+        # Tab interactions rerun main(), including its account access check.
+        render_saved_facebook_links(user_email)
 
 
 def main() -> None:
@@ -2668,13 +2704,14 @@ def main() -> None:
         render_record_management()
 
     with analysis_tab:
-        analysis_sources = _render_analysis_tab(user_email)
+        _render_analysis_tab(user_email)
 
     # Render after processing so the trends page includes the latest saved run.
     with trends_tab:
         sentiment_trend_tab, risk_trend_tab = st.tabs(["Sentiment over time", "Border tension risk over time"])
         with sentiment_trend_tab:
-            _render_sentiment_history(source_urls=analysis_sources)
+            # The saved timeline is independent of the inputs for the next analysis.
+            _render_sentiment_history()
         with risk_trend_tab:
             _render_news_risk_history()
 

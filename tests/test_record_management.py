@@ -202,6 +202,9 @@ class RecordManagementUITests(unittest.TestCase):
         self.load.assert_called_once_with("db")
         self.assertEqual(len(self.app.dataframe), 0)
         self.assertEqual(len([button for button in self.app.button if "card_featured" in button.key]), 2)
+        self.assertEqual(len([button for button in self.app.tabs[1].button if "card_search" in button.key]), 2)
+        self.assertEqual(self.app.tabs[1].expander[0].label, "Show / hide filters")
+        self.assertFalse(self.app.tabs[1].expander[0].proto.expanded)
         self.assertFalse(self.app.multiselect)
         self.app.run()
         self.load.assert_called_once_with("db")
@@ -239,18 +242,25 @@ class RecordManagementUITests(unittest.TestCase):
         self.app.text_input(key="record_manager_dataset_search").set_value("not-found").run()
         self.assertTrue(any("No datasets match" in info.value for info in self.app.info))
         self.app.text_input(key="record_manager_dataset_search").set_value("   ").run()
-        self.assertFalse([button for button in self.app.button if "card_search" in button.key])
+        self.assertEqual(len([button for button in self.app.button if "card_search" in button.key]), 10)
 
     def test_search_paginates_datasets_and_resets_on_a_new_query(self):
         self.rows = [record(str(i), custom_title=f"Campaign {i:02}") for i in range(25)]
         self.app.button(key="record_manager_refresh").click().run()
+        self.assertEqual(len([button for button in self.app.button if "card_search" in button.key]), 12)
+        self.app.selectbox(key="record_manager_dataset_page").select(3).run()
+        self.assertEqual(len([button for button in self.app.button if "card_search" in button.key]), 1)
         self.app.text_input(key="record_manager_dataset_search").set_value("campaign").run()
+        self.assertEqual(self.app.selectbox(key="record_manager_dataset_page").value, 1)
         self.assertEqual(len([button for button in self.app.button if "card_search" in button.key]), 12)
         self.app.selectbox(key="record_manager_dataset_page").select(3).run()
         self.assertEqual(len([button for button in self.app.button if "card_search" in button.key]), 1)
         self.app.text_input(key="record_manager_dataset_search").set_value("campaign 00").run()
         self.assertEqual([button.key for button in self.app.button if "card_search" in button.key],
                          ["record_manager_card_search_title:Campaign 00"])
+        self.app.text_input(key="record_manager_dataset_search").set_value("").run()
+        self.assertEqual(self.app.selectbox(key="record_manager_dataset_page").value, 1)
+        self.assertEqual(len([button for button in self.app.button if "card_search" in button.key]), 12)
         self.assertFalse(self.app.exception)
 
     def test_entire_dataset_covers_all_pages_and_statuses_despite_empty_search_results(self):

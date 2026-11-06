@@ -3,7 +3,8 @@
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(min(100%, 280px), 300px));
   gap: 20px;
-  max-width: 760px;
+  width: 100%;
+  max-width: none;
   align-items: stretch;
 }
 .st-key-sm_source_picker_grid > [data-testid="stLayoutWrapper"] {

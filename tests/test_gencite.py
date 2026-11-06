@@ -407,7 +407,7 @@ class GenCiteWorkspaceTests(unittest.TestCase):
 
     def assert_ok(self, app):
         self.assertFalse(list(app.exception), [e.value for e in app.exception])
-        visible = str(app) + repr(app.session_state.filtered_state)
+        visible = str(app) + repr(app.session_state)
         self.assertNotIn("private-gemini", visible)
         self.assertNotIn("private-openai", visible)
 
@@ -415,13 +415,22 @@ class GenCiteWorkspaceTests(unittest.TestCase):
         db, fake = MemoryDB(), FakeProviders()
         app = self.run_app(db, fake)
         self.assert_ok(app)
-        self.assertTrue(app.button(key="gencite_run").disabled)
+        self.assertTrue(app.button(key="gencite_generate_variations").disabled)
+        self.assertNotIn("gencite_run", [button.key for button in app.button])
+        self.assertNotIn("gencite_brand", [field.key for field in app.text_input])
+        self.assertNotIn("**2 · Queries to test**", [block.value for block in app.markdown])
         app.text_input(key="gencite_query").input("crm software").run()
+        self.assertNotIn("gencite_continue_brand", [button.key for button in app.button])
         app.button(key="gencite_generate_variations").click().run()
         self.assertEqual(len(app.session_state["gencite_rows"]), 50)
+        self.assertNotIn("gencite_query", [field.key for field in app.text_input])
+        self.assertNotIn("gencite_brand", [field.key for field in app.text_input])
         app.button(key="gencite_clear_selection").click().run()
-        self.assertTrue(app.button(key="gencite_run").disabled)
+        self.assertTrue(app.button(key="gencite_continue_brand").disabled)
         app.button(key="gencite_select_all").click().run()
+        app.button(key="gencite_continue_brand").click().run()
+        self.assertNotIn("**2 · Queries to test**", [block.value for block in app.markdown])
+        self.assertTrue(app.button(key="gencite_run").disabled)
         app.text_input(key="gencite_brand").input("Acme").run()
         app.text_input(key="gencite_aliases").input("ACM Labs").run()
         app.text_input(key="gencite_competitors").input("Beta").run()
@@ -459,6 +468,51 @@ class GenCiteWorkspaceTests(unittest.TestCase):
         self.assertEqual((len(tested["queries"]), tested["runCount"]), (1, 1))
         self.assertTrue(any("queued keywords were tested" in s.value for s in app.success))
 
+    def test_step_navigation_preserves_edits_and_requires_regeneration_for_a_changed_topic(self):
+        app = self.run_app(MemoryDB(), FakeProviders())
+        app.text_input(key="gencite_query").input("crm software").run()
+        app.button(key="gencite_generate_variations").click().run()
+
+        # AppTest cannot edit data_editor cells directly; supply the edited frame.
+        def edit_queries(frame, **kwargs):
+            frame = frame.copy()
+            frame.loc[0, "Test"] = False
+            frame.loc[1, "Query"] = "Edited query"
+            return frame
+
+        with patch("modules.gencite_ui.st.data_editor", side_effect=edit_queries):
+            app.run()
+        app.button(key="gencite_continue_brand").click().run()
+        self.assertEqual(app.button(key="gencite_run").label, "Run analysis on 49 queries")
+        app.text_input(key="gencite_brand").input("Acme").run()
+        app.text_input(key="gencite_aliases").input("ACM").run()
+        app.text_input(key="gencite_competitors").input("Beta").run()
+        app.text_input(key="gencite_market").input("SaaS").run()
+        app.text_input(key="gencite_region").input("Singapore").run()
+        app.multiselect(key="gencite_providers").set_value(["openai"]).run()
+        app.button(key="gencite_back_queries").click().run()
+        self.assertFalse(app.session_state["gencite_current_rows"][0]["Test"])
+        self.assertEqual(app.session_state["gencite_current_rows"][1]["Query"], "Edited query")
+        app.button(key="gencite_back_topic").click().run()
+        self.assertEqual(app.text_input(key="gencite_query").value, "crm software")
+        app.button(key="gencite_continue_queries").click().run()
+        app.button(key="gencite_continue_brand").click().run()
+        for key, value in (("brand", "Acme"), ("aliases", "ACM"), ("competitors", "Beta"),
+                           ("market", "SaaS"), ("region", "Singapore")):
+            self.assertEqual(app.text_input(key=f"gencite_{key}").value, value)
+        self.assertEqual(app.multiselect(key="gencite_providers").value, ["openai"])
+        self.assertEqual(app.button(key="gencite_run").label, "Run analysis on 49 queries")
+        app.button(key="gencite_back_queries").click().run()
+        app.button(key="gencite_back_topic").click().run()
+        app.text_input(key="gencite_query").input("accounting software").run()
+        self.assertNotIn("gencite_continue_queries", [button.key for button in app.button])
+        self.assertNotIn("gencite_run", [button.key for button in app.button])
+        app.button(key="gencite_generate_variations").click().run()
+        self.assertEqual(len(app.session_state["gencite_current_rows"]), 50)
+        self.assertTrue(all(row["Test"] for row in app.session_state["gencite_current_rows"]))
+        self.assertNotIn("Edited query", [row["Query"] for row in app.session_state["gencite_current_rows"]])
+        self.assert_ok(app)
+
     def test_saved_analysis_opens_renames_and_deletes(self):
         db = MemoryDB()
         result = gencite.merge_analysis_results(None, gencite.build_provider_result(
@@ -471,6 +525,8 @@ class GenCiteWorkspaceTests(unittest.TestCase):
         self.assert_ok(app)
         self.assertEqual(app.session_state["gencite_result"]["brand"], "Acme")
         self.assertEqual(app.session_state["gencite_aliases"], "ACM")
+        self.assertEqual(app.session_state["gencite_step"], "Brand")
+        self.assertFalse(app.button(key="gencite_run").disabled)
         self.assertTrue(any("Opened from saved analysis" in i.value for i in app.info))
         app.text_input(key=f"gencite_rename_{record['id']}").input("Relaunch").run()
         app.button(key="gencite_rename_saved").click().run()
@@ -485,6 +541,10 @@ class GenCiteWorkspaceTests(unittest.TestCase):
         os.environ.update({"GEMINI_KEY": "", "OPENAI_API_KEY": ""})
         app.run()
         self.assert_ok(app)
+        app.text_input(key="gencite_query").input("crm software").run()
+        app.button(key="gencite_generate_variations").click().run()
+        self.assertTrue(any("standard templates" in warning.value for warning in app.warning))
+        app.button(key="gencite_continue_brand").click().run()
         self.assertTrue(app.button(key="gencite_run").disabled)
         self.assertTrue(any("No AI provider is configured" in e.value for e in app.error))
 
@@ -604,7 +664,7 @@ class ProviderCheckTests(unittest.TestCase):
         self.assertFalse(list(app.exception))
         self.assertTrue(any("Gemini · gemini-2.5-flash** works with GenCite" in s.value for s in app.success))
         self.assertTrue(any("ChatGPT · gpt-4.1-mini** cannot run GenCite yet" in e.value for e in app.error))
-        visible = str(app) + repr(app.session_state.filtered_state)
+        visible = str(app) + repr(app.session_state)
         self.assertNotIn("private-gemini", visible)
         self.assertNotIn("private-openai", visible)
 

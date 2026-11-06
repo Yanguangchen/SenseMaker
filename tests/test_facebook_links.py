@@ -212,22 +212,32 @@ class FacebookLinkNavigationTests(unittest.TestCase):
             stack.enter_context(patch("modules.facebook_links_ui.init_db", return_value=db))
             stack.enter_context(patch("dashboard.active_collection", return_value=None))
             stack.enter_context(patch("modules.auth.allowed_emails", return_value={"owner@example.com"}))
+            stack.enter_context(patch("modules.auth.web_config", return_value={
+                "apiKey": "public", "authDomain": "example.firebaseapp.com",
+                "projectId": "example", "appId": "public",
+            }))
+            stack.enter_context(patch("streamlit.components.v1.declare_component", return_value=lambda **kwargs: None))
             verify = stack.enter_context(patch("modules.auth.verify_access", return_value="owner@example.com"))
             check = stack.enter_context(patch("dashboard._auto_check_facebook", wraps=_auto_check_facebook))
             loader = stack.enter_context(patch("modules.facebook_links_ui.load_saved_links", wraps=load_saved_links))
             browser = stack.enter_context(patch("dashboard.start_login"))
             collect = stack.enter_context(patch("dashboard.start_collection"))
             app = AppTest.from_string(
-                "from dashboard import _render_scrape_workspace\n"
+                "from dashboard import _render_scrape_workspace, require_access\n"
                 "from modules.facebook_session import FacebookSession\n"
-                "_render_scrape_workspace('owner@example.com', FacebookSession('saved'))\n"
-            ).run()
+                "email = require_access()\n"
+                "if email:\n"
+                "    _render_scrape_workspace(email, FacebookSession('saved'))\n"
+            )
+            app.session_state["auth_token"] = "signed-token"
+            app.run()
             self.assertFalse(app.exception)
             # A saved login is not checked in Browserbase just to visit the source cards.
             check.assert_not_called()
-            app.button(key="scrape_inspect_facebook_links").click().run()
-            self.assertFalse(app.exception)
-            self.assertEqual(list(app.dataframe[0].value["Facebook URL"]), [url])
+            self.assertEqual([tab.label for tab in app.tabs], ["Collect data", "Saved Facebook links"])
+            self.assertEqual(list(app.tabs[1].dataframe[0].value["Facebook URL"]), [url])
+            self.assertFalse(app.tabs[0].dataframe)
+            self.assertNotIn("focus_workspace_modal", app.session_state)
             check.assert_not_called()
             browser.assert_not_called()
             collect.assert_not_called()
@@ -236,7 +246,8 @@ class FacebookLinkNavigationTests(unittest.TestCase):
             for action in ("delete", "refresh"):
                 if action == "refresh":
                     verify.side_effect = None
-                    app.button(key="scrape_inspect_facebook_links").click().run()
+                    app.session_state["auth_token"] = "signed-token"
+                    app.run()
                 else:
                     editor_key = app.session_state[f"{FacebookLinkInspectorTests.prefix}_delete_editor_key"]
                     app.session_state[editor_key] = {"edited_rows": {0: {"Delete": True}},
@@ -249,13 +260,14 @@ class FacebookLinkNavigationTests(unittest.TestCase):
                 self.assertFalse(app.exception)
                 loader.assert_not_called()
                 self.assertEqual(db.records, before)
-                self.assertNotIn("focus_workspace_modal", app.session_state)
+                self.assertFalse(app.tabs)
 
     def test_selecting_facebook_still_checks_the_saved_connection(self):
         from modules.facebook_session import FacebookSession
 
         with patch("dashboard.IS_CLOUD", True), \
              patch("dashboard.init_db"), \
+             patch("modules.facebook_links_ui.init_db"), \
              patch("dashboard.active_collection", return_value=None), \
              patch("dashboard._auto_check_facebook", return_value=FacebookSession()) as check:
             app = AppTest.from_string(

@@ -229,6 +229,15 @@ class SourceWorkspaceTests(unittest.TestCase):
             self.assertNotIn("Your links", [heading.value for heading in app.tabs[1].subheader])
             app.button(key="select_all_links_facebook").click().run()
             app.button(key="facebook_wizard_step_next").click().run()
+            # Step navigation is accessible before posts are collected:
+            app.button(key="facebook_wizard_step_previous").click().run()
+            app.button(key="clear_selected_links_facebook").click().run()
+            self.assertFalse(list(app.exception))
+            self.assertEqual(app.multiselect[0].value, [])
+            self.assertFalse(list(app.tabs[1].multiselect))
+            self.assertEqual(len(db.records), 2)
+            app.button(key="select_all_links_facebook").click().run()
+            app.button(key="facebook_wizard_step_next").click().run()
             app.button(key="collect_facebook_posts").click().run()
             self.assertEqual(scrape.call_args.kwargs["urls"], [facebook_url])
             app.number_input(key="reddit_post_limit").set_value(100).run()
@@ -239,12 +248,9 @@ class SourceWorkspaceTests(unittest.TestCase):
             self.assertEqual(app.session_state["last_reddit_scrape_results"][0]["url"], CAMBODIA_URL)
             self.assertTrue(any(button.key == "save_last_results_btn" for button in app.button))
             self.assertTrue(any(button.key == "save_reddit_results_btn" for button in app.button))
-            app.button(key="facebook_wizard_step_previous").click().run()
-            app.button(key="clear_selected_links_facebook").click().run()
-            self.assertFalse(list(app.exception))
-            self.assertEqual(app.multiselect[0].value, [])
-            self.assertFalse(list(app.tabs[1].multiselect))
-            self.assertEqual(len(db.records), 2)
+            # Next and previous are hidden now that all posts have been collected:
+            self.assertNotIn("facebook_wizard_step_previous", [button.key for button in app.button])
+            self.assertNotIn("facebook_wizard_step_next", [button.key for button in app.button])
 
     def test_other_platform_links_cannot_be_saved_or_collected_in_facebook(self):
         db = MemoryDB()

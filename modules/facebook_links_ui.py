@@ -57,7 +57,7 @@ def render_facebook_link_list(urls: list[str], *, key_prefix: str, user_email: s
             selected = [url for index, url in enumerate(shown) if bool(edited.iloc[index]["Delete"])]
             if st.button(f"Delete {len(selected)} selected link{'s' if len(selected) != 1 else ''}",
                          key=f"{key_prefix}_delete", disabled=not selected, type="primary") and selected:
-                # This runs after the dialog's access check, never as a widget callback.
+                # This runs after the enclosing view's access check, never as a widget callback.
                 try:
                     remove_saved_links(init_db(), user_email, selected)
                 except Exception:
@@ -100,7 +100,7 @@ def render_saved_facebook_links(user_email: str) -> None:
             previous = st.session_state.get(library_key, {})
             st.session_state[library_key] = {"urls": previous.get("urls", []), "error": True}
 
-    # Run refresh after the enclosing dialog's access check, not in a callback.
+    # Run refresh after the enclosing view's access check, not in a callback.
     requested_refresh = st.button("Refresh saved Facebook links", key=f"facebook_link_inspector_{owner}_refresh")
     if library_key not in st.session_state or requested_refresh:
         refresh()

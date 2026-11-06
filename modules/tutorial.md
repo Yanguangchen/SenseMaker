@@ -35,7 +35,7 @@ Open **Scrape Data** to choose from five main source cards—**Facebook**, **Oyo
 | Source | What it collects | Cloud saving |
 | --- | --- | --- |
 | **Facebook** | Posts and visible comments from your selected Facebook group, page, or post links. | Manual (**Save data to cloud**) |
-| **Oyoshi on Facebook** | Direct Facebook search results for `oyoshi` (or a custom Facebook search URL) with 2–3 scrolls. | Manual (**Save data to cloud**) |
+| **Oyoshi on Facebook** | Direct Facebook search results for `oyoshi` (or a custom Facebook search URL) with 2–5 scrolls. | Manual (**Save data to cloud**) |
 | **X** | Recent posts (last ~7 days, excluding reposts) and optional reply samples for enabled searches. | Automatic |
 | **Online news** | Google News headlines and snippets across enabled watch categories and editions. | Automatic |
 | **Custom website** | Main text extracted from up to 100 public web pages per run. | Automatic (plus **Save dataset** to rename) |
@@ -56,13 +56,13 @@ Open **Scrape Data** to choose from five main source cards—**Facebook**, **Oyo
 Open **Scrape Data → Oyoshi on Facebook** to collect directly from the preconfigured Facebook search for `oyoshi` (including its saved filter), reusing your Facebook login without altering your saved link selection:
 
 - **Skips link selection:** Opens straight to **Collect posts** (or **Connect Facebook** first if you are not signed in).
-- **Strict scroll budget:** Defaults to **3** scroll iterations (adjustable between **2** and **3**) with a strict limit—no extra adaptive scroll cycles are added.
+- **Strict scroll budget:** Defaults to **3** scroll iterations (adjustable between **2** and **5**) with a strict limit—no extra adaptive scroll cycles are added.
 - **Custom search URLs:** Replace **Oyoshi Facebook search URL** with any filtered Facebook search link (`/search/…` containing a `q=` query). Your custom URL and scroll count stay saved in the session when switching sources.
 - **Preview & save:** Click **Open this search on Facebook** to inspect the live search page, or click **Collect posts**, enter a **Custom title**, and click **Save data to cloud**.
 
 ### Saved Facebook links
 
-Click **Saved Facebook links** on the **Scrape Data** source-card screen or inside the Facebook workspace (or expand **Inspect all saved Facebook links** in **Your links**):
+Open **Scrape Data → Saved Facebook links**, beside the **Collect data** tab (or expand **Inspect all saved Facebook links** in **Your links**):
 
 - **Search & inspect:** Filter your entire personal library with **Find a saved Facebook link** and click any URL to open it in Facebook.
 - **Delete saved links:** Tick **Delete** beside the unwanted URLs, then click **Delete … selected links**. Deleted links are removed from your saved library and pending scrape selection. Previously collected posts and analyses stay intact.
@@ -110,7 +110,7 @@ Open **Clean & manage data** in the sidebar to inspect datasets and permanently 
 ### Browse and filter
 
 - **Dataset cards:** Shows all datasets saved today in your local timezone (or the 6 latest datasets if none were saved today). Click **Refresh datasets** to reload from the cloud.
-- **Find older datasets:** Use **Search datasets** to match a dataset title, page title, URL, or record ID, then click **Open dataset**—or click **Browse all records**.
+- **Find older datasets:** Open **Find a dataset** to browse all datasets as cards, 12 per page. Expand **Show / hide filters** to search by dataset title, page title, URL, or record ID. Collapse the panel to keep browsing filtered cards, or clear the search to show every dataset again. Click **Open dataset** to review one, or **Browse all records**.
 - **Filter inside a dataset:** Narrow records by **Dataset**, **Source**, **Status** (`pending`, `processed`, `error`), or **Search records**. Click **Back to datasets** to return to the card view.
 
 ### Delete records or datasets
@@ -134,7 +134,7 @@ Open the **Settings** tab in **Sentiment Analysis** to adjust:
 Click **Start sentiment analysis** (or **Continue**) on the **Analysis** tab to open the 2-step guided modal:
 
 1. **Choose and edit data:**
-   - Select **Manual selection** (pick **Record sources**, then click one or more dataset cards or use **Choose older datasets or adjust selection**) or **Last scraped data** (the most recent collection from this browser session).
+   - Select **Manual selection** (check **Filter by record sources**, then click one or more dataset cards or use **Choose older datasets or adjust selection**) or **Last scraped data** (the most recent collection from this browser session).
    - Review the loaded table and uncheck **Include** on any record you want to exclude. Exclusions save to the cloud immediately and persist across sessions. Click **Next →**.
 2. **Analyze:**
    - Enter any Thai projects, companies, or brands to watch (one per line).
@@ -161,7 +161,7 @@ Each analyzed record receives an English translation, topics, a sentiment label 
 
 Open **Sentiment Trends** to compare runs over time:
 
-- **Sentiment over time:** Plots each saved AI analysis run and Online News scan from **−100** (all negative) to **+100** (all positive), with a dashed equal-weight average and red rings marking boycott or border-tension signals. Use **Refresh timeline** to reload recent runs.
+- **Sentiment over time:** Plots each saved AI analysis run and Online News scan from **−100** (all negative) to **+100** (all positive), with a dashed equal-weight average and red rings marking boycott or border-tension signals. Saved history from all record sources appears automatically, independently of your selections in Sentiment Analysis. Use **Refresh timeline** to reload recent runs.
 - **Border tension risk over time:** Tracks headline risk scores (`Low < 20 ≤ Elevated < 45 ≤ High`) and boycott article counts from Google News scans. Use **Refresh risk timeline** to update.
 - **Velocity Tracker:** To measure engagement growth (`Live`, `Slowing`, `Dead`) in Sentiment Analysis reports, recollect and save the same eligible Facebook/Reddit/X posts at a later time so at least two snapshots exist.
 
@@ -179,7 +179,7 @@ Open **Content plan** in the sidebar to turn analyzed customer concerns into key
 
 Open **GenCite** to measure how often AI models mention your brand when answering customer questions:
 
-- **Analyze:** Enter a **Query or topic**, click **Generate query variations** (or edit the table directly, up to 50 checked queries), enter **Brand to track** (plus optional aliases, competitors, market, and region), choose **Providers**, and click **Run analysis on … queries**. Use **Run again** to add another sampling round, or enter an **Analysis name** and click **Save analysis**.
+- **Analyze:** Follow one step at a time. Enter a **Query or topic** and click **Generate query variations** to open **Queries to test**. Edit the table and select up to 50 queries, then click **Continue to brand**. Enter **Brand to track** (plus optional aliases, competitors, market, and region), choose **Providers**, and click **Run analysis on … queries**. Back buttons preserve your entries and selections. Use **Run again** to add another sampling round, or enter an **Analysis name** and click **Save analysis**.
 - **Recommendations:** Generate content briefs or keyword ideas targeting low-visibility queries. Open **View brief** / **View evidence**, or select **Queue for testing** → **Test … queued keywords** to run those keywords as a new query set.
 - **Saved analyses:** Open, rename, refresh, or delete your private saved GenCite runs. Use **Check provider access → Run check** in **Analyze** to test server AI keys.
 

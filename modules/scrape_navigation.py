@@ -16,7 +16,7 @@ SOURCE_CARDS = (
     {"key": "facebook", "title": "Facebook", "label": "GROUPS & PAGES",
      "description": "Collect posts and comments from the Facebook links you follow."},
     {"key": "facebook_search", "icon": "facebook", "title": "Oyoshi on Facebook", "label": "DIRECT SEARCH",
-     "description": "Open Oyoshi search results directly and collect posts with 2–3 scrolls."},
+     "description": "Open Oyoshi search results directly and collect posts with 2–5 scrolls."},
     {"key": "x", "title": "X", "label": "RECENT POSTS & REPLIES",
      "description": "Find recent posts about your brands, topics and search terms."},
     {"key": "news", "title": "Online news", "label": "NEWS & HEADLINES",
@@ -27,8 +27,7 @@ SOURCE_CARDS = (
 SOURCE_KEYS = {source["key"] for source in SOURCE_CARDS} | {"reddit"}
 
 
-def render_scrape_navigation(on_select: Callable[[str | None], None], *,
-                             on_inspect_facebook_links: Callable[[], None] | None = None) -> str | None:
+def render_scrape_navigation(on_select: Callable[[str | None], None]) -> str | None:
     selected = st.session_state.get("scrape_source")
     if selected not in SOURCE_KEYS:
         selected = None
@@ -44,14 +43,9 @@ def render_scrape_navigation(on_select: Callable[[str | None], None], *,
     st.html(f"<style>{hidden} {{ display: none !important; }}</style>")
     if selected:
         st.button("← All sources", key="scrape_all_sources", on_click=on_select, args=(None,))
-        if selected == "facebook" and on_inspect_facebook_links:
-            st.button("Saved Facebook links", key="scrape_inspect_facebook_links", on_click=on_inspect_facebook_links)
         return selected
 
-    st.subheader("Scrape Data")
     st.caption("Choose a source to start collecting. Your settings and collected data stay here when you switch sources.")
-    if on_inspect_facebook_links:
-        st.button("Saved Facebook links", key="scrape_inspect_facebook_links", on_click=on_inspect_facebook_links)
     with st.container(key="sm_source_picker_grid"):
         for source in SOURCE_CARDS:
             with st.container(border=True, key=f"sm_source_card_{source['key']}"):

@@ -3,6 +3,7 @@
 import copy
 import os
 import unittest
+from contextlib import ExitStack
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
@@ -24,6 +25,11 @@ def snapshot(sentiments, day=1, selected_count=None):
         selected_count=selected_count if selected_count is not None else len(sentiments),
         provider="gemini", targets=["example"],
     )
+
+
+def chart_count(tree):
+    # Streamlit 1.66 renamed this element; hosted deployments still use 1.50.
+    return len(tree.get("vega_lite_chart")) + len(tree.get("arrow_vega_lite_chart"))
 
 
 class MemoryDatabase:
@@ -194,7 +200,7 @@ class TimelineUITests(unittest.TestCase):
                 app = AppTest.from_string(self.script).run()
                 self.assertFalse(list(app.exception))
                 self.assertEqual(app.metric[2].value, str(count))
-                self.assertEqual(len(app.get("arrow_vega_lite_chart")), 1)
+                self.assertEqual(chart_count(app), 1)
                 self.assertEqual(len(app.dataframe[0].value), count)
                 if count == 2:
                     self.assertEqual(app.metric[0].delta, "-100.0 vs previous point")
@@ -217,12 +223,12 @@ class TimelineUITests(unittest.TestCase):
         self.news.return_value = [news_scan(1, neutral=4)]
         with patch("dashboard._load_sentiment_history", return_value=[]):
             app = AppTest.from_string(self.script).run()
-        self.assertEqual(len(app.get("arrow_vega_lite_chart")), 1)
+        self.assertEqual(chart_count(app), 1)
         self.news.side_effect = RuntimeError("offline")
         with patch("dashboard._load_sentiment_history", return_value=[snapshot(["Joy"])]):
             app = AppTest.from_string(self.script).run()
         self.assertFalse(list(app.exception))
-        self.assertEqual(len(app.get("arrow_vega_lite_chart")), 1)
+        self.assertEqual(chart_count(app), 1)
         self.assertTrue(any("Online News points" in caption.value for caption in app.caption))
 
     def test_news_history_requires_an_explicit_news_source(self):
@@ -231,10 +237,39 @@ class TimelineUITests(unittest.TestCase):
         with patch("dashboard._load_sentiment_history", return_value=[]):
             app = AppTest.from_string(script, default_timeout=30).run()
             self.news.assert_not_called()
-            self.assertEqual(len(app.get("arrow_vega_lite_chart")), 0)
+            self.assertEqual(chart_count(app), 0)
             app = AppTest.from_string(script.replace("source:website", "source:news"), default_timeout=30).run()
-            self.assertEqual(len(app.get("arrow_vega_lite_chart")), 1)
+            self.assertEqual(chart_count(app), 1)
             self.assertFalse(list(app.exception))
+
+    def test_trends_show_saved_history_independently_of_analysis_source_selection(self):
+        from modules.facebook_session import FacebookSession
+        rows = [snapshot(["Joy"]),
+                {**snapshot(["Anger"], day=2), "record_sources": [{"source_type": "reddit_post"}]},
+                {**snapshot(["Neutral"], day=3), "record_sources": [
+                    {"source_type": "reddit_post"}, {"source_type": "website_page"}]}]
+        self.news.return_value = [news_scan(4, positive=1)]
+        with ExitStack() as stack:
+            stack.enter_context(patch("dashboard.require_access", return_value="editor@example.com"))
+            stack.enter_context(patch("dashboard.IS_CLOUD", False))
+            stack.enter_context(patch("dashboard._get_facebook_session", return_value=FacebookSession()))
+            stack.enter_context(patch("dashboard._load_sentiment_history", return_value=rows))
+            stack.enter_context(patch("dashboard._render_ai_settings", return_value="openai"))
+            for name in ("_render_scrape_workspace", "render_record_management", "_render_news_risk_history",
+                         "render_content_workspace", "render_gencite_workspace", "render_tutorial_workspace"):
+                stack.enter_context(patch("dashboard." + name))
+            for sources in ([], ["source:website"]):
+                with self.subTest(analysis_sources=sources):
+                    app = AppTest.from_string("from dashboard import main\nmain()", default_timeout=30)
+                    app.session_state["analysis_sources"] = sources
+                    app.run()
+                    self.assertFalse(list(app.exception))
+                    trends = next(tab for tab in app.tabs if tab.label == "Sentiment over time")
+                    self.assertEqual(chart_count(trends), 1)
+                    self.assertEqual({metric.label: metric.value for metric in trends.metric}["Analysis runs"], "3")
+                    self.assertEqual({metric.label: metric.value for metric in trends.metric}["News searches"], "1")
+                    self.assertEqual(len(trends.dataframe[0].value), 4)
+                    self.assertFalse(list(trends.info))
 
     def test_dashboard_saves_one_run_and_invalidates_history_after_analysis(self):
         from dashboard import _process_selected_firestore_posts
@@ -276,7 +311,7 @@ class TimelineUITests(unittest.TestCase):
                 patch("modules.processor.analyze_posts", side_effect=[
                     {"a": {"sentiment": "Anger"}}, {"a": {"sentiment": "Joy"}},
                 ]):
-            app = AppTest.from_file(path)
+            app = AppTest.from_file(path, default_timeout=30)
             app.run()
             ui(app, "analysis_sources").select("source:reddit").run()
             app.session_state["analysis_dataset_catalog"] = {"rows": [{"key": "untitled:", "title": "Untitled", "count": 1, "pending": 1}], "error": False}
@@ -293,12 +328,11 @@ class TimelineUITests(unittest.TestCase):
             self.assertEqual(metrics["Average sentiment"], "+0.0")
             trends = next(tab for tab in app.tabs if tab.label == "Sentiment Trends")
             analysis = next(tab for tab in app.tabs if tab.label == "Sentiment Analysis")
-            self.assertEqual(len(trends.get("arrow_vega_lite_chart")), 1)
-            self.assertEqual(len(analysis.get("arrow_vega_lite_chart")), 0)
+            self.assertEqual(chart_count(trends), 1)
+            self.assertEqual(chart_count(analysis), 0)
             self.assertTrue({"Comment Sentiment Analysis", "Velocity Tracker", "Evidence by record"}
                             <= {tab.label for tab in app.tabs})
-            restored = AppTest.from_file(path).run()
-            ui(restored, "analysis_sources").select("source:reddit").run()
+            restored = AppTest.from_file(path, default_timeout=30).run()
             self.assertFalse(list(restored.exception))
             self.assertEqual({metric.label: metric.value for metric in restored.metric}["Analysis runs"], "2")
 

@@ -119,7 +119,11 @@ class GeminiSettingsTests(unittest.TestCase):
             app.session_state["gemini_model_name"] = "models/gemini-retired"
             app.run()
             self.assertEqual(len(app.text_input), 0)
-            app.button(key="refresh_gemini_models").click().run()
+            refresh_btn = app.button(key="refresh_gemini_models")
+            self.assertEqual(refresh_btn.label, "")
+            self.assertEqual(refresh_btn.help, "Refresh available models")
+            self.assertEqual(refresh_btn.proto.icon, ":material/refresh:")
+            refresh_btn.click().run()
             self.assertFalse(list(app.exception))
             self.assertEqual(app.selectbox(key="gemini_model_name").value, "auto")
             self.assertIn("gemini-test-flash", app.selectbox(key="gemini_model_name").options)

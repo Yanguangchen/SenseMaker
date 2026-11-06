@@ -94,11 +94,15 @@ GenCite web app itself is unchanged and can keep running separately.
 
 **Analyze**
 
+Follow one step at a time. Later steps stay hidden until you complete the current one;
+the Back buttons preserve your entries and query selections.
+
 1. **Topic**: enter a query or topic and click **Generate query variations**. Gemini (or ChatGPT when
    only it is configured) writes 50 queries across ten search intents: direct, comparative,
    alternatives, evaluative, ranked list, discovery, pricing, use case, problem-solving and
    audience-specific. If generation fails, 50 template variations are used and the cause is shown.
-2. **Queries to test**: tick, edit or add queries (up to 50).
+2. **Queries to test**: opens after generating variations. Tick, edit or add queries (up to 50),
+   then click **Continue to brand**.
 3. **Brand**: enter the brand, optional aliases and competitors (up to five each), and optional
    market and region. Choose the providers and click **Run analysis**.
 
@@ -159,7 +163,7 @@ SenseMaker/
 
 ## Thailand tensions and boycott watch
 
-In **Sentiment Analysis → Manual selection**, choose **Record sources** first: Facebook,
+In **Sentiment Analysis → Manual selection**, check **Filter by record sources** first: Facebook,
 Reddit, Online news, X, Custom website or Other saved sources. Nothing is selected automatically
 in a new session. Select one or more source-colored dataset cards: all datasets saved today
 appear first, using your local timezone; if none were saved today, the six latest appear.
@@ -173,9 +177,9 @@ their collection date or Firestore creation time. Reusing a dataset title still 
 together, and its displayed date advances when records are saved to it.
 Changing sources clears loaded records, selections and previous results. The old
 records remain in Firestore; they are not deleted or reclassified by language.
-The sentiment timeline uses the same source selection. New analysis runs record
-their source links; runs without source metadata and runs containing unselected sources are
-excluded from the filtered timeline. News-scan points appear only when Online news is selected.
+The sentiment timeline shows saved history from all record sources independently of
+the selection for a new analysis. Earlier runs without source metadata, mixed-source
+runs and saved Online News scans remain visible, including in a new browser session.
 
 If the selected sources have no saved records yet, collect their posts before loading Sentiment Analysis.
 Online news, X and Custom website save automatically; Facebook and Reddit require **Save data to cloud**. Saving source links
@@ -248,8 +252,9 @@ Open **Clean & manage data** in the sidebar to see individual dataset cards. The
 automatically and shows every dataset saved today in your browser's timezone (UTC when
 unavailable), newest first. If none were saved today, it shows the six latest datasets.
 Cards show the dataset name, record and pending counts, sources and latest save time.
-Use **Search datasets** below the cards to find any dataset by its name, page title, URL
-or record ID. Search results also appear as cards, with 12 datasets per page.
+Open **Find a dataset** to browse all datasets as cards, with 12 datasets per page.
+Expand **Show / hide filters** to search by dataset name, page title, URL or record ID.
+Collapse the panel to keep browsing filtered cards, or clear the search to show all datasets again.
 Click **Open dataset** to review its records, or **Browse all records** for the shared
 library. Filter by dataset (saved Custom title), source or status, and use **Search records**
 to narrow the table. **Back to datasets** returns to the cards and keeps your dataset search.
@@ -733,12 +738,12 @@ The dashboard has **four pages**, accessible from the left toolbar:
   settings and collected results in the current session.
 - **Oyoshi on Facebook** opens the configured direct search for `oyoshi`, including its saved filters, reusing your Facebook login
   and collection results. It skips saved-link selection and defaults to 3 scroll iterations,
-  adjustable to 2. This preset has a strict scroll limit without the normal extra adaptive cycles.
+  adjustable between 2 and 5. This preset has a strict scroll limit without the normal extra adaptive cycles.
   You can replace its search URL with a filtered Facebook search link; those filters are preserved.
 - Facebook and Reddit each keep their own source selections, collection settings and results.
 - Facebook auth session capture (opens Chrome for manual login)
 - Save a personal library of links, available on future visits and other devices
-- Open **Saved Facebook links** from the source cards or Facebook workspace to inspect your
+- Open the **Saved Facebook links** tab beside **Collect data** in **Scrape Data** to inspect your
   entire personal library, search URLs, open them in Facebook, refresh, or download the full list.
   Tick **Delete** beside unwanted URLs and click **Delete … selected links** to remove them
   from your library and pending scrape selection. Previously collected posts and analyses are kept.
@@ -759,7 +764,7 @@ The dashboard has **four pages**, accessible from the left toolbar:
 
 The **Analysis** subtab opens by default. **Start sentiment analysis** opens a focused two-step dialog: **Choose and edit data**, then **Analyze**. Settings remain on their own subtab.
 
-- Choose **Manual selection** or **Last scraped data**. In Manual selection, choose **Record sources**, then select one or more source-colored dataset cards. All datasets saved today appear first; when there are none, the six latest appear. **Choose older datasets or adjust selection** opens a searchable picker for the full source-filtered library. Dates use your local timezone, and cards show sources and record counts. Nothing is preselected in a new session; click a selected card again or remove its picker entry to deselect it.
+- Choose **Manual selection** or **Last scraped data**. In Manual selection, check **Filter by record sources**, then select one or more source-colored dataset cards. All datasets saved today appear first; when there are none, the six latest appear. **Choose older datasets or adjust selection** opens a searchable picker for the full source-filtered library. Dates use your local timezone, and cards show sources and record counts. Nothing is preselected in a new session; click a selected card again or remove its picker entry to deselect it.
 - Choosing datasets immediately opens all matching records, newest first. The separate load button and 50/200-record load cap are removed. **Record status** in Settings defaults to **all** and filters the editor and analysis run.
 - Edit **Include** directly in the table. Records start included unless previously excluded. Changes automatically save `analysis_excluded` on the existing records, without changing text, analysis or dataset titles. Exclusions are shared with the dataset and reversible by checking Include again. Save failures block analysis and offer a retry.
 - **Last scraped data** uses the exact IDs from the latest completed collection, even if its title was reused. Unsaved collections save before opening. Empty/failed collections never fall back to an older batch. Use Manual selection after reopening the app.
