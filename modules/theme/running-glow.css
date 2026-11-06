@@ -1,0 +1,82 @@
+/* Pulsating AI-gradient frame shown while a collection or analysis is running.
+   The marker sits wherever the work runs (page or modal); body-level pseudo-elements
+   escape any transformed ancestor so the frame always hugs the browser window. */
+
+/* The syntax is hex-escaped: Streamlit's sanitizer drops any style block containing a less-than sign. */
+@property --sm-glow-angle {
+  syntax: "\3c angle\3e";
+  inherits: false;
+  initial-value: 0deg;
+}
+
+[data-testid="stElementContainer"]:has(.sm-running) {
+  display: none;
+}
+
+body:has(.sm-running)::before,
+body:has(.sm-running)::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: 2147483000;
+  pointer-events: none;
+  background: conic-gradient(from var(--sm-glow-angle),
+    #4285f4, #9b72f3, #d96570, #f9ab00, #34a853, #4285f4);
+  animation: sm-glow-spin 4s linear infinite, sm-glow-pulse 2.4s ease-in-out infinite;
+}
+
+/* Crisp edge line. */
+body:has(.sm-running)::before {
+  padding: 3px;
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask: linear-gradient(#000 0 0) content-box exclude, linear-gradient(#000 0 0);
+}
+
+/* Soft halo fading inward from every edge. */
+body:has(.sm-running)::after {
+  --sm-glow-fade: linear-gradient(#000, transparent 56px, transparent calc(100% - 56px), #000);
+  -webkit-mask: var(--sm-glow-fade), linear-gradient(to right, #000, transparent 56px, transparent calc(100% - 56px), #000);
+  mask: var(--sm-glow-fade), linear-gradient(to right, #000, transparent 56px, transparent calc(100% - 56px), #000);
+}
+
+/* The dialog section's wrapper clips overflow, so the glow goes on the wrapper. */
+[data-testid="stDialog"] > div:has(.sm-running) {
+  overflow: visible;
+  animation: sm-glow-modal 2.4s ease-in-out infinite;
+}
+
+@keyframes sm-glow-spin {
+  to { --sm-glow-angle: 360deg; }
+}
+
+@keyframes sm-glow-pulse {
+  0%, 100% { opacity: 0.35; }
+  50% { opacity: 0.9; }
+}
+
+@keyframes sm-glow-modal {
+  0%, 100% {
+    box-shadow: 0 0 0 2px rgb(66 133 244 / 0.55), 0 0 28px 4px rgb(66 133 244 / 0.35),
+                0 0 60px 12px rgb(155 114 243 / 0.2);
+  }
+  33% {
+    box-shadow: 0 0 0 2px rgb(155 114 243 / 0.7), 0 0 36px 6px rgb(155 114 243 / 0.45),
+                0 0 72px 16px rgb(217 101 112 / 0.25);
+  }
+  66% {
+    box-shadow: 0 0 0 2px rgb(217 101 112 / 0.6), 0 0 32px 5px rgb(249 171 0 / 0.35),
+                0 0 64px 14px rgb(66 133 244 / 0.22);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  body:has(.sm-running)::before,
+  body:has(.sm-running)::after,
+  [data-testid="stDialog"] > div:has(.sm-running) {
+    animation: none;
+  }
+  [data-testid="stDialog"] > div:has(.sm-running) {
+    box-shadow: 0 0 0 2px rgb(155 114 243 / 0.7), 0 0 36px 6px rgb(155 114 243 / 0.4);
+  }
+}

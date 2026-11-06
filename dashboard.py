@@ -18,7 +18,7 @@ import pandas as pd
 import streamlit as st
 
 from modules.auth import require_access
-from modules.ui import apply_brand
+from modules.ui import apply_brand, running_glow, show_running_glow
 from modules.analysis_library import (
     SOURCE_LABELS, dataset_date_label, dataset_key, dataset_options, matches_sources,
     select_history, select_records,
@@ -1399,7 +1399,7 @@ def _autosave_collection(collection: dict[str, Any], source: str, custom_title: 
         # Reusing a title must not leave old source text runnable after an edit.
         _clear_loaded_analysis()
     try:
-        with st.spinner("Saving collected records to the cloud…"):
+        with running_glow(), st.spinner("Saving collected records to the cloud…"):
             summary = _write_results_to_firestore(records, custom_title=save["title"])
     except Exception:
         save.update(state="error", count=0)
@@ -1458,6 +1458,7 @@ def _render_facebook_collection_progress(email: str, job_id: str) -> None:
             st.session_state["last_scrape_error"] = "The collection ended when the app restarted. Please try again."
         st.rerun(scope="app")
     total = len(job.urls)
+    show_running_glow()
     st.progress(job.completed / max(total, 1), text=f"Collection running · {job.completed} of {total} sources finished")
     if job.status == "cancelling":
         st.info("Stopping collection and releasing your Facebook connection…")
@@ -1729,7 +1730,7 @@ def _render_collect_controls(
                 st.session_state["facebook_collection_job"] = start_collection(user_email, target_urls, run)
                 st.rerun()
             progress = st.progress(0, text=f"Starting collection for {len(target_urls)} links…")
-            with st.spinner("Running scraper..."):
+            with running_glow(), st.spinner("Running scraper..."):
                 try:
                     results = _run_multi_scrape_sync(
                         urls=target_urls,
@@ -1854,7 +1855,7 @@ def _render_news_workspace() -> None:
             st.error("Choose at least one Google News edition.")
         else:
             progress = st.progress(0, text="Searching Google News…")
-            with st.spinner("Scanning news coverage…"):
+            with running_glow(), st.spinner("Scanning news coverage…"):
                 rows = collect_news(searches, window=window, editions=editions, limit=int(limit),
                                     on_progress=lambda done, total, query: progress.progress(
                                         done / total, text=f"Searched {done} of {total}: {query}"))
@@ -2110,7 +2111,7 @@ def _render_x_collection_dialog_body() -> None:
     settings = _render_x_collection_setup()
     if settings:
         progress = st.progress(0, text="Starting X collection…")
-        with st.spinner("Collecting recent posts…"):
+        with running_glow(), st.spinner("Collecting recent posts…"):
             try:
                 client = XClient(time.monotonic() + 180)
                 rows = collect_x(settings["searches"], max_posts=settings["limit"],
@@ -2253,7 +2254,7 @@ def _render_website_collect_step() -> None:
                  disabled=not urls or _collection_save_pending("website_collection")) and not _collection_save_pending("website_collection"):
         st.session_state["website_collection"] = {"urls": urls, "rows": []}
         progress = st.progress(0, text="Starting website collection…")
-        with st.spinner("Reading website pages…"):
+        with running_glow(), st.spinner("Reading website pages…"):
             rows = collect_websites(urls, on_progress=lambda done, total, url:
                                     progress.progress(done / total, text=f"Checked {done} of {total} pages"))
             st.session_state["website_collection"]["rows"] = rows
@@ -2507,6 +2508,7 @@ def _render_analysis_run_step(picked: Dict[str, Any], provider: str, provider_la
                  key="run_analysis_selected_btn",
                  disabled=not get_ai_key(provider) or not count or not picked["ready"]
                  or not st.session_state.get("analysis_edits_saved", True)):
+        glow = show_running_glow()
         status_container = st.status(
             f"Running {provider_label} on {len(selected_posts)} record(s)...",
             expanded=True,
@@ -2530,6 +2532,7 @@ def _render_analysis_run_step(picked: Dict[str, Any], provider: str, provider_la
                 state="error" if summary["error"] else "complete",
             )
         except Exception as exc:
+            glow.empty()
             error_text = (str(exc).strip() if isinstance(exc, (AIError, ValueError)) else
                           "Analysis failed. Please try again or contact the app administrator.")
             error_text = redact(error_text, get_ai_key(provider))
