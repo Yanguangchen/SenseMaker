@@ -112,6 +112,40 @@ class AnalysisBatchTests(unittest.TestCase):
             with self.assertRaisesRegex(GeminiError, "record IDs"):
                 analyze_posts_with_gemini(self.posts(1), api_key="test")
 
+    def test_gemini_request_constrains_results_to_the_batch_ids(self):
+        reply = json.dumps({"results": [assessment("post_1"), assessment("post_2")]})
+        with patch("modules.processor._generate_content", return_value=reply) as generate:
+            analyze_posts_with_gemini(self.posts(2), api_key="test")
+        schema = generate.call_args.kwargs["generation_config"]["responseJsonSchema"]
+        results = schema["properties"]["results"]
+        self.assertEqual(schema["required"], ["results"])
+        self.assertEqual((results["minItems"], results["maxItems"]), (2, 2))
+        self.assertEqual(results["items"]["properties"]["_id"]["enum"], ["post_1", "post_2"])
+
+    def test_unwrapped_and_back_to_back_records_are_still_matched_by_id(self):
+        first, second = assessment("post_1"), assessment("post_2")
+        second["translation"] = "second"
+        for reply in (json.dumps(first) + "\n" + json.dumps(second),
+                      json.dumps(first) + ",\n" + json.dumps(second) + "\nDone.",
+                      json.dumps([second, first]),
+                      "```json\n" + json.dumps({"results": [first]}) + "\n```\n" + json.dumps({"results": [second]})):
+            with patch("modules.processor._generate_content", return_value=reply):
+                result = analyze_posts_with_gemini(self.posts(2), api_key="test")
+            self.assertEqual(set(result), {"real-0", "real-1"}, reply)
+            self.assertEqual(result["real-1"]["translation"], "second")
+        for reply in (json.dumps(first), json.dumps({"results": first})):
+            with patch("modules.processor._generate_content", return_value=reply):
+                self.assertEqual(set(analyze_posts_with_gemini(self.posts(1), api_key="test")), {"real-0"})
+
+    def test_unusable_replies_still_fail_with_a_clear_message(self):
+        for reply in ('{"results": "none"}', '{"answer": []}', "No JSON here"):
+            with patch("modules.processor._generate_content", return_value=reply):
+                with self.assertRaises(GeminiError):
+                    analyze_posts_with_gemini(self.posts(1), api_key="test")
+        with patch("modules.processor._generate_content", return_value=json.dumps(assessment()) + json.dumps(assessment())):
+            with self.assertRaisesRegex(GeminiError, "record IDs"):
+                analyze_posts_with_gemini(self.posts(1), api_key="test")
+
     def test_large_jobs_batch_and_preserve_success_when_one_batch_fails(self):
         replies = [json.dumps({"results": [assessment(f"post_{i}") for i in range(1, 9)]}),
                    RuntimeError("Unavailable"), json.dumps({"results": [assessment()]})]

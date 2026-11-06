@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import ssl
 import time
 from typing import Any, Dict, List, Optional
@@ -16,7 +17,7 @@ from firebase_admin.firestore import Client
 
 from modules.database import get_pending_posts, mark_post_processed
 from modules.sentiment_history import persist_analysis_run
-from modules.signals import content_sources, is_analyzable, normalize_analysis, watch_terms
+from modules.signals import RELEVANCE, SIGNAL_LABELS, content_sources, is_analyzable, normalize_analysis, watch_terms
 from modules.ai_errors import AIError
 from modules.config import AI_PROVIDERS, get_ai_key, get_ai_model, get_ai_provider, get_setting
 from modules.gemini import AUTO_MODEL, GeminiError, api_error, normalize_model_name, redact, resolve_model
@@ -149,6 +150,74 @@ def _extract_json_object(text: str) -> Dict[str, Any]:
     return parsed
 
 
+def _results_schema(ids: List[str]) -> Dict[str, Any]:
+    """Gemini structured output for one batch; normalize_analysis still validates every value."""
+    def strings(**extra: Any) -> Dict[str, Any]:
+        return {"type": "array", "items": {"type": "string", **extra}}
+
+    def obj(properties: Dict[str, Any]) -> Dict[str, Any]:
+        return {"type": "object", "properties": properties, "required": list(properties),
+                "additionalProperties": False}
+
+    evidence = obj({"source": {"type": "string"}, "quote": {"type": "string"},
+                    "purpose": {"type": "string", "enum": ["relevance", "signal", "target"]}})
+    monitor = obj({
+        "thailand_relevance": {"type": "string", "enum": sorted(RELEVANCE)},
+        "signal_type": {"type": "string", "enum": list(SIGNAL_LABELS)},
+        "target_kind": {"type": "string", "enum": ["named_project", "company_brand", "country_general", "unclear"]},
+        "target_names": strings(),
+        "confidence": {"type": "string", "enum": ["low", "medium", "high"]},
+        "summary": {"type": "string"},
+        "evidence": {"type": "array", "maxItems": 8, "items": evidence},
+    })
+    record = obj({
+        "_id": {"type": "string", "enum": ids},
+        "translation": {"type": "string"},
+        "sentiment": {"type": "string", "enum": ["Anxiety", "Anger", "Joy", "Neutral"]},
+        "risk_score": {"type": "integer", "minimum": 1, "maximum": 10},
+        "topics": strings(),
+        "monitor": monitor,
+    })
+    return obj({"results": {"type": "array", "minItems": len(ids), "maxItems": len(ids), "items": record}})
+
+
+def _result_items(value: Any) -> List[Any]:
+    if isinstance(value, list):
+        return value
+    if isinstance(value, dict):
+        results = value.get("results")
+        if isinstance(results, list):
+            return results
+        if isinstance(results, dict):
+            return [results]
+        if "_id" in value:
+            return [value]
+    raise ValueError("The model returned an invalid results list.")
+
+
+def _extract_results(text: str) -> List[Any]:
+    """Accept {"results": [...]}, a bare list, one record, or records emitted back to back.
+
+    Records are still matched by _id, so accepting these shapes never assigns a result by position.
+    """
+    candidate = re.sub(r"(?im)^\s*```(?:json)?\s*$", "", text or "").strip()
+    starts = [i for i in (candidate.find("{"), candidate.find("[")) if i != -1]
+    if not starts:
+        return _result_items(_extract_json_object(candidate))
+    decoder, pos, values = json.JSONDecoder(), min(starts), []
+    while pos < len(candidate) and candidate[pos] in "{[":
+        try:
+            value, pos = decoder.raw_decode(candidate, pos)
+        except ValueError:
+            break
+        values.append(value)
+        while pos < len(candidate) and candidate[pos] in " \t\r\n,":
+            pos += 1
+    if not values:
+        return _result_items(_extract_json_object(candidate))
+    return [item for value in values for item in _result_items(value)]
+
+
 def _is_rate_limit_error(exc: Exception) -> bool:
     """Return True if the exception is a retryable 429 / ResourceExhausted error."""
     msg = str(exc).lower()
@@ -232,7 +301,11 @@ def analyze_posts(
                     remaining = deadline - time.monotonic()
                     if remaining < 1:
                         raise TimeoutError("Analysis time budget reached.")
-                    response = generate(prompt, provider_key, target_model, timeout=min(90, remaining))
+                    if provider == "gemini":
+                        response = generate(prompt, provider_key, target_model, timeout=min(90, remaining),
+                                            generation_config={"responseJsonSchema": _results_schema(list(index_map))})
+                    else:
+                        response = generate(prompt, provider_key, target_model, timeout=min(90, remaining))
                     break
                 except Exception as exc:
                     if _is_rate_limit_error(exc) and attempt < MAX_RETRIES:
@@ -243,10 +316,7 @@ def analyze_posts(
                         time.sleep(wait)
                     else:
                         raise
-            parsed = _extract_json_object(response or "")
-            results = parsed.get("results")
-            if not isinstance(results, list):
-                raise ValueError("The model returned an invalid results list.")
+            results = _extract_results(response or "")
             # Never assign by position: a shuffled or invented ID could blame the wrong source.
             returned = {}
             duplicate_keys = set()
