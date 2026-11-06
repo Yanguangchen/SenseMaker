@@ -150,14 +150,18 @@ def _extract_json_object(text: str) -> Dict[str, Any]:
     return parsed
 
 
-def _results_schema(ids: List[str]) -> Dict[str, Any]:
-    """Gemini structured output for one batch; normalize_analysis still validates every value."""
-    def strings(**extra: Any) -> Dict[str, Any]:
-        return {"type": "array", "items": {"type": "string", **extra}}
+def _results_schema() -> Dict[str, Any]:
+    """Gemini structured output for one batch; normalize_analysis still validates every value.
+
+    Gemini rejects schemas over an undocumented complexity budget with a bare HTTP 400, and
+    item counts on object arrays cost the most. So the schema fixes only the shape and the
+    labels; record IDs, counts and score ranges are checked locally.
+    """
+    def strings() -> Dict[str, Any]:
+        return {"type": "array", "items": {"type": "string"}}
 
     def obj(properties: Dict[str, Any]) -> Dict[str, Any]:
-        return {"type": "object", "properties": properties, "required": list(properties),
-                "additionalProperties": False}
+        return {"type": "object", "properties": properties, "required": list(properties)}
 
     evidence = obj({"source": {"type": "string"}, "quote": {"type": "string"},
                     "purpose": {"type": "string", "enum": ["relevance", "signal", "target"]}})
@@ -168,17 +172,17 @@ def _results_schema(ids: List[str]) -> Dict[str, Any]:
         "target_names": strings(),
         "confidence": {"type": "string", "enum": ["low", "medium", "high"]},
         "summary": {"type": "string"},
-        "evidence": {"type": "array", "maxItems": 8, "items": evidence},
+        "evidence": {"type": "array", "items": evidence},
     })
     record = obj({
-        "_id": {"type": "string", "enum": ids},
+        "_id": {"type": "string"},
         "translation": {"type": "string"},
         "sentiment": {"type": "string", "enum": ["Anxiety", "Anger", "Joy", "Neutral"]},
-        "risk_score": {"type": "integer", "minimum": 1, "maximum": 10},
+        "risk_score": {"type": "integer"},
         "topics": strings(),
         "monitor": monitor,
     })
-    return obj({"results": {"type": "array", "minItems": len(ids), "maxItems": len(ids), "items": record}})
+    return obj({"results": {"type": "array", "items": record}})
 
 
 def _result_items(value: Any) -> List[Any]:
@@ -282,6 +286,7 @@ def analyze_posts(
     _status(f"Using {provider_label} · {target_model}.")
     out = AnalysisResults()
     deadline = time.monotonic() + 180
+    use_schema = provider == "gemini"
     for offset in range(0, len(selected), BATCH_SIZE):
         if time.monotonic() >= deadline - 1:
             message = "Analysis time budget reached. Completed results are kept; retry the remaining error records."
@@ -301,14 +306,19 @@ def analyze_posts(
                     remaining = deadline - time.monotonic()
                     if remaining < 1:
                         raise TimeoutError("Analysis time budget reached.")
-                    if provider == "gemini":
+                    if use_schema:
                         response = generate(prompt, provider_key, target_model, timeout=min(90, remaining),
-                                            generation_config={"responseJsonSchema": _results_schema(list(index_map))})
+                                            generation_config={"responseJsonSchema": _results_schema()})
                     else:
                         response = generate(prompt, provider_key, target_model, timeout=min(90, remaining))
                     break
                 except Exception as exc:
-                    if _is_rate_limit_error(exc) and attempt < MAX_RETRIES:
+                    if (use_schema and isinstance(exc, GeminiError) and exc.status_code == 400
+                            and attempt < MAX_RETRIES):
+                        # The prompt and the tolerant parser still define the shape without a schema.
+                        use_schema = False
+                        _status("Gemini did not accept the response format; retrying without it…")
+                    elif _is_rate_limit_error(exc) and attempt < MAX_RETRIES:
                         wait = INITIAL_BACKOFF_S * (2 ** (attempt - 1))
                         if wait + 1 >= deadline - time.monotonic():
                             raise TimeoutError("Analysis time budget reached.") from None

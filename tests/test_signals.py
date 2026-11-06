@@ -112,15 +112,31 @@ class AnalysisBatchTests(unittest.TestCase):
             with self.assertRaisesRegex(GeminiError, "record IDs"):
                 analyze_posts_with_gemini(self.posts(1), api_key="test")
 
-    def test_gemini_request_constrains_results_to_the_batch_ids(self):
+    def test_gemini_request_fixes_the_results_shape_within_the_schema_budget(self):
         reply = json.dumps({"results": [assessment("post_1"), assessment("post_2")]})
         with patch("modules.processor._generate_content", return_value=reply) as generate:
             analyze_posts_with_gemini(self.posts(2), api_key="test")
         schema = generate.call_args.kwargs["generation_config"]["responseJsonSchema"]
-        results = schema["properties"]["results"]
+        record = schema["properties"]["results"]["items"]
         self.assertEqual(schema["required"], ["results"])
-        self.assertEqual((results["minItems"], results["maxItems"]), (2, 2))
-        self.assertEqual(results["items"]["properties"]["_id"]["enum"], ["post_1", "post_2"])
+        self.assertIn("monitor", record["required"])
+        self.assertEqual(record["properties"]["sentiment"]["enum"], ["Anxiety", "Anger", "Joy", "Neutral"])
+        # Item counts and numeric bounds push Gemini over its schema complexity budget (HTTP 400).
+        text = json.dumps(schema)
+        for keyword in ("minItems", "maxItems", "minimum", "maximum"):
+            self.assertNotIn(keyword, text)
+
+    def test_rejected_schema_falls_back_to_prompt_only_requests(self):
+        reply = json.dumps({"results": [assessment(f"post_{i}") for i in range(1, 9)]})
+        rejected = GeminiError("Gemini HTTP 400: Google rejected the request. Google: Request contains an invalid argument.", 400)
+        with patch("modules.processor._generate_content", side_effect=[rejected, reply, reply]) as generate:
+            result = analyze_posts_with_gemini(self.posts(16), api_key="test")
+        self.assertEqual(len(result), 16)
+        self.assertEqual(["generation_config" in call.kwargs for call in generate.call_args_list], [True, False, False])
+        with patch("modules.processor._generate_content", side_effect=GeminiError("Gemini HTTP 400: Bad key.", 400)) as generate:
+            with self.assertRaisesRegex(GeminiError, "HTTP 400"):
+                analyze_posts_with_gemini(self.posts(16), api_key="test")
+        self.assertEqual(generate.call_count, 2)
 
     def test_unwrapped_and_back_to_back_records_are_still_matched_by_id(self):
         first, second = assessment("post_1"), assessment("post_2")
