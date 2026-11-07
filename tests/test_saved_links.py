@@ -252,6 +252,26 @@ class SourceWorkspaceTests(unittest.TestCase):
             self.assertNotIn("facebook_wizard_step_previous", [button.key for button in app.button])
             self.assertNotIn("facebook_wizard_step_next", [button.key for button in app.button])
 
+    def test_facebook_dialog_navigation_advances_after_select_all(self):
+        db = MemoryDB()
+        facebook_url = "https://www.facebook.com/groups/community"
+        save_links(db, "owner@example.com", [facebook_url])
+        script = (
+            "from dashboard import _facebook_steps_modal\n"
+            "from modules.facebook_session import FacebookSession\n"
+            "_facebook_steps_modal('owner@example.com', FacebookSession('connected', '123', 'Editor'), ['Your links', 'Collect posts'], 0)\n"
+        )
+        with patch("dashboard.init_db", return_value=db), \
+             patch("modules.auth.verify_access", return_value="owner@example.com"):
+            app = AppTest.from_string(script).run()
+            self.assertTrue(app.button(key="facebook_wizard_step_next").disabled)
+            app.button(key="select_all_links_facebook").click().run()
+            self.assertFalse(app.button(key="facebook_wizard_step_next").disabled)
+            app.button(key="facebook_wizard_step_next").click().run()
+            self.assertIn("collect_facebook_posts", [b.key for b in app.button])
+            app.button(key="facebook_wizard_step_previous").click().run()
+            self.assertIn("select_all_links_facebook", [b.key for b in app.button])
+
     def test_other_platform_links_cannot_be_saved_or_collected_in_facebook(self):
         db = MemoryDB()
         with patch("dashboard.init_db", return_value=db), \

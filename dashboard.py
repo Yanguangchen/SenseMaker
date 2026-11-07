@@ -1683,7 +1683,13 @@ def _facebook_steps_modal(user_email: str, session: FacebookSession,
         except Exception:
             _close_focus_modal()
             st.rerun()
-    current = labels[index]
+    # Dialog reruns retain their original call arguments. Read the live step so
+    # Next and Previous navigation take effect immediately.
+    step_key = FACEBOOK_SEARCH_STEP_KEY if search else FACEBOOK_STEP_KEY
+    current = st.session_state.get(step_key, labels[index] if index < len(labels) else labels[0])
+    if current not in labels:
+        current = labels[0]
+    index = labels.index(current)
     st.subheader("Oyoshi on Facebook" if search else "Facebook", help=None if search else FACEBOOK_USAGE_WARNING)
     _render_step_header(labels, index)
 
@@ -1741,7 +1747,7 @@ def _facebook_steps_modal(user_email: str, session: FacebookSession,
     posts = [r for r in (st.session_state.get("last_scrape_results") or [])
              if r.get("source_type") not in NON_CONTENT_TYPES]
     if not (index >= len(labels) - 1 and bool(posts)):
-        _render_step_nav(FACEBOOK_SEARCH_STEP_KEY if search else FACEBOOK_STEP_KEY, labels, index, can_continue)
+        _render_step_nav(step_key, labels, index, can_continue)
 
 
 def _render_collect_controls(
@@ -2264,6 +2270,12 @@ def _website_steps_modal(user_email: str, labels: List[str], index: int) -> None
         except Exception:
             _close_focus_modal()
             st.rerun()
+    # Dialog reruns retain their original call arguments. Read the live step so
+    # Next and Previous navigation take effect immediately.
+    current = st.session_state.get(WEBSITE_STEP_KEY, labels[index] if index < len(labels) else labels[0])
+    if current not in labels:
+        current = labels[0]
+    index = labels.index(current)
     _render_step_header(labels, index)
     if labels[index] == "Your links":
         _render_website_links_step(user_email)
