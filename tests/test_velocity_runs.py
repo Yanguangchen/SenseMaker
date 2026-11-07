@@ -109,7 +109,8 @@ class RunStoreTests(VelocityTestCase):
         self.assertIn('title="Needs view counts from both the latest and previous runs.">—</td>', sheet)
         self.assertNotIn('>Check 1</th>', sheet)
         empty = velocity_card_sheet({"posts": []})
-        self.assertIn('colspan="11"', empty)
+        self.assertIn('colspan="12"', empty)
+        self.assertIn('class="crt-remark">Remark</th>', empty)
         self.assertEqual(empty.count('title="Not run yet"'), 8)
 
     def test_dates_normalize_to_utc_and_growth_from_zero_is_not_infinite(self):
@@ -231,6 +232,18 @@ class RunUITests(VelocityTestCase):
         self.assertTrue(app.button(key=f"{self.key}_remove_{card['id']}").disabled)
         self.assertEqual(len(app.get("progress")), 1)
         self.assertNotIn("runs", store.load_cards(self.db, EMAIL)[0])
+        self.assertTrue(any('class="sm-running"' in element.proto.body for element in app.get("html")))
+        job.status = "saving"
+        app.run()
+        self.assertTrue(any('class="sm-running"' in element.proto.body for element in app.get("html")))
+        app.button(key=f"{self.key}_close").click().run()
+        self.assertTrue(any('class="sm-running"' in element.proto.body for element in app.get("html")))
+        job.status = "error"
+        job.error = "Collection stopped."
+        app.run()
+        self.assertFalse(list(app.exception))
+        self.assertFalse(any('class="sm-running"' in element.proto.body for element in app.get("html")))
+        self.assertEqual(len(app.get("progress")), 0)
 
     def test_run_is_disabled_without_links_and_saves_a_check_on_click(self):
         card = store.add_card(self.db, EMAIL)[0]

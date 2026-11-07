@@ -70,6 +70,37 @@ class VelocityTestCase(unittest.TestCase):
 
 
 class VelocityStoreTests(VelocityTestCase):
+    def test_remarks_are_per_card_post_and_survive_new_checks(self):
+        email = "owner@example.com"
+        first = store.add_card(self.db, email, url=post_url())[0]
+        second = store.add_card(self.db, email, url=post_url())[1]
+        first = store.add_post(self.db, email, first["id"], post_url(2))[0]
+        post = store.card_posts(first)[0]
+        note = "Watch replies\nFollow up tomorrow"
+        store.save_remark(self.db, email, first["id"], post["id"], note)
+        run = {"id": "f" * 64, "at": "2026-11-07", "results": [{"post_id": post["id"], "views": 100}]}
+        store.save_run(self.db, email, first["id"], run)
+        first, unchanged = store.load_cards(self.db, email)
+        self.assertEqual(store.card_posts(first)[0]["remark"], note)
+        self.assertNotIn("remark", store.card_posts(first)[1])
+        self.assertEqual(unchanged, second)
+        store.save_remark(self.db, email, first["id"], post["id"], "Updated")
+        updated = store.load_cards(self.db, email)[0]
+        self.assertEqual(updated["runs"], first["runs"])
+        store.save_remark(self.db, email, first["id"], post["id"], "")
+        self.assertEqual(store.card_posts(store.load_cards(self.db, email)[0])[0]["remark"], "")
+
+    def test_remarks_reject_other_owners_missing_posts_and_oversized_text(self):
+        card = store.add_card(self.db, "owner@example.com", url=post_url())[0]
+        post = store.card_posts(card)[0]
+        with self.assertRaisesRegex(ValueError, "no longer exists"):
+            store.save_remark(self.db, "other@example.com", card["id"], post["id"], "Not mine")
+        with self.assertRaisesRegex(ValueError, "no longer in"):
+            store.save_remark(self.db, "owner@example.com", card["id"], "e" * 64, "Unknown post")
+        with self.assertRaisesRegex(ValueError, "at most"):
+            store.save_remark(self.db, "owner@example.com", card["id"], post["id"], "x" * (store.MAX_REMARK_CHARS + 1))
+        self.assertEqual(store.load_cards(self.db, "owner@example.com"), [card])
+
     def test_approved_users_see_existing_teammate_cards_and_saved_results(self):
         own = store.add_card(self.db, "owner@example.com", "My card")[0]
         team = store.add_card(self.db, "other@example.com", "Team card", post_url())[0]
@@ -252,6 +283,7 @@ class VelocityUITests(VelocityTestCase):
     def test_teammate_card_is_visible_read_only_and_survives_own_card_creation(self):
         team = store.add_card(self.db, "other@example.com", "Team monitoring", post_url())[0]
         post = store.card_posts(team)[0]
+        store.save_remark(self.db, "other@example.com", team["id"], post["id"], "Monitor this discussion")
         store.save_run(self.db, "other@example.com", team["id"], {
             "id": "a" * 64, "at": "2026-11-07T01:00:00+00:00",
             "results": [{"post_id": post["id"], "views": 250, "outcome": "ok"}],
@@ -262,7 +294,8 @@ class VelocityUITests(VelocityTestCase):
             app.button(key=f"{self.key}_open_{shared['id']}").click().run()
             self.assertFalse(list(app.exception))
             self.assertTrue(any(">250</td>" in element.proto.body for element in app.get("html")))
-            self.assertFalse({"Run", "Save name", "Remove card", "Add post", "Remove post"}
+            self.assertTrue(any("Monitor this discussion" in element.proto.body for element in app.get("html")))
+            self.assertFalse({"Run", "Save name", "Save remark", "Remove card", "Add post", "Remove post"}
                              & {button.label for button in app.button})
             self.assertTrue(any("View only" in caption.value for caption in app.caption))
             app.button(key=f"{self.key}_create").click().run()
@@ -272,6 +305,37 @@ class VelocityUITests(VelocityTestCase):
             store.rename_card(self.db, "other@example.com", team["id"], "Updated team card")
             app.button(key=f"{self.key}_refresh").click().run()
             self.assertEqual(app.button(key=f"{self.key}_open_{shared['id']}").label, "Open Updated team card")
+
+    def test_remark_editor_saves_reloads_and_retries_without_losing_text(self):
+        card = store.add_card(self.db, "owner@example.com", url=post_url())[0]
+        card = store.add_post(self.db, "owner@example.com", card["id"], post_url(2))[0]
+        first, second = store.card_posts(card)
+        card_key = f"{self.key}_{card['id']}"
+        app = self.app()
+        app.button(key=f"{self.key}_open_{card['id']}").click().run()
+        value = "Review <script>nothing executable</script>\nFollow up tomorrow"
+        app.text_area(key=f"{card_key}_remark_{first['id']}").set_value(value)
+        self.db.fail_writes = True
+        next(button for button in app.button if button.label == "Save remark").click().run()
+        self.assertFalse(list(app.exception))
+        self.assertTrue(any("could not be saved" in error.value for error in app.error))
+        self.assertEqual(app.text_area(key=f"{card_key}_remark_{first['id']}").value, value)
+        self.assertNotIn("remark", store.card_posts(store.load_cards(self.db, "owner@example.com")[0])[0])
+        self.db.fail_writes = False
+        next(button for button in app.button if button.label == "Save remark").click().run()
+        self.assertFalse(list(app.exception))
+        tables = [element.proto.body for element in app.get("html") if 'aria-label="Velocity Tracker"' in element.proto.body]
+        self.assertIn('class="crt-remark">Remark</th>', tables[0])
+        self.assertIn("&lt;script&gt;nothing executable&lt;/script&gt;", tables[0])
+        self.assertNotIn("<script>", tables[0])
+        app.selectbox(key=f"{card_key}_remark_post").select(second["id"]).run()
+        self.assertEqual(app.text_area(key=f"{card_key}_remark_{second['id']}").value, "")
+        fresh = self.app()
+        fresh.button(key=f"{self.key}_open_{card['id']}").click().run()
+        self.assertEqual(fresh.text_area(key=f"{card_key}_remark_{first['id']}").value, value)
+        fresh.text_area(key=f"{card_key}_remark_{first['id']}").set_value("")
+        next(button for button in fresh.button if button.label == "Save remark").click().run()
+        self.assertEqual(store.card_posts(store.load_cards(self.db, "owner@example.com")[0])[0]["remark"], "")
 
     def test_teammate_cards_do_not_use_own_limit_and_are_hidden_after_allowlist_removal(self):
         for index in range(10):

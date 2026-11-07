@@ -19,6 +19,7 @@ from modules.saved_links import library_owner_id, normalize_link
 MAX_CARDS = 10
 MAX_POSTS_PER_CARD = 10
 MAX_NAME_CHARS = 120
+MAX_REMARK_CHARS = 1000
 SHOWN_RUNS = 8
 
 
@@ -147,8 +148,18 @@ def remove_post(db: Any, email: str, card_id: str, post_id: str) -> list[dict[st
     return _edit_posts(db, email, card_id, remove_id=post_id)
 
 
+def save_remark(db: Any, email: str, card_id: str, post_id: str, remark: str) -> list[dict[str, Any]]:
+    """Save a note on one owned card's post, retaining concurrent checks and edits."""
+    if not re.fullmatch(r"[a-f0-9]{64}", post_id):
+        raise ValueError("Choose a post from this card.")
+    if not isinstance(remark, str) or len(remark) > MAX_REMARK_CHARS:
+        raise ValueError(f"Use a remark of at most {MAX_REMARK_CHARS} characters.")
+    return _edit_posts(db, email, card_id, remark_post_id=post_id, remark=remark.strip())
+
+
 def _edit_posts(db: Any, email: str, card_id: str, *, post: dict[str, str] | None = None,
-                remove_id: str | None = None) -> list[dict[str, Any]]:
+                remove_id: str | None = None, remark_post_id: str | None = None,
+                remark: str = "") -> list[dict[str, Any]]:
     if not re.fullmatch(r"[a-f0-9]{64}", card_id):
         raise ValueError("Choose a saved velocity card.")
     ref = _ref(db, email)
@@ -166,6 +177,10 @@ def _edit_posts(db: Any, email: str, card_id: str, *, post: dict[str, str] | Non
             if len(posts) >= MAX_POSTS_PER_CARD:
                 raise ValueError(f"Each card can track up to {MAX_POSTS_PER_CARD} posts. Remove a post before adding another.")
             posts = [*posts, post]
+        elif remark_post_id is not None:
+            if not any(row["id"] == remark_post_id for row in posts):
+                raise ValueError("This post is no longer in the card. Refresh cards & checks.")
+            posts = [{**row, "remark": remark} if row["id"] == remark_post_id else row for row in posts]
         else:
             posts = [row for row in posts if row["id"] != remove_id]
         changed = {key: value for key, value in card.items() if key not in {"url", "source_url"}}

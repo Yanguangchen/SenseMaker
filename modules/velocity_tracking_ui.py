@@ -10,6 +10,7 @@ import streamlit as st
 from modules import database, velocity_jobs as jobs, velocity_tracking as store
 from modules.client_report import CSS_PATH, format_time
 from modules.saved_links import library_owner_id
+from modules.ui import show_running_glow
 from modules.velocity_table import velocity_card_sheet
 
 log = logging.getLogger(__name__)
@@ -107,6 +108,7 @@ def _run_progress(email: str, job_id: str) -> None:
     if job is None or job.id != job_id or job.status not in {"running", "saving"}:
         st.rerun(scope="app")
         return
+    show_running_glow()
     st.progress(job.completed / len(job.posts), text=job.message)
 
 
@@ -124,6 +126,33 @@ def _render_card_history(card: dict) -> None:
                 st.link_button(f"Open post {index} on Facebook", post["url"])
             st.caption("A view-based status and percentage change need two consecutive view counts. "
                        "If Facebook does not display views for a photo or text post, this card cannot measure its views.")
+
+
+def _render_remarks(email: str, card: dict, state: dict, key: str, card_key: str) -> None:
+    posts = store.card_posts(card)
+    if not posts:
+        return
+    with st.expander("Edit remarks"):
+        by_id = {post["id"]: post for post in posts}
+        post_id = st.selectbox("Post for remark", list(by_id), key=f"{card_key}_remark_post",
+                               format_func=lambda ident: by_id[ident]["url"])
+        with st.form(f"{card_key}_remark_form_{post_id}"):
+            remark = st.text_area("Remark", value=by_id[post_id].get("remark", ""),
+                                  key=f"{card_key}_remark_{post_id}", height=100,
+                                  max_chars=store.MAX_REMARK_CHARS,
+                                  placeholder="Add a note about this post…")
+            save = st.form_submit_button("Save remark", disabled=state["error"])
+        if save:
+            try:
+                _update_owned_cards(state, store.save_remark(database.init_db(), email, card["id"], post_id, remark))
+            except ValueError as exc:
+                st.error(str(exc))
+            except Exception:
+                log.exception("Velocity remark could not be saved")
+                st.error("The remark could not be saved. Your text is still here; try Save remark again.")
+            else:
+                st.session_state[f"{key}_notice"] = "Remark saved."
+                st.rerun()
 
 
 def _render_card(email: str, card: dict, index: int, state: dict, key: str, *, hosted: bool) -> None:
@@ -197,6 +226,7 @@ def _render_card(email: str, card: dict, index: int, state: dict, key: str, *, h
             elif job.status == "complete" and job.run.get("warning"):
                 st.warning(job.run["warning"])
         _render_card_history(card)
+        _render_remarks(email, card, state, key, card_key)
         if posts and not card.get("runs"):
             st.caption("Click Run to save the first view-count check. Your Facebook connection from Scrape Data is used.")
 

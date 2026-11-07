@@ -212,7 +212,9 @@ html .st-key-sm_velocity_modal [data-testid="stExpander"] {
   box-shadow: none;
 }
 html .st-key-sm_velocity_modal input,
+html .st-key-sm_velocity_modal textarea,
 html .st-key-sm_velocity_modal [data-baseweb="input"],
+html .st-key-sm_velocity_modal [data-baseweb="textarea"],
 html .st-key-sm_velocity_modal [data-baseweb="select"] > div {
   color: #35453f !important;
   -webkit-text-fill-color: #35453f !important;
@@ -221,6 +223,7 @@ html .st-key-sm_velocity_modal [data-baseweb="select"] > div {
   border-radius: 4px !important;
 }
 html .st-key-sm_velocity_modal input::placeholder { color: #8b897c; -webkit-text-fill-color: #8b897c; }
+html .st-key-sm_velocity_modal textarea::placeholder { color: #8b897c; -webkit-text-fill-color: #8b897c; }
 html .st-key-sm_velocity_modal button {
   color: #3b504e !important;
   background: #fffcf1 !important;
@@ -249,10 +252,17 @@ html .st-key-sm_velocity_modal .crt-sheet {
   box-shadow: none;
   border-radius: 0;
 }
-html .st-key-sm_velocity_modal .crt-table { border-spacing: 0; min-width: 1160px; table-layout: fixed; }
+html .st-key-sm_velocity_modal .crt-table { border-spacing: 0; min-width: 1380px; table-layout: fixed; }
 html .st-key-sm_velocity_modal .crt-table th:first-child,
 html .st-key-sm_velocity_modal .crt-table td:first-child { width: 210px; min-width: 210px; max-width: 210px; }
-html .st-key-sm_velocity_modal .crt-table th:nth-last-child(-n+2) { width: 100px; }
+html .st-key-sm_velocity_modal .crt-table th:nth-last-child(3),
+html .st-key-sm_velocity_modal .crt-table th:nth-last-child(2) { width: 100px; }
+html .st-key-sm_velocity_modal .crt-table .crt-remark {
+  width: 220px;
+  text-align: left;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
 html .st-key-sm_velocity_modal .crt-run-date,
 html .st-key-sm_velocity_modal .crt-run-time { display: block; white-space: nowrap; font-size: 11px; }
 html .st-key-sm_velocity_modal .crt-run-time { margin-top: 4px; font-weight: 400; }
@@ -270,6 +280,11 @@ html .st-key-sm_velocity_modal .crt-table .crt-empty td { padding: 44px 20px; fo
 html .st-key-sm_velocity_modal .crt-key { font-size: 12px; gap: 8px 24px; }
 html .st-key-sm_velocity_modal .crt-note { font-size: 11px; line-height: 1.6; max-width: 850px; }
 html .st-key-sm_velocity_modal .crt-status { border-radius: 3px; padding: 3px 7px; font-size: 12px; }
+@media (max-width: 640px) {
+  /* Let the wider Remark column remain fully readable when scrolled into view. */
+  html .st-key-sm_velocity_modal .crt-table th:first-child,
+  html .st-key-sm_velocity_modal .crt-table td:first-child { position: static; }
+}
 @media (max-width: 520px) {
   .st-key-sm_velocity_grid { padding-right: 5px; gap: 24px; }
   .sm-note-cover { padding: 47px 20px 16px 48px; }

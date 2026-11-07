@@ -63,7 +63,7 @@ def velocity_card_sheet(card: dict) -> str:
             title, label = "Not run yet", "—"
         head += f'<th scope=col title="{escape(title, quote=True)}">{label}</th>'
     head += ('<th scope=col>Status</th><th scope=col title="Latest run versus the previous run">'
-             'Views change (%)</th></tr>')
+             'Views change (%)</th><th scope=col class="crt-remark">Remark</th></tr>')
     body = []
     for post in card_posts(card):
         cells, values = [], []
@@ -97,12 +97,14 @@ def velocity_card_sheet(card: dict) -> str:
             change_title = (f"{values[-2]:,} → {values[-1]:,} views · "
                             f"{format_time(runs[-2]['at'])} → {format_time(runs[-1]['at'])}")
         change_cell = f'<td title="{escape(change_title, quote=True)}">{change_label}</td>'
+        remark = escape(str(post.get("remark") or "")) or '<span class="crt-muted">—</span>'
+        remark_cell = f'<td class="crt-remark">{remark}</td>'
         url = escape(post["url"], quote=True)
         body.append(f'<tr><td><a href="{url}" target="_blank" rel="noopener noreferrer">{url}</a>'
                     '<div class="crt-muted crt-small">Views</div></td>' + "".join(cells)
-                    + f"<td>{badge}</td>{change_cell}</tr>")
+                    + f"<td>{badge}</td>{change_cell}{remark_cell}</tr>")
     if not body:
-        body.append(f'<tr class="crt-empty"><td colspan="{SHOWN_RUNS + 3}">'
+        body.append(f'<tr class="crt-empty"><td colspan="{SHOWN_RUNS + 4}">'
                     'No posts added yet. Add a Facebook post when you\'re ready.</td></tr>')
     note = ""
     if card.get("run_count", 0) > SHOWN_RUNS:
