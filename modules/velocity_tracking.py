@@ -243,6 +243,23 @@ def _edit_posts(db: Any, email: str, card_id: str, *, post: dict[str, str] | Non
     return save(db.transaction(max_attempts=3))
 
 
+def remove_workspace_card(db: Any, email: str, card: dict[str, Any]) -> None:
+    """Delete an owned or shared card from its creator's saved collection."""
+    from modules.auth import allowed_emails
+
+    owners = {library_owner_id(owner): owner for owner in allowed_emails()}
+    viewer = library_owner_id(email)
+    owner = card.get("owner_id") if card.get("shared") else viewer
+    card_id = card.get("source_card_id") if card.get("shared") else card.get("id")
+    if viewer not in owners or owner not in owners:
+        raise PermissionError("Sign in with an approved account to remove velocity cards.")
+    if not isinstance(card_id, str) or not re.fullmatch(r"[a-f0-9]{64}", card_id):
+        raise ValueError("Choose a saved velocity card.")
+    if card.get("shared") and card.get("id") != hashlib.sha256(f"{owner}:{card_id}".encode()).hexdigest():
+        raise ValueError("Choose a saved velocity card.")
+    remove_card(db, owners[owner], card_id)
+
+
 def remove_card(db: Any, email: str, card_id: str) -> list[dict[str, Any]]:
     """Remove only the preset; collected posts and engagement history stay intact."""
     if not re.fullmatch(r"[a-f0-9]{64}", card_id):

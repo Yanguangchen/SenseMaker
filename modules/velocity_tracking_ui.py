@@ -266,19 +266,14 @@ def _render_card(email: str, card: dict, index: int, state: dict, key: str, *, h
     busy = bool(job and job.status in jobs.BUSY)
     card_busy = busy and job.card_id == card["id"]
     with st.container(key=f"velocity_card_{card['id']}"):
-        if card.get("shared"):
-            st.subheader(_card_name(card, index))
-            st.caption(f"{len(posts)} / {store.MAX_POSTS_PER_CARD} posts · Shared by another approved user · View only")
-            _render_card_tabs(email, card, state, card_key)
-            st.caption("The creator runs and edits this card. Use Refresh cards & checks to see their latest saved results.")
-            return
         title, actions = st.columns([4, 1], vertical_alignment="center")
         title.subheader(_card_name(card, index))
         title.caption(f"{len(posts)} / {store.MAX_POSTS_PER_CARD} posts · Likes + comments (all reactions included)")
         if actions.button("Remove card", key=f"{key}_remove_{card['id']}", disabled=state["error"],
-                          help="Remove the card. Any current check finishes in the background, and saved checks are kept."):
+                          help="Remove this card for all users. Any current check finishes in the background, and saved checks are kept."):
             try:
-                _update_owned_cards(state, store.remove_card(database.init_db(), email, card["id"]))
+                store.remove_workspace_card(database.init_db(), email, card)
+                state["cards"] = [row for row in state["cards"] if row["id"] != card["id"]]
             except Exception:
                 log.exception("Velocity card could not be removed")
                 st.error("The card could not be removed. Refresh cards & checks before trying again.")
@@ -287,6 +282,12 @@ def _render_card(email: str, card: dict, index: int, state: dict, key: str, *, h
                 st.session_state[f"{key}_notice"] = "Card removed. Collected posts and checks are kept."
                 _close_card()
                 st.rerun()
+
+        if card.get("shared"):
+            st.caption(f"{len(posts)} / {store.MAX_POSTS_PER_CARD} posts · Shared by another approved user · Any approved user can remove this card")
+            _render_card_tabs(email, card, state, card_key)
+            st.caption("The creator runs and edits this card. Use Refresh cards & checks to see their latest saved results.")
+            return
 
         with st.expander("Rename card"):
             with st.form(f"{card_key}_rename"):
@@ -378,7 +379,7 @@ def render_velocity_workspace(email: str, *, hosted: bool | None = None) -> None
     st.html(CSS_PATH)
     st.html(PAPER_CSS)
     st.subheader("Velocity Tracking")
-    st.caption("Cards and saved results are shared with approved users. Run and edit your own cards.")
+    st.caption("Cards and saved results are shared with approved users. Any approved user can remove any card. Run and edit your own cards.")
     toolbar = st.container(horizontal=True, vertical_alignment="center", key="sm_velocity_toolbar")
     create_slot = toolbar.empty()
     refresh = toolbar.button("Refresh cards & checks", key=f"{key}_refresh")

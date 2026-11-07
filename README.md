@@ -844,8 +844,8 @@ This immediately saves an empty card; no name or link is required. The cards are
 table and controls in a matching modal. Up to **10 cards per account** are saved,
 and each card can hold **10 Facebook posts**, one per row. Add links inside a card whenever ready.
 All approved users can see each other's existing cards and saved results. Teammates' covers are marked
-**SHARED VELOCITY** and open in view-only mode; the creator keeps the Run, rename, post-editing, and remove
-controls. Use **Refresh cards & checks** to load another user's new cards or results. Shared cards do not
+**SHARED VELOCITY**. Any approved user can remove any card for everyone; collected posts and checks are kept.
+The creator keeps the Run, rename, and post-editing controls. Use **Refresh cards & checks** to load another user's new cards or results. Shared cards do not
 use your own ten-card allowance, and Facebook login sessions remain private.
 Use **Rename card → Card name → Save name** inside the notepad to change its name.
 Each notepad has **Velocity** and **Analysis** tabs. Velocity shows **Provoker's post**, the completion

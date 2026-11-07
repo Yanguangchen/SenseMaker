@@ -17,6 +17,7 @@ from urllib.parse import urlsplit
 import pandas as pd
 import streamlit as st
 
+from modules.audio_feedback import install_audio_feedback, notify_sound
 from modules.auth import require_access
 from modules.ui import apply_brand, running_glow, show_running_glow
 from modules.browserbase_usage_ui import render_browserbase_usage_bar
@@ -103,6 +104,8 @@ def _remember_collection(rows: list[dict[str, Any]], source: str, completed_at: 
     if previous and previous["completed_at"] > completed_at:
         return
     st.session_state["last_collected_dataset"] = collection_snapshot(rows, source, completed_at)
+    if any(is_analyzable(row) for row in rows):
+        notify_sound("success")
 
 
 def _collection_record_keys(rows: list[dict[str, Any]]) -> set[tuple[str, str, str]]:
@@ -1465,6 +1468,7 @@ def _apply_ui_theme() -> None:
     st.markdown(_UI_THEME, unsafe_allow_html=True)
     st.html(Path(__file__).parent / "modules" / "theme" / "button-shimmer.css")
     apply_brand()
+    install_audio_feedback()
 
 
 def _render_reddit_settings() -> tuple[int, int]:
@@ -1602,6 +1606,8 @@ def _render_facebook_collection_progress(email: str, job_id: str) -> None:
         if job:
             st.session_state["last_scrape_results"] = job.results
             _remember_collection(job.results, "Facebook", job.finished_at)
+            if job.error:
+                notify_sound("error")
             st.session_state["last_scrape_urls"] = list(job.urls)
             st.session_state["last_scrape_error"] = job.error or (
                 "Collection cancelled. Completed results have been kept." if job.status == "cancelled" else "")

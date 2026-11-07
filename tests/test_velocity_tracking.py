@@ -138,6 +138,26 @@ class VelocityStoreTests(VelocityTestCase):
         self.assertEqual(len({card["id"] for card in cards}), 2)
         self.assertEqual(cards[1]["name"], "Velocity tracking card 1")
 
+    def test_shared_deletion_targets_creator_and_validates_access(self):
+        legacy = {"id": "a" * 64, "name": "Same ID", "posts": []}
+        for email in ("owner@example.com", "other@example.com"):
+            self.db.rows["sensemaker_velocity_tracking/" + library_owner_id(email)] = {"cards": [legacy]}
+        with patch("modules.auth.allowed_emails", return_value={"owner@example.com", "other@example.com"}):
+            shared = store.load_workspace_cards(self.db, "owner@example.com")[1]
+            before = deepcopy(self.db.rows)
+            with self.assertRaises(PermissionError):
+                store.remove_workspace_card(self.db, "outside@example.com", shared)
+            with self.assertRaises(PermissionError):
+                store.remove_workspace_card(self.db, "owner@example.com", {**shared, "owner_id": "unknown"})
+            with self.assertRaises(ValueError):
+                store.remove_workspace_card(self.db, "owner@example.com", {**shared, "source_card_id": "b" * 64})
+            self.assertEqual(self.db.rows, before)
+            store.remove_workspace_card(self.db, "owner@example.com", shared)
+            self.assertEqual(store.load_cards(self.db, "other@example.com"), [])
+            self.assertEqual(store.load_cards(self.db, "owner@example.com"), [legacy])
+            store.remove_workspace_card(self.db, "owner@example.com", legacy)
+            self.assertEqual(store.load_cards(self.db, "owner@example.com"), [])
+
     def test_rename_rejects_invalid_names_other_accounts_and_removed_cards(self):
         card = store.add_card(self.db, "owner@example.com", "Original", post_url())[0]
         original = deepcopy(self.db.rows)
@@ -284,7 +304,7 @@ class VelocityUITests(VelocityTestCase):
         self.assertFalse(list(app.exception))
         return app
 
-    def test_teammate_card_is_visible_read_only_and_survives_own_card_creation(self):
+    def test_teammate_card_can_be_removed_and_survives_own_card_creation(self):
         team = store.add_card(self.db, "other@example.com", "Team monitoring", post_url())[0]
         post = store.card_posts(team)[0]
         store.save_remark(self.db, "other@example.com", team["id"], post["id"], "Monitor this discussion")
@@ -299,9 +319,9 @@ class VelocityUITests(VelocityTestCase):
             self.assertFalse(list(app.exception))
             self.assertTrue(any(">250</td>" in element.proto.body for element in app.get("html")))
             self.assertTrue(any("Monitor this discussion" in element.proto.body for element in app.get("html")))
-            self.assertFalse({"Run", "Save name", "Save remark", "Remove card", "Add post", "Remove post"}
+            self.assertFalse({"Run", "Save name", "Save remark", "Add post", "Remove post"}
                              & {button.label for button in app.button})
-            self.assertTrue(any("View only" in caption.value for caption in app.caption))
+            self.assertTrue(any(button.label == "Remove card" for button in app.button))
             app.button(key=f"{self.key}_create").click().run()
             self.assertFalse(list(app.exception))
             self.assertIn(f"{self.key}_open_{shared['id']}", [button.key for button in app.button])
@@ -309,6 +329,12 @@ class VelocityUITests(VelocityTestCase):
             store.rename_card(self.db, "other@example.com", team["id"], "Updated team card")
             app.button(key=f"{self.key}_refresh").click().run()
             self.assertEqual(app.button(key=f"{self.key}_open_{shared['id']}").label, "Open Updated team card")
+            app.button(key=f"{self.key}_remove_{shared['id']}").click().run()
+            self.assertFalse(list(app.exception))
+            self.assertEqual(store.load_cards(self.db, "other@example.com"), [])
+            self.assertEqual(len(store.load_cards(self.db, "owner@example.com")), 1)
+            self.assertNotIn(f"{self.key}_open_{shared['id']}", [button.key for button in app.button])
+            self.assertTrue(any("/runs/" in path for path in self.db.rows))
 
     def test_remark_editor_saves_reloads_and_retries_without_losing_text(self):
         card = store.add_card(self.db, "owner@example.com", url=post_url())[0]
