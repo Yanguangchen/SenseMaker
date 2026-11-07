@@ -20,6 +20,7 @@ import streamlit as st
 from modules.auth import require_access
 from modules.ui import apply_brand, running_glow, show_running_glow
 from modules.browserbase_usage_ui import render_browserbase_usage_bar
+from modules.global_alerts import render_global_alerts
 from modules.analysis_library import (
     SOURCE_LABELS, dataset_date_label, dataset_key, dataset_options, matches_sources,
     select_history, select_records,
@@ -46,6 +47,7 @@ from modules.client_report import (
 )
 from modules.engagement import checks_for
 from modules.report_pdf import PDFExportError, render_pdf
+from modules.word_cloud_ui import render_word_cloud
 from modules.facebook_session import (
     FacebookLoginError,
     FacebookSession,
@@ -211,8 +213,14 @@ def _render_analysis_datasets(source_urls: list[str] | None, ready: bool) -> lis
 
     st.button("", icon=":material/refresh:", key="refresh_analysis_datasets", help="Refresh datasets",
               on_click=refresh, disabled=not ready)
+    recent = st.session_state.get("last_collected_dataset")
+    if ready and isinstance(recent, dict) and recent.get("rows") and not recent.get("saved"):
+        st.session_state.pop("analysis_dataset_catalog", None)
     if ready and "analysis_dataset_catalog" not in st.session_state:
         try:
+            if isinstance(recent, dict) and recent.get("rows") and not recent.get("saved"):
+                _write_results_to_firestore(recent["rows"], custom_title=recent["title"])
+                recent["saved"] = True
             st.session_state["analysis_dataset_catalog"] = {"rows": _fetch_analysis_datasets(source_urls), "error": False}
         except Exception:
             st.session_state["analysis_dataset_catalog"] = {"rows": [], "error": True}
@@ -1069,12 +1077,14 @@ def _render_client_report(items: List[Dict[str, Any]], key: str, report_date: st
     negatives = negative_records(records)
     st.html(REPORT_CSS)
     _render_report_downloads(records, key, report_date)
-    sentiment_tab, reports_tab, evidence_tab = st.tabs([
-        "Comment Sentiment Analysis", f"Negative Post Reports ({len(negatives)})",
+    sentiment_tab, cloud_tab, reports_tab, evidence_tab = st.tabs([
+        "Comment Sentiment Analysis", "Word cloud", f"Negative Post Reports ({len(negatives)})",
         "Evidence by record",
     ])
     with sentiment_tab:
         st.html(sentiment_sheet(records, report_date))
+    with cloud_tab:
+        render_word_cloud(records, key)
     with reports_tab:
         if not negatives:
             st.info("No negative or flagged records in this set, so there are no Negative Post Reports.")
@@ -1922,6 +1932,8 @@ def _render_collect_controls(
                     if platform == "facebook":
                         # Refresh the action row and connection status after collection.
                         st.rerun()
+                    else:
+                        st.session_state.pop("record_manager_rows", None)
                 except Exception as exc:
                     progress_area.empty()
                     st.session_state[f"{result_key}_results"] = []
@@ -2813,6 +2825,7 @@ def main() -> None:
         # st.stop() here can leave new component frames at about:blank.
         return
     render_browserbase_usage_bar(user_email)
+    alerts_slot = st.container(key="sm_global_alerts")
     try:
         facebook_session = (remote_facebook_session(user_email) if IS_CLOUD else
                             _get_facebook_session(_facebook_storage_path()))
@@ -2844,6 +2857,21 @@ def main() -> None:
 
     with tutorial_tab:
         render_tutorial_workspace()
+
+    try:
+        saved_sentiment_history = _load_sentiment_history()
+    except Exception:
+        saved_sentiment_history = []
+    try:
+        saved_news_history = _load_news_history()
+    except Exception:
+        saved_news_history = []
+    with alerts_slot:
+        render_global_alerts(
+            user_email,
+            sentiment_history=saved_sentiment_history,
+            news_history=saved_news_history,
+        )
 
 
 if __name__ == "__main__":

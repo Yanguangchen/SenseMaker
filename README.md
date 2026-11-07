@@ -839,6 +839,10 @@ This immediately saves an empty card; no name or link is required. The cards are
 420 × 300 px on desktop (the Scrape Data card dimensions rotated 90 degrees). Click a card to open its
 table and controls in a matching modal. Up to **10 cards per account** are saved,
 and each card can hold **10 Facebook posts**, one per row. Add links inside a card whenever ready.
+All approved users can see each other's existing cards and saved results. Teammates' covers are marked
+**SHARED VELOCITY** and open in view-only mode; the creator keeps the Run, rename, post-editing, and remove
+controls. Use **Refresh cards & checks** to load another user's new cards or results. Shared cards do not
+use your own ten-card allowance, and Facebook login sessions remain private.
 Use **Rename card → Card name → Save name** inside the notepad to change its name.
 The table columns are **Provoker's post**, the completion date and time (UTC) of the latest eight runs,
 **Status**, then **Views change (%)**. Unused run columns show **—**.
@@ -854,6 +858,12 @@ Cards without links show an empty table. Added posts have blank cells until thei
 is treated as zero or replaced by comments. Rounded Facebook counts remain approximate. Each column
 represents the same run across all rows. The latest eight runs appear in the table; earlier runs stay in
 the account's Firestore run archive. Comments and likes are not collected by velocity runs yet.
+
+When a count is missing, **Why counts are unavailable** shows the saved reason and a link to the post.
+Photo viewers are supported, including layouts with comment articles. A photo or text post still needs
+a view count displayed by Facebook; reactions, comments, and shares cannot provide a view-based velocity.
+If the post cannot be identified or opened, the run reports **Failed**; if it opens without a readable view
+count, it reports **Unavailable**. A Facebook sign-in prompt asks you to reconnect in **Scrape Data**.
 
 Runs continue when switching pages. Use **Refresh cards & checks** to reload saved results. A failed
 Firestore save offers **Retry saving check**, which saves the same results without scraping again or

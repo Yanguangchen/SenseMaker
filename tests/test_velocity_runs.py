@@ -207,6 +207,18 @@ class RunUITests(VelocityTestCase):
             auth.start()
             self.addCleanup(auth.stop)
 
+    def test_saved_unavailable_reason_is_visible_without_hovering(self):
+        card = store.add_card(self.db, EMAIL, url=post_url())[0]
+        run = run_for(card, views=None)
+        run["results"][0].update(outcome="unavailable", reason="The requested post could not be identified on the page.")
+        store.save_run(self.db, EMAIL, card["id"], run)
+        app = self.app()
+        app.button(key=f"{self.key}_open_{card['id']}").click().run()
+        self.assertFalse(list(app.exception))
+        self.assertIn("Why counts are unavailable", [expander.label for expander in app.expander])
+        self.assertTrue(any("The requested post could not be identified" in element.value for element in app.markdown))
+        self.assertTrue(any("two consecutive view counts" in element.value for element in app.caption))
+
     def test_active_run_disables_duplicate_runs_and_edits_while_polling(self):
         card = store.add_card(self.db, EMAIL, url=post_url())[0]
         run = run_for(card)

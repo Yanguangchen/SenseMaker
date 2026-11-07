@@ -39,9 +39,14 @@ def _show_notice(key: str) -> None:
         st.success(notice)
 
 
+def _update_owned_cards(state: dict, cards: list[dict]) -> None:
+    state["cards"] = [*cards, *(card for card in state["cards"] if card.get("shared"))]
+
+
 def _render_cover(email: str, card: dict, index: int, key: str) -> None:
     posts, runs = store.card_posts(card), card.get("runs", [])
     name = _card_name(card, index)
+    eyebrow = "SHARED VELOCITY" if card.get("shared") else "VELOCITY"
     job = jobs.latest_job(email)
     running = job and job.card_id == card["id"] and job.status in {"running", "saving"}
     detail = "Checking views…" if running else (f"Last run · {format_time(runs[-1]['at'])}" if runs else "Ready for your first check")
@@ -50,7 +55,7 @@ def _render_cover(email: str, card: dict, index: int, key: str) -> None:
     with st.container(key=f"sm_velocity_cover_{card['id']}"):
         st.html(
             '<div class="sm-note-cover">'
-            f'<div class="sm-note-eyebrow">VELOCITY <span>NO. {index:02}</span></div>'
+            f'<div class="sm-note-eyebrow">{eyebrow} <span>NO. {index:02}</span></div>'
             f'<h3>{escape(name)}</h3>'
             f'<p class="sm-note-meta">{len(posts)} / 10 posts <span>·</span> {card.get("run_count", len(runs))} saved checks</p>'
             f'<div class="sm-note-checks" aria-label="Latest eight checks">{checks}</div>'
@@ -105,6 +110,22 @@ def _run_progress(email: str, job_id: str) -> None:
     st.progress(job.completed / len(job.posts), text=job.message)
 
 
+def _render_card_history(card: dict) -> None:
+    st.html(velocity_card_sheet(card))
+    if not card.get("runs"):
+        return
+    latest = {row["post_id"]: row for row in card["runs"][-1].get("results", [])}
+    missing = [(index, post, latest[post["id"]]) for index, post in enumerate(store.card_posts(card), 1)
+               if post["id"] in latest and latest[post["id"]].get("views") is None]
+    if missing:
+        with st.expander("Why counts are unavailable", expanded=True):
+            for index, post, result in missing:
+                st.write(f"Post {index}: {result.get('reason') or 'No view count was found on this post.'}")
+                st.link_button(f"Open post {index} on Facebook", post["url"])
+            st.caption("A view-based status and percentage change need two consecutive view counts. "
+                       "If Facebook does not display views for a photo or text post, this card cannot measure its views.")
+
+
 def _render_card(email: str, card: dict, index: int, state: dict, key: str, *, hosted: bool) -> None:
     posts = store.card_posts(card)
     card_key = f"{key}_{card['id']}"
@@ -116,13 +137,19 @@ def _render_card(email: str, card: dict, index: int, state: dict, key: str, *, h
     busy = bool(job and job.status in jobs.BUSY)
     card_busy = busy and job.card_id == card["id"]
     with st.container(key=f"velocity_card_{card['id']}"):
+        if card.get("shared"):
+            st.subheader(_card_name(card, index))
+            st.caption(f"{len(posts)} / {store.MAX_POSTS_PER_CARD} posts · Shared by another approved user · View only")
+            _render_card_history(card)
+            st.caption("The creator runs and edits this card. Use Refresh cards & checks to see their latest saved results.")
+            return
         title, actions = st.columns([4, 1], vertical_alignment="center")
         title.subheader(_card_name(card, index))
         title.caption(f"{len(posts)} / {store.MAX_POSTS_PER_CARD} posts · Facebook views")
         if actions.button("Remove card", key=f"{key}_remove_{card['id']}", disabled=state["error"] or card_busy,
                           help="The collected posts and their saved checks are kept."):
             try:
-                state["cards"] = store.remove_card(database.init_db(), email, card["id"])
+                _update_owned_cards(state, store.remove_card(database.init_db(), email, card["id"]))
             except Exception:
                 log.exception("Velocity card could not be removed")
                 st.error("The card could not be removed. Refresh cards & checks before trying again.")
@@ -138,7 +165,7 @@ def _render_card(email: str, card: dict, index: int, state: dict, key: str, *, h
                 rename = st.form_submit_button("Save name", disabled=state["error"])
             if rename:
                 try:
-                    state["cards"] = store.rename_card(database.init_db(), email, card["id"], name)
+                    _update_owned_cards(state, store.rename_card(database.init_db(), email, card["id"], name))
                 except ValueError as exc:
                     st.error(str(exc))
                 except Exception:
@@ -169,7 +196,7 @@ def _render_card(email: str, card: dict, index: int, state: dict, key: str, *, h
                     st.rerun()
             elif job.status == "complete" and job.run.get("warning"):
                 st.warning(job.run["warning"])
-        st.html(velocity_card_sheet(card))
+        _render_card_history(card)
         if posts and not card.get("runs"):
             st.caption("Click Run to save the first view-count check. Your Facebook connection from Scrape Data is used.")
 
@@ -181,7 +208,7 @@ def _render_card(email: str, card: dict, index: int, state: dict, key: str, *, h
                 submitted = st.form_submit_button("Add post", disabled=state["error"] or card_busy)
             if submitted:
                 try:
-                    state["cards"] = store.add_post(database.init_db(), email, card["id"], url)
+                    _update_owned_cards(state, store.add_post(database.init_db(), email, card["id"], url))
                 except ValueError as exc:
                     st.error(str(exc))
                 except Exception:
@@ -201,7 +228,7 @@ def _render_card(email: str, card: dict, index: int, state: dict, key: str, *, h
                                       format_func=lambda ident: by_id[ident]["url"])
                 if st.button("Remove post", key=f"{card_key}_remove_post", disabled=state["error"] or card_busy):
                     try:
-                        state["cards"] = store.remove_post(database.init_db(), email, card["id"], choice)
+                        _update_owned_cards(state, store.remove_post(database.init_db(), email, card["id"], choice))
                     except Exception:
                         log.exception("Velocity post could not be removed")
                         st.error("The post could not be removed. Refresh cards & checks before trying again.")
@@ -211,23 +238,28 @@ def _render_card(email: str, card: dict, index: int, state: dict, key: str, *, h
 
 
 def render_velocity_workspace(email: str, *, hosted: bool | None = None) -> None:
+    from modules.auth import allowed_emails
+
     if hosted is None:
         hosted = os.path.exists("/mount/src") or os.getenv("SENSEMAKER_HOSTED") == "1"
     key = f"velocity_tracking_{library_owner_id(email)}"
     st.html(CSS_PATH)
     st.html(PAPER_CSS)
     st.subheader("Velocity Tracking")
-    st.caption("Your tracking notepads. Open a card to add posts, run a view check, and see its history.")
+    st.caption("Cards and saved results are shared with approved users. Run and edit your own cards.")
     toolbar = st.container(horizontal=True, vertical_alignment="center", key="sm_velocity_toolbar")
     create_slot = toolbar.empty()
     refresh = toolbar.button("Refresh cards & checks", key=f"{key}_refresh")
     count_slot = toolbar.empty()
     job = jobs.latest_job(email)
     finished = bool(job and job.status == "complete" and st.session_state.get(f"{key}_seen_run") != job.id)
-    if key not in st.session_state or refresh or finished:
+    owners = sorted(library_owner_id(owner) for owner in allowed_emails())
+    if key not in st.session_state or refresh or finished or st.session_state[key].get("shared_owners") != owners:
         state = st.session_state.get(key, {"cards": []})
+        state["cards"] = [card for card in state["cards"] if not card.get("shared") or card.get("owner_id") in owners]
         try:
-            state["cards"] = store.load_cards(database.init_db(), email)
+            state["cards"] = store.load_workspace_cards(database.init_db(), email)
+            state["shared_owners"] = owners
             state["error"] = False
             if finished:
                 st.session_state[f"{key}_seen_run"] = job.id
@@ -239,6 +271,7 @@ def render_velocity_workspace(email: str, *, hosted: bool | None = None) -> None
         st.session_state[key] = state
     state = st.session_state[key]
     cards = state["cards"]
+    own_count = sum(not card.get("shared") for card in cards)
 
     selection = st.session_state.get(MODAL_KEY, {})
     if selection and (selection.get("owner") != library_owner_id(email)
@@ -249,11 +282,11 @@ def render_velocity_workspace(email: str, *, hosted: bool | None = None) -> None
         _show_notice(key)
     if state["error"]:
         st.warning("Your velocity cards could not be loaded. Refresh cards & checks to try again. Any cards shown are from the last successful load.")
-    count_slot.caption(f"{len(cards)} / {store.MAX_CARDS} velocity cards")
+    count_slot.caption(f"{len(cards)} cards · {own_count} / {store.MAX_CARDS} created by you")
     if create_slot.button("Create velocity tracking card", key=f"{key}_create", type="primary",
-                          disabled=state["error"] or len(cards) >= store.MAX_CARDS):
+                          disabled=state["error"] or own_count >= store.MAX_CARDS):
         try:
-            state["cards"] = store.add_card(database.init_db(), email)
+            _update_owned_cards(state, store.add_card(database.init_db(), email))
         except ValueError as exc:
             st.error(str(exc))
         except Exception:
@@ -262,8 +295,8 @@ def render_velocity_workspace(email: str, *, hosted: bool | None = None) -> None
         else:
             st.session_state[f"{key}_notice"] = "Velocity tracking card created. Add posts whenever you're ready."
             st.rerun()
-    if len(cards) >= store.MAX_CARDS:
-        st.info("All 10 cards are in use. Remove a card to create another.")
+    if own_count >= store.MAX_CARDS:
+        st.info("You have created all 10 cards. Remove one of your cards to create another.")
     if not cards:
         if not state["error"]:
             st.info("No velocity cards yet. Create your first notepad, then open it to add posts.")

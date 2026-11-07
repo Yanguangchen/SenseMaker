@@ -25,7 +25,7 @@ Run your first end-to-end analysis with a public website article—no social med
 | **Scrape Data** | Collect posts, comments, headlines, and web pages from **Facebook**, **Oyoshi on Facebook**, **X**, **Online news**, **Custom website**, or **Reddit**; manage **Saved Facebook links**. | Shared datasets · Private link libraries |
 | **Clean & manage data** | Browse dataset cards, filter records by source or status, and review/delete single records, page batches, or entire datasets. | Shared across approved users |
 | **Sentiment Analysis** | Configure AI provider (**Gemini** or **ChatGPT**), curate included records, run analysis, inspect literal quote evidence, and export HTML/PDF/CSV reports. | Shared across approved users |
-| **Velocity Tracking** | Create and rename up to 10 private tracking notepads, add up to 10 Facebook post permalinks per card, and log view counts with run dates, times, and percentage changes. | Private to your account |
+| **Velocity Tracking** | Create and rename up to 10 tracking notepads, add up to 10 Facebook post permalinks per card, and log view counts with run dates, times, and percentage changes. | Shared viewing; creator runs and edits |
 | **Sentiment Trends** | Track **Sentiment over time** (`−100` to `+100`) and **Border tension risk over time** (`0`–`100`), or reset shared timeline history. | Shared across approved users |
 | **Content plan** | Turn up to 30 analyzed records into target keywords, content outlines, drafts, and verification checklists in **English**, **Khmer**, or **Thai**. | Current browser session · CSV/JSON export |
 | **GenCite** | Measure brand share of voice across sampled **Gemini** and **ChatGPT** answers, generate gap-closing recommendations, and save runs. | Private to your account |
@@ -211,7 +211,7 @@ Each analyzed record receives an English **translation**, **topics**, a **sentim
 
 ## Velocity Tracking
 
-Open **Velocity Tracking** in the sidebar to monitor view-count growth on specific Facebook posts, photos, reels, or videos using private landscape notepads.
+Open **Velocity Tracking** in the sidebar to monitor view-count growth on specific Facebook posts, photos, reels, or videos using landscape notepads. All approved users can see each other's cards and saved results. Covers marked **SHARED VELOCITY** open in view-only mode; each creator retains the Run and editing controls. Click **Refresh cards & checks** to see another user's newly saved cards or results.
 
 ### Create cards, add posts & run checks
 
@@ -234,7 +234,7 @@ Open **Velocity Tracking** in the sidebar to monitor view-count growth on specif
 | **dead** | Views showed zero growth across consecutive checks. |
 | **`—` (status)** | Fewer than two consecutive numerical view counts are available for this post. |
 | **Views change (%)** | Beside **Status**, shows `(latest − previous) / previous × 100` for the latest two runs. Positive values mean views increased; negative values mean they decreased. Shows **—** if either count is missing or the previous count is zero. |
-| **Unavailable / Failed** | **Unavailable** means Facebook did not display a public view count; **Failed** means the post could not be loaded. Neither is treated as zero, so a missing count never falsely marks a post **dead**. |
+| **Unavailable / Failed** | **Unavailable** means no view count could be read from the identified post; **Failed** means the post could not be loaded or identified. Expand **Why counts are unavailable** for the saved reason and a link to check the post. Neither is treated as zero, so a missing count never falsely marks a post **dead**. |
 
 ## Sentiment Trends & risk timeline
 
@@ -317,7 +317,7 @@ At the top of **GenCite**, check which models and server keys are active for **G
 | **Saved Facebook links & Website URL presets** | Private to your account | Saved in **Your links** / **URL presets**; manage or export in **Saved Facebook links**. |
 | **Collected records, datasets & `Include` toggles** | Shared across approved users | Auto-saved (**X**, **Online news**, **Custom website**) or saved via **Save data to cloud** (**Facebook**, **Reddit**); curated in **Sentiment Analysis** and **Clean & manage data**. |
 | **AI sentiment analyses & timelines** | Shared across approved users | Saved with each record and in shared run/scan history collections (`_analysis_runs`, `_news_scans`). |
-| **Velocity Tracking cards & check history** | Private to your account | Saved automatically when creating cards, adding posts, or clicking **Run** in **Velocity Tracking**. |
+| **Velocity Tracking cards & check history** | Shared viewing across approved users; creator runs and edits | Saved automatically when creating cards, adding posts, or clicking **Run** in **Velocity Tracking**. Existing cards are shared without moving or deleting their history; Facebook login sessions stay private. |
 | **GenCite saved analyses & published marks** | Private to your account | Saved via **Save analysis** and **Mark as published** in **GenCite**. |
 | **Content plans & exported reports** | Session / local download | Downloaded as `.csv`, `.json`, `.html`, `.pdf`, or `.txt` files. |
 
@@ -333,7 +333,7 @@ At the top of **GenCite**, check which models and server keys are active for **G
 | **Dataset exclusions could not be saved** | Click **Retry saving changes** in **Choose and edit data**, or click the refresh icon (`↻`) to reload the latest dataset state. |
 | **No records appear in Sentiment Analysis** | In **Choose and edit data**, select at least one source and dataset card (or **Last scraped data**), check **Record status** in **Settings**, or click **↻** to refresh datasets. |
 | **Run Gemini / ChatGPT button is disabled** | Confirm at least one record has **Include** checked, dataset edits have finished saving, and the chosen provider's API key is configured on the server. |
-| **Velocity check shows `Unavailable`, `Failed`, or save error** | `Unavailable` means Facebook hid the view count; `Failed` means the post could not be opened (check your Facebook login). If saving to Firestore failed, click **Retry saving check**. |
+| **Velocity check shows `Unavailable`, `Failed`, or save error** | Read **Why counts are unavailable** inside the card. Open the post on Facebook and check whether it displays views; photos or text posts showing only reactions/comments/shares cannot supply view counts. `Failed` means the post could not be opened or identified. Reconnect Facebook in **Scrape Data** if prompted. If saving to Firestore failed, click **Retry saving check**. |
 | **PDF export unavailable** | Click **Download report (HTML)** and print to PDF in your browser (A4 landscape), or ask the administrator to install Playwright Chromium (`python -m playwright install chromium`). |
 
 ### Administrator configuration & CLI entrypoints

@@ -298,7 +298,7 @@ def velocity_view(records: list[dict[str, Any]], *, negative_only: bool = True) 
     times = [at for row in rows for at in row["times"]]
 
     if rows:
-        parts = [f"{statuses[s]} {s.lower()}" for s in ("Live", "Slowing", "Dead") if statuses[s]]
+        parts = [f"{statuses[s]} {s.lower()}" for s in ("Viral", "Live", "Slowing", "Dead") if statuses[s]]
         if statuses["New"]:
             first = sum(not row["values"] for row in rows)
             if first:
@@ -469,7 +469,7 @@ def velocity_sheet(records: list[dict[str, Any]], report_date: str, *, negative_
     head = ("<tr><th scope=col>Provoker's post</th>"
             + "".join(f"<th scope=col>Check {i}</th>" for i in range(1, SHOWN_CHECKS + 1))
             + "<th scope=col>Status</th></tr>")
-    labels = {"Live": "alive", "Slowing": "dying", "Dead": "dead"}
+    labels = {"Viral": "Viral", "Live": "alive", "Slowing": "dying", "Dead": "dead"}
     body = []
     for row in view["rows"]:
         record, result = row["record"], row["velocity"]
@@ -494,7 +494,7 @@ def velocity_sheet(records: list[dict[str, Any]], report_date: str, *, negative_
         f'<section class="crt-sheet{" crt-sheet--compact" if compact else ""}" aria-label="Velocity Tracker">'
         + heading + '<div class="crt-table-wrap"><table class="crt-table"><thead>' + head + "</thead><tbody>"
         + "".join(body) + "</tbody></table></div>"
-        + '<div class="crt-key"><span><b>alive</b> still gaining</span><span><b>dying</b> gains shrinking</span>'
+        + '<div class="crt-key"><span><b>Viral</b> surging significantly</span><span><b>alive</b> still gaining</span><span><b>dying</b> gains shrinking</span>'
           "<span><b>dead</b> no growth across checks</span></div>"
         + '<p class="crt-note">Each check is a saved collection. Counts are platform comment totals when available, '
           "otherwise collected comments (a sample), as labeled under the post. Status needs at least two checks."

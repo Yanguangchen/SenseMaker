@@ -9,9 +9,12 @@ import streamlit as st
 from modules.analysis_library import dataset_date_label, dataset_key, dataset_options, select_records
 from modules.client_report import platform_label
 from modules.config import get_setting
-from modules.database import delete_dataset_records, delete_datasets_records, delete_records, init_db, load_record_catalog
+from modules.database import (
+    delete_dataset_records, delete_datasets_records, delete_records, init_db, load_record_catalog, upsert_post,
+)
 from modules.dataset_cards import apply_dataset_card_theme, featured_datasets, render_dataset_cards, viewer_timezone
 from modules.record_state import purge_record_caches
+from modules.signals import NON_CONTENT_TYPES
 
 DATASET_SELECTION = "record_manager_datasets_to_delete"
 DATASET_REVIEW = "datasets_delete_pending"
@@ -358,6 +361,10 @@ def render_record_management() -> None:
         _clear_selection()
         _clear_dataset_selection()
         st.session_state["record_manager_collection"] = collection
+    recent = st.session_state.get("last_collected_dataset")
+    if isinstance(recent, dict) and recent.get("rows") and st.session_state.get("record_manager_last_collection_id") != recent.get("id"):
+        st.session_state.pop("record_manager_rows", None)
+        st.session_state["record_manager_last_collection_id"] = recent.get("id")
     refresh = refresh_col.button("", icon=":material/refresh:", key="record_manager_refresh", help="Refresh datasets")
     if refresh or ("record_manager_rows" not in st.session_state
                    and not st.session_state.get("record_manager_needs_refresh")
@@ -366,7 +373,20 @@ def render_record_management() -> None:
         st.session_state.pop("record_manager_error", None)
         try:
             with st.spinner("Loading saved records…"):
-                st.session_state["record_manager_rows"] = load_record_catalog(init_db())
+                db = init_db()
+                if isinstance(recent, dict) and recent.get("rows") and not recent.get("saved"):
+                    save_timestamp = datetime.now().astimezone().isoformat()
+                    title = str(recent.get("title") or "").strip()
+                    for post in recent["rows"]:
+                        url = str(post.get("url") or "").strip()
+                        if url and post.get("source_type") not in NON_CONTENT_TYPES:
+                            payload = {**post, "custom_title": title, "saved_at": save_timestamp}
+                            if not payload.get("scraped_at"):
+                                payload["scraped_at"] = save_timestamp
+                            upsert_post(db, payload)
+                    recent["saved"] = True
+                    st.session_state.pop("analysis_dataset_catalog", None)
+                st.session_state["record_manager_rows"] = load_record_catalog(db)
             st.session_state.pop("record_manager_needs_refresh", None)
         except Exception:
             st.session_state.pop("record_manager_rows", None)

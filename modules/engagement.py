@@ -119,7 +119,16 @@ def velocity(checks: list[dict[str, Any]]) -> dict[str, Any]:
     change = values[-1] - values[-2]
     earlier = values[-2] - values[-3] if len(values) > 2 else None
     if change > 0:
-        status = "Live" if earlier is None or change >= earlier else "Slowing"
+        if earlier is None or change >= earlier:
+            is_viral = (
+                values[-1] > 500_000
+                or change >= 10_000
+                or (values[-2] >= 10 and change >= values[-2] * 2)
+                or (earlier is not None and earlier > 0 and change >= earlier * 2 and change >= 50)
+            )
+            status = "Viral" if is_viral else "Live"
+        else:
+            status = "Slowing"
     else:
         status = "Slowing" if earlier is not None and earlier > 0 else "Dead"
     result.update(prior=values[-2], change=change, pct=100 * change / values[-2] if values[-2] else None,

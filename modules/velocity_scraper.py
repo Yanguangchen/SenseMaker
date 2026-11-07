@@ -27,12 +27,14 @@ def parse_views(labels: list[str]) -> tuple[int | None, str]:
     """Accept only explicit view labels; ambiguous or absent counts are unknown."""
     found = {}
     for label in labels:
-        text = " ".join(label.split())
-        match = _VIEWS.fullmatch(text)
-        if match:
-            count = parse_count(match.group(1) or match.group(2))
-            if count is not None:
-                found[count] = text
+        # Facebook can combine separate engagement labels in one visible line.
+        for part in [label, *re.split(r"[·•|\n\r]", label)]:
+            text = " ".join(part.split())
+            match = _VIEWS.fullmatch(text)
+            if match:
+                count = parse_count(match.group(1) or match.group(2))
+                if count is not None:
+                    found[count] = text
     return next(iter(found.items())) if len(found) == 1 else (None, "")
 
 
@@ -54,6 +56,9 @@ VIEW_LABELS_JS = r"""requested => {
         return '';
     };
     const visible = el => !!el.getClientRects().length && getComputedStyle(el).visibility !== 'hidden';
+    if ([...document.querySelectorAll('input[type="password"]')].some(visible)) {
+        return {matched: false, labels: [], login_required: true};
+    }
     const sharePage = /^\/share\/[pvr]\//.test(location.pathname)
         && new URL(requested).pathname.replace(/\/$/, '') === location.pathname.replace(/\/$/, '');
     const canonical = document.querySelector('link[rel="canonical"]')?.href
@@ -63,20 +68,37 @@ VIEW_LABELS_JS = r"""requested => {
     // Share URLs must resolve to a specific post before we can attribute counts.
     if (!finalId || (requestedId && requestedId !== finalId)) return {matched: false, labels: []};
     const anchors = [...document.querySelectorAll('a[href]')].filter(a => visible(a));
+    const commentSelector = '[data-testid*="comment"], [aria-label^="Comment by"], [aria-label^="Reply by"]';
+    const comments = [...document.querySelectorAll('[role="article"]')].filter(article =>
+        article.matches(commentSelector) || anchors.some(a => article.contains(a)
+            && a.closest('[role="article"]') === article
+            && /[?&](?:comment_id|reply_comment_id)=/.test(a.href)));
+    const inComment = el => !!el.closest(commentSelector) || comments.some(comment => comment.contains(el));
     const candidates = [];
-    for (const anchor of anchors.filter(a => identity(a.href) === finalId)) {
+    for (const anchor of anchors.filter(a => !inComment(a) && identity(a.href) === finalId)) {
         const root = anchor.closest('[role="article"], [data-pagelet^="FeedUnit"]');
         if (root && visible(root) && !candidates.includes(root)) candidates.push(root);
     }
     let roots = candidates.filter(root => !candidates.some(other => other !== root && root.contains(other)));
     if (!roots.length) {
-        // Video/reel layouts may not use articles. Accept one unambiguous post
-        // container only; pages containing a recommendation feed stay unknown.
-        for (const root of document.querySelectorAll('[role="dialog"], [role="main"]')) {
-            if (!visible(root) || root.querySelector('[role="article"]')) continue;
-            const ids = new Set(anchors.filter(a => root.contains(a)).map(a => identity(a.href)).filter(Boolean));
+        // Media viewers may have no post permalink and use articles for comments.
+        // Prefer the active dialog; a recommendation feed is never a fallback.
+        const mediaRoots = [...document.querySelectorAll('[role="dialog"], [role="main"]')]
+            .sort((a, b) => Number(b.getAttribute('role') === 'dialog') - Number(a.getAttribute('role') === 'dialog'));
+        const photoPage = /^\/photo(?:\.php)?\/?$/.test(location.pathname)
+            || location.pathname.includes('/photos/');
+        for (const root of mediaRoots) {
+            if (!visible(root) || [...root.querySelectorAll('[role="article"]')]
+                .some(article => visible(article) && !inComment(article))) continue;
+            const ids = new Set(anchors.filter(a => root.contains(a) && !inComment(a))
+                .map(a => identity(a.href)).filter(Boolean));
+            const photos = [...root.querySelectorAll('img')].filter(img => {
+                const rect = img.getBoundingClientRect();
+                return visible(img) && !inComment(img) && rect.width >= 200 && rect.height >= 200;
+            });
             if ((ids.size === 1 && ids.has(finalId)) ||
-                (ids.size === 0 && root.querySelectorAll('video').length === 1)) { roots = [root]; break; }
+                (ids.size === 0 && (root.querySelectorAll('video').length === 1
+                    || (photoPage && photos.length === 1)))) { roots = [root]; break; }
         }
     }
     if (roots.length !== 1) return {matched: false, labels: []};
@@ -84,7 +106,7 @@ VIEW_LABELS_JS = r"""requested => {
     const excluded = '[data-ad-preview="message"], [data-ad-comet-preview="message"], '
         + '[data-testid="post_message"], [data-testid*="comment"], [role="article"]';
     for (const el of root.querySelectorAll('span, div, [role="button"], [aria-label], [title]')) {
-        if (!visible(el)) continue;
+        if (!visible(el) || inComment(el) || comments.some(comment => el.contains(comment))) continue;
         const parent = el.closest(excluded);
         if ((parent && parent !== root) || el.querySelector(excluded)) continue;
         for (const value of [el.innerText, el.getAttribute('aria-label'), el.getAttribute('title')]) {
@@ -102,15 +124,21 @@ async def read_post_views(page, url: str) -> dict:
         if re.search(r"facebook\.com/(?:login|checkpoint|two_step_verification)(?:[/?._]|$)", page.url):
             raise FacebookLoginError("Facebook is asking you to sign in. Reconnect Facebook in Scrape Data, then run again.")
         snapshot = await page.evaluate(VIEW_LABELS_JS, url)
+        if snapshot.get("login_required"):
+            raise FacebookLoginError("Facebook is asking you to sign in. Reconnect Facebook in Scrape Data, then run again.")
         matched = matched or snapshot["matched"]
         count, label = parse_views(snapshot["labels"])
         if count is not None:
             return {"views": count, "label": label, "outcome": "ok"}
         if attempt < 7:
             await page.wait_for_timeout(1000)
-    return {"views": None, "outcome": "unavailable", "reason": (
-        "Facebook did not display a view count for this post." if matched else
-        "The requested post could not be identified on the page.")}
+    if not matched:
+        return {"views": None, "outcome": "error", "reason_code": "post_not_identified",
+                "reason": "The requested post could not be identified on the page. Open the link on Facebook "
+                          "to check that it loads, then run the card again."}
+    return {"views": None, "outcome": "unavailable", "reason_code": "views_not_shown",
+            "reason": "No view count was found on this post. Check whether Facebook displays views for it; "
+                      "reactions, comments, and shares cannot be used as view counts."}
 
 
 async def collect_views(email: str, posts: list[dict], *, hosted: bool, progress, partial) -> list[dict]:

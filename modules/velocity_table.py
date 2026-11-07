@@ -6,6 +6,21 @@ from modules.client_report import format_time
 from modules.velocity_tracking import SHOWN_RUNS, card_posts
 
 
+VIRAL_VIEW_THRESHOLD = 500_000
+VIRAL_VIEW_DELTA_THRESHOLD = 10_000
+VIRAL_GROWTH_MULTIPLIER = 2
+
+
+def _is_viral_velocity(prior: int, current: int, delta: int, earlier: int | None) -> bool:
+    if current > VIRAL_VIEW_THRESHOLD or delta >= VIRAL_VIEW_DELTA_THRESHOLD:
+        return True
+    if prior > 0 and delta >= prior * VIRAL_GROWTH_MULTIPLIER:
+        return True
+    if earlier is not None and earlier > 0 and delta >= earlier * VIRAL_GROWTH_MULTIPLIER and delta >= 50:
+        return True
+    return False
+
+
 def view_status(values: list[int | None]) -> str | None:
     # Require consecutive successful checks. Missing views must never imply death
     # or leave an old status looking current.
@@ -21,7 +36,9 @@ def view_status(values: list[int | None]) -> str | None:
     delta = recent[-1] - recent[-2]
     earlier = recent[-2] - recent[-3] if len(recent) == 3 else None
     if delta > 0:
-        return "alive" if earlier is None or delta >= earlier else "dying"
+        if earlier is None or delta >= earlier:
+            return "Viral" if _is_viral_velocity(recent[-2], recent[-1], delta, earlier) else "alive"
+        return "dying"
     return "dying" if earlier is not None and earlier > 0 else "dead"
 
 
@@ -66,7 +83,7 @@ def velocity_card_sheet(card: dict) -> str:
             cells.append(f'<td title="{escape(title, quote=True)}">{escape(label)}</td>')
         cells += ["<td></td>"] * (SHOWN_RUNS - len(cells))
         status = view_status(values)
-        classes = {"alive": "live", "dying": "slowing", "dead": "dead"}
+        classes = {"Viral": "viral", "alive": "live", "dying": "slowing", "dead": "dead"}
         badge = (f'<span class="crt-status crt-status--{classes[status]}">{status}</span>' if status else
                  '<span class="crt-muted" title="Needs two consecutive view counts">—</span>')
         change = views_change_percent(values)
@@ -94,7 +111,7 @@ def velocity_card_sheet(card: dict) -> str:
         '<section class="crt-sheet crt-sheet--compact" aria-label="Velocity Tracker">'
         '<div class="crt-table-wrap"><table class="crt-table"><thead>' + head + '</thead><tbody>'
         + "".join(body) + '</tbody></table></div>'
-        '<div class="crt-key"><span><b>alive</b> views growing</span><span><b>dying</b> view gains shrinking</span>'
+        '<div class="crt-key"><span><b>Viral</b> views surging significantly</span><span><b>alive</b> views growing</span><span><b>dying</b> view gains shrinking</span>'
         '<span><b>dead</b> no view growth</span></div>'
         '<p class="crt-note">Column headings show when each run completed (UTC). Counts are the views Facebook displays; '
         'rounded counts remain approximate. Unavailable means no view count could be read. '

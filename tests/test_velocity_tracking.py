@@ -70,6 +70,39 @@ class VelocityTestCase(unittest.TestCase):
 
 
 class VelocityStoreTests(VelocityTestCase):
+    def test_approved_users_see_existing_teammate_cards_and_saved_results(self):
+        own = store.add_card(self.db, "owner@example.com", "My card")[0]
+        team = store.add_card(self.db, "other@example.com", "Team card", post_url())[0]
+        store.add_card(self.db, "outside@example.com", "Unapproved account")
+        post = store.card_posts(team)[0]
+        store.save_run(self.db, "other@example.com", team["id"], {
+            "id": "a" * 64, "at": "2026-11-07T01:00:00+00:00",
+            "results": [{"post_id": post["id"], "views": 250, "outcome": "ok"}],
+        })
+        original = deepcopy(self.db.rows)
+        with patch("modules.auth.allowed_emails", return_value={"owner@example.com", "other@example.com"}):
+            cards = store.load_workspace_cards(self.db, "owner@example.com")
+            self.assertEqual([card["name"] for card in cards], ["My card", "Team card"])
+            self.assertEqual(cards[0], own)
+            self.assertTrue(cards[1]["shared"])
+            self.assertEqual(cards[1]["runs"][0]["results"][0]["views"], 250)
+            self.assertEqual(len(store.load_workspace_cards(self.db, "other@example.com")), 2)
+            with self.assertRaises(PermissionError):
+                store.load_workspace_cards(self.db, "outside@example.com")
+        self.assertEqual(self.db.rows, original)
+        self.assertEqual(store.load_cards(self.db, "owner@example.com"), [own])
+
+    def test_shared_legacy_cards_with_the_same_id_have_distinct_display_ids(self):
+        legacy = {"id": "a" * 64, "name": "Velocity tracking card", "url": post_url()}
+        for email in ("owner@example.com", "other@example.com"):
+            self.db.rows["sensemaker_velocity_tracking/" + library_owner_id(email)] = {"cards": [legacy]}
+        with patch("modules.auth.allowed_emails", return_value={"owner@example.com", "other@example.com"}):
+            cards = store.load_workspace_cards(self.db, "owner@example.com")
+            again = store.load_workspace_cards(self.db, "owner@example.com")
+        self.assertEqual(cards, again)
+        self.assertEqual(len({card["id"] for card in cards}), 2)
+        self.assertEqual(cards[1]["name"], "Velocity tracking card 1")
+
     def test_rename_rejects_invalid_names_other_accounts_and_removed_cards(self):
         card = store.add_card(self.db, "owner@example.com", "Original", post_url())[0]
         original = deepcopy(self.db.rows)
@@ -86,7 +119,7 @@ class VelocityStoreTests(VelocityTestCase):
             store.rename_card(self.db, "owner@example.com", card["id"], "New name")
         self.assertEqual(store.load_cards(self.db, "owner@example.com"), [])
 
-    def test_cards_survive_reload_are_private_and_enforce_limit_against_saved_state(self):
+    def test_cards_survive_reload_remain_creator_owned_and_enforce_limit_against_saved_state(self):
         for index in range(10):
             store.add_card(self.db, " OWNER@example.com ", f"Post {index}", post_url(index))
         self.assertEqual(len(store.load_cards(self.db, "owner@example.com")), 10)
@@ -215,6 +248,42 @@ class VelocityUITests(VelocityTestCase):
         app = AppTest.from_string(self.script).run()
         self.assertFalse(list(app.exception))
         return app
+
+    def test_teammate_card_is_visible_read_only_and_survives_own_card_creation(self):
+        team = store.add_card(self.db, "other@example.com", "Team monitoring", post_url())[0]
+        post = store.card_posts(team)[0]
+        store.save_run(self.db, "other@example.com", team["id"], {
+            "id": "a" * 64, "at": "2026-11-07T01:00:00+00:00",
+            "results": [{"post_id": post["id"], "views": 250, "outcome": "ok"}],
+        })
+        with patch("modules.auth.allowed_emails", return_value={"owner@example.com", "other@example.com"}):
+            shared = store.load_workspace_cards(self.db, "owner@example.com")[0]
+            app = self.app()
+            app.button(key=f"{self.key}_open_{shared['id']}").click().run()
+            self.assertFalse(list(app.exception))
+            self.assertTrue(any(">250</td>" in element.proto.body for element in app.get("html")))
+            self.assertFalse({"Run", "Save name", "Remove card", "Add post", "Remove post"}
+                             & {button.label for button in app.button})
+            self.assertTrue(any("View only" in caption.value for caption in app.caption))
+            app.button(key=f"{self.key}_create").click().run()
+            self.assertFalse(list(app.exception))
+            self.assertIn(f"{self.key}_open_{shared['id']}", [button.key for button in app.button])
+            self.assertEqual(len(store.load_cards(self.db, "owner@example.com")), 1)
+            store.rename_card(self.db, "other@example.com", team["id"], "Updated team card")
+            app.button(key=f"{self.key}_refresh").click().run()
+            self.assertEqual(app.button(key=f"{self.key}_open_{shared['id']}").label, "Open Updated team card")
+
+    def test_teammate_cards_do_not_use_own_limit_and_are_hidden_after_allowlist_removal(self):
+        for index in range(10):
+            store.add_card(self.db, "other@example.com", f"Team card {index}")
+        with patch("modules.auth.allowed_emails", return_value={"owner@example.com", "other@example.com"}) as allowed:
+            app = self.app()
+            self.assertFalse(app.button(key=f"{self.key}_create").disabled)
+            self.assertEqual(len([button for button in app.button if button.label.startswith("Open Team card")]), 10)
+            allowed.return_value = {"owner@example.com"}
+            app.run()
+            self.assertFalse(list(app.exception))
+            self.assertFalse(any(button.label.startswith("Open Team card") for button in app.button))
 
     def test_rename_updates_cover_and_survives_a_new_session(self):
         card = store.add_card(self.db, "owner@example.com", url=post_url())[0]

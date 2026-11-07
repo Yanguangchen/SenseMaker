@@ -268,6 +268,7 @@
   font-weight: 700;
 }
 
+.crt-status--viral { background: #8c1d18; color: #fff; }
 .crt-status--live { background: #f7dfdf; color: var(--crt-red); }
 .crt-status--slowing { background: #f5ecd5; color: #7d5f12; }
 .crt-status--dead { background: #e7e8e5; color: var(--crt-grey); }

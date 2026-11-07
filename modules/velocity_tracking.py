@@ -1,4 +1,4 @@
-"""Account-scoped Facebook cards and their durable view-count runs."""
+"""Creator-owned Facebook cards with shared viewing for approved users."""
 
 from __future__ import annotations
 
@@ -53,6 +53,31 @@ def _ref(db: Any, email: str) -> Any:
 
 def load_cards(db: Any, email: str) -> list[dict[str, Any]]:
     return (_ref(db, email).get(timeout=15, retry=None).to_dict() or {}).get("cards", [])
+
+
+def load_workspace_cards(db: Any, email: str) -> list[dict[str, Any]]:
+    """Read approved teammates' cards without moving records or sharing logins.
+
+    Mutations and workers still use load_cards, which reads only the creator's
+    records. Shared display IDs also separate legacy cards with identical IDs.
+    """
+    from modules.auth import allowed_emails
+
+    owners = {library_owner_id(owner): owner for owner in allowed_emails()}
+    viewer = library_owner_id(email)
+    if viewer not in owners:
+        raise PermissionError("Sign in with an approved account to view velocity cards.")
+    cards = list(load_cards(db, email))
+    for owner_id in sorted(owners):
+        if owner_id == viewer:
+            continue
+        for index, card in enumerate(load_cards(db, owners[owner_id]), 1):
+            shared = {**card, "id": hashlib.sha256(f"{owner_id}:{card['id']}".encode()).hexdigest(),
+                      "shared": True, "owner_id": owner_id}
+            if card.get("name", "Velocity tracking card") == "Velocity tracking card":
+                shared["name"] = f"Velocity tracking card {index}"
+            cards.append(shared)
+    return cards
 
 
 def _post(url: str) -> dict[str, str]:

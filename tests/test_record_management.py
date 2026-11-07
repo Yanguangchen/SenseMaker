@@ -712,6 +712,27 @@ class RecordManagementUITests(unittest.TestCase):
         self.assertNotIn("record_manager_pending", self.app.session_state)
         self.delete.assert_not_called()
 
+    def test_unsaved_last_collected_dataset_persists_on_load(self):
+        with patch("modules.record_management_ui.upsert_post") as upsert:
+            app = AppTest.from_string(self.script)
+            app.session_state["last_collected_dataset"] = {
+                "id": "fb-run-1",
+                "title": "Facebook · 07 Nov 2026 20:00",
+                "rows": [
+                    {"url": "https://www.facebook.com/groups/example/posts/101", "raw_text": "Post 101", "source_type": "container_post"},
+                    {"url": "https://www.facebook.com/groups/example", "raw_text": "Warning", "source_type": "batch_warning"},
+                ],
+                "saved": False,
+            }
+            app.run()
+            self.assertFalse(app.exception)
+            upsert.assert_called_once()
+            saved_payload = upsert.call_args.args[1]
+            self.assertEqual(saved_payload["url"], "https://www.facebook.com/groups/example/posts/101")
+            self.assertEqual(saved_payload["custom_title"], "Facebook · 07 Nov 2026 20:00")
+            self.assertTrue(app.session_state["last_collected_dataset"]["saved"])
+            self.assertEqual(app.session_state["record_manager_last_collection_id"], "fb-run-1")
+
 
 if __name__ == "__main__":
     unittest.main()

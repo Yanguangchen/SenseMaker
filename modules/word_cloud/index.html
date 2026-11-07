@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Interactive word cloud</title>
+  <link rel="stylesheet" href="./cloud.css">
+</head>
+<body>
+  <main class="cloud-card" aria-label="Interactive word cloud">
+    <div class="toolbar">
+      <span id="hint">Select a word to explore its source text</span>
+      <div class="actions">
+        <button id="motion" type="button" aria-pressed="false">Pause motion</button>
+        <button id="reset" type="button">Reset layout</button>
+      </div>
+    </div>
+    <div id="cloud" role="group" aria-label="Words sized by frequency" aria-describedby="hint"></div>
+    <section id="detail" aria-label="Selected word" aria-live="polite">
+      <p class="empty">Select any word for its frequency and source examples. You can also use Tab and Enter.</p>
+    </section>
+  </main>
+  <script type="module" src="./cloud.js"></script>
+</body>
+</html>

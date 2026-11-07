@@ -22,6 +22,9 @@ class ViewCountTests(unittest.TestCase):
         self.assertEqual(parse_views(["1.2K views", "Views: 1,200"])[0], 1200)
         self.assertEqual(parse_views(["0 views"])[0], 0)
         self.assertEqual(parse_views(["3M video views"])[0], 3_000_000)
+        self.assertEqual(parse_views(["1.2K views · 45 reactions · 8 comments"])[0], 1200)
+        self.assertEqual(parse_views(["45 reactions\n1.2K views\n8 comments"])[0], 1200)
+        self.assertEqual(parse_views(["Views:\n1,200"])[0], 1200)
         for labels in (["12 likes", "3 comments", "50 plays"], ["We got 1.2K views today"],
                        ["100 views", "200 views"], [], ["views"]):
             self.assertEqual(parse_views(labels), (None, ""))
@@ -89,7 +92,7 @@ class ViewDOMTests(unittest.IsolatedAsyncioTestCase):
         await self.playwright.stop()
 
     async def load(self, body, url=URL):
-        await self.page.route("**/*", lambda route: route.fulfill(status=200, content_type="text/html", body=body))
+        await self.page.route("**/*", lambda route: route.fulfill(status=200, content_type="text/html; charset=utf-8", body=body))
         await self.page.goto(url)
 
     async def test_requested_post_excludes_recommendations_comments_and_message_quotes(self):
@@ -142,6 +145,47 @@ class ViewDOMTests(unittest.IsolatedAsyncioTestCase):
         page.url = "https://www.facebook.com/checkpoint/123"
         with self.assertRaisesRegex(FacebookLoginError, "Reconnect Facebook"):
             await read_post_views(page, URL)
+
+    async def test_photo_viewer_is_identified_without_a_permalink_and_ignores_comments(self):
+        url = "https://www.facebook.com/photo?fbid=1906718530693623"
+        await self.load('''<main role="main"><div role="dialog">
+            <img width="600" height="400" alt="Photo">
+            <div data-ad-preview="message">We reached <span>9M views</span></div>
+            <div>1.2K views · 45 reactions · 8 comments</div>
+            <article role="article" aria-label="Comment by Someone"><span>900 views</span></article>
+            <article role="article"><a href="?fbid=1906718530693623&comment_id=55">Comment</a>
+                <span>700 views</span></article>
+            </div></main><article role="article"><span>3M views</span></article>''', url)
+        snapshot = await self.page.evaluate(VIEW_LABELS_JS, url)
+        self.assertTrue(snapshot["matched"])
+        self.assertEqual(parse_views(snapshot["labels"])[0], 1200, snapshot)
+        self.assertEqual((await read_post_views(self.page, url))["views"], 1200)
+
+    async def test_photo_without_public_views_is_distinct_from_an_unidentified_post(self):
+        url = "https://www.facebook.com/photo?fbid=1906718530693623"
+        await self.load('<main role="main"><img width="600" height="400" alt="Photo">'
+                        '<span>25 reactions</span><span>8 comments</span></main>', url)
+        with patch.object(self.page, "wait_for_timeout", new=AsyncMock()):
+            result = await read_post_views(self.page, url)
+        self.assertEqual(result["outcome"], "unavailable")
+        self.assertEqual(result["reason_code"], "views_not_shown")
+        self.assertIsNone(result["views"])
+        await self.page.unroute("**/*")
+        await self.load('<main role="main"><img width="600" height="400" alt="Photo">'
+                        '<article role="article"><a href="/other/posts/999">Other post</a>'
+                        '<span>90M views</span></article></main>', url)
+        with patch.object(self.page, "wait_for_timeout", new=AsyncMock()):
+            result = await read_post_views(self.page, url)
+        self.assertEqual(result["outcome"], "error")
+        self.assertEqual(result["reason_code"], "post_not_identified")
+        self.assertIsNone(result["views"])
+
+    async def test_photo_login_overlay_requires_reconnecting(self):
+        url = "https://www.facebook.com/photo?fbid=1906718530693623"
+        await self.load('<main role="main"><img width="600" height="400" alt="Photo">'
+                        '<input type="password"><span>100 views</span></main>', url)
+        with self.assertRaisesRegex(FacebookLoginError, "Reconnect Facebook"):
+            await read_post_views(self.page, url)
 
 
 if __name__ == "__main__":
