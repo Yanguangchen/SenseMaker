@@ -6,7 +6,7 @@ import hashlib
 import re
 from datetime import datetime, timezone
 from secrets import token_hex
-from typing import Any
+from typing import Any, Callable
 from urllib.parse import parse_qs, urlencode, urlsplit, urlunsplit
 
 from firebase_admin import firestore
@@ -20,6 +20,7 @@ MAX_CARDS = 10
 MAX_POSTS_PER_CARD = 10
 MAX_NAME_CHARS = 120
 SHOWN_RUNS = 8
+DEFAULT_NAME = "Velocity tracking card"
 
 
 def normalize_post_url(value: str) -> str:
@@ -70,10 +71,15 @@ def card_posts(card: dict[str, Any]) -> list[dict[str, str]]:
     return []
 
 
-def add_card(db: Any, email: str, name: str = "", url: str = "") -> list[dict[str, Any]]:
-    name = " ".join(name.split()) or "Velocity tracking card"
+def _card_name(name: str) -> str:
+    name = " ".join(str(name or "").split())
     if len(name) > MAX_NAME_CHARS:
         raise ValueError(f"Use a card name of at most {MAX_NAME_CHARS} characters.")
+    return name
+
+
+def add_card(db: Any, email: str, name: str = "", url: str = "") -> list[dict[str, Any]]:
+    name = _card_name(name) or DEFAULT_NAME
     row = {"id": token_hex(32), "name": name, "posts": [_post(url)] if url.strip() else [],
            "created_at": datetime.now(timezone.utc).isoformat()}
     ref = _ref(db, email)
@@ -101,18 +107,17 @@ def remove_post(db: Any, email: str, card_id: str, post_id: str) -> list[dict[st
     return _edit_posts(db, email, card_id, remove_id=post_id)
 
 
+def rename_card(db: Any, email: str, card_id: str, name: str) -> list[dict[str, Any]]:
+    """Rename one card; its posts and saved runs are untouched."""
+    name = _card_name(name)
+    if not name:
+        raise ValueError("Enter a card name.")
+    return _change_card(db, email, card_id, lambda card: {**card, "name": name})
+
+
 def _edit_posts(db: Any, email: str, card_id: str, *, post: dict[str, str] | None = None,
                 remove_id: str | None = None) -> list[dict[str, Any]]:
-    if not re.fullmatch(r"[a-f0-9]{64}", card_id):
-        raise ValueError("Choose a saved velocity card.")
-    ref = _ref(db, email)
-
-    @firestore.transactional
-    def save(transaction: Any) -> list[dict[str, Any]]:
-        cards = (ref.get(transaction=transaction, timeout=15, retry=None).to_dict() or {}).get("cards", [])
-        card = next((row for row in cards if row["id"] == card_id), None)
-        if card is None:
-            raise ValueError("This card no longer exists. Refresh cards & checks.")
+    def change(card: dict[str, Any]) -> dict[str, Any]:
         posts = card_posts(card)
         if post is not None:
             if any(row["id"] == post["id"] for row in posts):
@@ -124,6 +129,25 @@ def _edit_posts(db: Any, email: str, card_id: str, *, post: dict[str, str] | Non
             posts = [row for row in posts if row["id"] != remove_id]
         changed = {key: value for key, value in card.items() if key not in {"url", "source_url"}}
         changed["posts"] = posts
+        return changed
+
+    return _change_card(db, email, card_id, change)
+
+
+def _change_card(db: Any, email: str, card_id: str,
+                 change: Callable[[dict[str, Any]], dict[str, Any]]) -> list[dict[str, Any]]:
+    """Apply ``change`` to the saved card inside a transaction, preserving concurrent edits."""
+    if not re.fullmatch(r"[a-f0-9]{64}", card_id):
+        raise ValueError("Choose a saved velocity card.")
+    ref = _ref(db, email)
+
+    @firestore.transactional
+    def save(transaction: Any) -> list[dict[str, Any]]:
+        cards = (ref.get(transaction=transaction, timeout=15, retry=None).to_dict() or {}).get("cards", [])
+        card = next((row for row in cards if row["id"] == card_id), None)
+        if card is None:
+            raise ValueError("This card no longer exists. Refresh cards & checks.")
+        changed = change(card)
         updated = [changed if row["id"] == card_id else row for row in cards]
         transaction.set(ref, {"cards": updated})
         return updated

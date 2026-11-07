@@ -1,5 +1,6 @@
 """Durable card runs, views-only tables, and background failure recovery."""
 
+import re
 from types import SimpleNamespace
 import unittest
 from unittest.mock import AsyncMock, patch
@@ -7,7 +8,7 @@ from unittest.mock import AsyncMock, patch
 from modules import velocity_jobs as jobs, velocity_tracking as store
 from modules.facebook_session import FacebookLoginError
 from modules.saved_links import library_owner_id
-from modules.velocity_table import velocity_card_sheet, view_status
+from modules.velocity_table import format_percent, velocity_card_sheet, view_change, view_status
 from tests import test_velocity_tracking as fixtures
 
 VelocityTestCase = fixtures.VelocityTestCase
@@ -65,6 +66,37 @@ class RunStoreTests(VelocityTestCase):
         self.assertNotIn("999", sheet)
         self.assertNotIn('class="crt-status ', sheet)
         self.assertIn("Post was not included in this run", sheet)
+
+    def test_columns_are_headed_by_run_time_and_change_column_follows_status(self):
+        card = store.add_card(self.db, EMAIL, url=post_url())[0]
+        card = store.add_post(self.db, EMAIL, card["id"], post_url(2))[0]
+        card["runs"] = [run_for(card, 1, 100), run_for(card, 2, 250)]
+        card["runs"][1]["results"][1].update(views=None, outcome="unavailable", reason="No views shown here")
+        sheet = velocity_card_sheet(card)
+        headings = re.findall(r"<th scope=col[^>]*>(.*?)</th>", sheet)
+        self.assertEqual(headings[0], "Provoker's post")
+        self.assertEqual(re.sub(r"<[^>]+>", "", headings[1]), "07 Nov 2026 01:01 UTC")
+        self.assertEqual(re.sub(r"<[^>]+>", "", headings[2]), "07 Nov 2026 01:02 UTC")
+        self.assertEqual(headings[3:9], ["Not run yet"] * 6)
+        self.assertEqual(headings[9:], ["Status", "% change"])
+        self.assertNotIn("Check ", sheet)
+        self.assertIn('title="Run 2 · 07 Nov 2026 · 01:02 UTC"', sheet)
+        first, second = sheet.split("<tbody>")[1].split("</tr>")[:2]
+        self.assertIn('alive</span></td><td title="From 100 views (07 Nov 2026 · 01:01 UTC) to 250 views', first)
+        self.assertIn('class="crt-change crt-up">+150%</span>', first)
+        # The latest run has no count, so no stale change and the reason is visible.
+        self.assertIn('<div class="crt-reason">Latest run: No views shown here</div>', second)
+        self.assertNotIn("crt-change", second)
+        self.assertIn('colspan="11"', velocity_card_sheet({"posts": []}))
+
+    def test_change_runs_from_earliest_count_to_latest_run(self):
+        for values, expected in (([100, 250], (0, 150.0)), ([None, 100, 50], (1, -50.0)),
+                                 ([100, None, 120], (0, 20.0)), ([100, None], None), ([100], None), ([], None),
+                                 ([None, None, 100], None), ([0, 0], (0, 0.0)), ([0, 5], (0, None))):
+            with self.subTest(values=values):
+                self.assertEqual(view_change(values), expected)
+        self.assertEqual([format_percent(value) for value in (150.0, -2.34, 0.01, 9.44, -1234.0)],
+                         ["+150%", "-2.3%", "0%", "+9.4%", "-1,234%"])
 
     def test_status_uses_consecutive_counts_and_handles_real_zero(self):
         for values, status in (([100], None), ([100, 200], "alive"), ([100, 200, 220], "dying"),

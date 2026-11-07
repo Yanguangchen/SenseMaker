@@ -166,12 +166,13 @@ Open **Velocity Tracking** in the left toolbar:
 
 1. Click **Create velocity tracking card** to create an empty paper notepad. No link or name is required. Click anywhere on a card to open its table in a matching notepad modal.
 2. Save up to **10 cards**. Inside the open notepad, enter a Facebook URL under **Provoker's post** and click **Add post** whenever ready. Each table can hold up to **10 posts**, one per row.
-3. Each table has **Provoker's post**, **Check 1** through **Check 8**, and **Status**. Status is **alive** (still gaining), **dying** (gains shrinking), or **dead** (no growth across checks).
-4. Click **Run** above a card’s table to visit each saved Facebook post using your Facebook connection from **Scrape Data**. Each run checks **views only** and automatically saves a new check in Firestore. You can switch pages while it runs.
-5. **Refresh cards & checks** reloads your saved cards and results. The table shows the latest eight runs; older runs remain saved in Firestore.
-6. Use **Manage posts → Remove post** to remove a row, or **Remove card** to remove the table. Collected posts and check history are kept.
+3. Each table has **Provoker's post**, one column per run headed by the date and time it ran (UTC; up to eight), **Status** and **% change**. Status is **alive** (still gaining), **dying** (gains shrinking), or **dead** (no growth across checks). **% change** compares the earliest view count shown with the latest run's count.
+4. To rename a card, open it, expand **Rename card**, type a new name and click **Save name**. Posts and saved runs are kept.
+5. Click **Run** above a card’s table to visit each saved Facebook post using your Facebook connection from **Scrape Data**. Each run checks **views only** and automatically saves a new check in Firestore. You can switch pages while it runs.
+6. **Refresh cards & checks** reloads your saved cards and results. The table shows the latest eight runs; older runs remain saved in Firestore.
+7. Use **Manage posts → Remove post** to remove a row, or **Remove card** to remove the table. Collected posts and check history are kept.
 
-Empty cards can be left without links. Added posts show blank checks until you run the card. **Unavailable** means no view count could be read; **Failed** means the post could not be checked. Neither is counted as zero. Rounded Facebook view counts remain approximate. Status needs two consecutive view counts and compares the view gains between runs.
+Empty cards can be left without links. Added posts show blank checks until you run the card. **Unavailable** means no view count could be read; **Failed** means the post could not be checked. Neither is counted as zero. When the latest run has no count, the reason appears under the post link. Facebook usually shows view counts only on videos and reels, so text and photo posts are normally Unavailable. Rounded Facebook view counts remain approximate. Status needs two consecutive view counts and compares the view gains between runs.
 
 Links and runs are private to your account. If saving fails, use **Retry saving check** to save the same results without scraping or adding a duplicate check. Comments and likes are not collected by velocity runs yet.
 

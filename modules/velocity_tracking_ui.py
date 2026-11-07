@@ -29,8 +29,8 @@ def _open_card(email: str, card_id: str) -> None:
 
 
 def _card_name(card: dict, index: int) -> str:
-    name = card.get("name", "Velocity tracking card")
-    return f"Velocity tracking card {index}" if name == "Velocity tracking card" else name
+    name = card.get("name", store.DEFAULT_NAME)
+    return f"{store.DEFAULT_NAME} {index}" if name == store.DEFAULT_NAME else name
 
 
 def _show_notice(key: str) -> None:
@@ -105,6 +105,30 @@ def _run_progress(email: str, job_id: str) -> None:
     st.progress(job.completed / len(job.posts), text=job.message)
 
 
+def _rename_form(email: str, card: dict, index: int, state: dict, key: str) -> None:
+    card_key = f"{key}_{card['id']}"
+    # A new generation shows the saved name again after a rename or a refresh.
+    generation = st.session_state.get(f"{card_key}_name_generation", 0)
+    with st.expander("Rename card"):
+        with st.form(f"{card_key}_rename_{generation}", border=False):
+            name = st.text_input("Card name", value=_card_name(card, index), max_chars=store.MAX_NAME_CHARS,
+                                 key=f"{card_key}_name_{generation}")
+            submitted = st.form_submit_button("Save name", disabled=state["error"])
+    if not submitted:
+        return
+    try:
+        state["cards"] = store.rename_card(database.init_db(), email, card["id"], name)
+    except ValueError as exc:
+        st.error(str(exc))
+    except Exception:
+        log.exception("Velocity card could not be renamed")
+        st.error("The card could not be renamed. Refresh cards & checks before trying again.")
+    else:
+        st.session_state[f"{card_key}_name_generation"] = generation + 1
+        st.session_state[f"{key}_notice"] = "Card renamed."
+        st.rerun()
+
+
 def _render_card(email: str, card: dict, index: int, state: dict, key: str, *, hosted: bool) -> None:
     posts = store.card_posts(card)
     card_key = f"{key}_{card['id']}"
@@ -130,6 +154,7 @@ def _render_card(email: str, card: dict, index: int, state: dict, key: str, *, h
                 st.session_state[f"{key}_notice"] = "Card removed. Collected posts and checks are kept."
                 _close_card()
                 st.rerun()
+        _rename_form(email, card, index, state, key)
 
         if st.button("Run", key=f"{card_key}_run", type="primary", disabled=state["error"] or not posts or busy,
                      help="Check the displayed views for every saved post in this card and save a new check."):

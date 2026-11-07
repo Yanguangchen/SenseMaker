@@ -109,8 +109,9 @@ async def read_post_views(page, url: str) -> dict:
         if attempt < 7:
             await page.wait_for_timeout(1000)
     return {"views": None, "outcome": "unavailable", "reason": (
-        "Facebook did not display a view count for this post." if matched else
-        "The requested post could not be identified on the page.")}
+        "Facebook did not display a view count for this post. Facebook usually shows views only on videos and reels."
+        if matched else
+        "The post could not be identified on the page Facebook opened. Check that the link opens this post.")}
 
 
 async def collect_views(email: str, posts: list[dict], *, hosted: bool, progress, partial) -> list[dict]:

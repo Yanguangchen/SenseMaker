@@ -172,6 +172,28 @@ class VelocityStoreTests(VelocityTestCase):
         self.assertEqual((saved["id"], saved["name"]), (legacy["id"], legacy["name"]))
         self.assertEqual([post["url"] for post in store.card_posts(saved)], [post_url(), post_url(2)])
 
+    def test_rename_keeps_posts_and_runs_validates_and_stays_private(self):
+        card = store.add_card(self.db, "owner@example.com", url=post_url())[0]
+        other = store.add_card(self.db, "other@example.com")[0]
+        post = store.card_posts(card)[0]
+        store.save_run(self.db, "owner@example.com", card["id"], {
+            "id": "b" * 64, "at": "2026-11-07T01:00:00+00:00",
+            "results": [{"post_id": post["id"], "views": 100, "outcome": "ok"}]})
+        before = store.load_cards(self.db, "owner@example.com")[0]
+        saved = store.rename_card(self.db, "owner@example.com", card["id"], "  Border   clash  posts ")[0]
+        self.assertEqual(saved["name"], "Border clash posts")
+        self.assertEqual({k: v for k, v in saved.items() if k != "name"},
+                         {k: v for k, v in before.items() if k != "name"})
+        for name, message in (("   ", "Enter a card name"), ("x" * 121, "at most 120")):
+            with self.subTest(name=name), self.assertRaisesRegex(ValueError, message):
+                store.rename_card(self.db, "owner@example.com", card["id"], name)
+        with self.assertRaisesRegex(ValueError, "no longer exists"):
+            store.rename_card(self.db, "other@example.com", card["id"], "Someone else's")
+        with self.assertRaisesRegex(ValueError, "Choose a saved"):
+            store.rename_card(self.db, "owner@example.com", "not-an-id", "Name")
+        self.assertEqual(store.load_cards(self.db, "owner@example.com")[0]["name"], "Border clash posts")
+        self.assertEqual(store.load_cards(self.db, "other@example.com"), [other])
+
     def test_table_status_labels_are_alive_dying_or_dead(self):
         for values, expected in (((10, 20), "alive"), ((10, 30, 35), "dying"), ((10, 10, 10), "dead")):
             row = report_record({"url": post_url(), "checks": [
@@ -239,6 +261,26 @@ class VelocityUITests(VelocityTestCase):
         self.assertIn(f"{_get_collection_name()}/post", self.db.rows)
         fresh.button(key=f"{self.key}_remove_{card['id']}").click().run()
         self.assertEqual(len(store.load_cards(self.db, "owner@example.com")), 1)
+
+    def test_rename_card_from_notepad_updates_its_cover(self):
+        card = store.add_card(self.db, "owner@example.com")[0]
+        app = self.app()
+        app.button(key=f"{self.key}_open_{card['id']}").click().run()
+        name = app.text_input(key=f"{self.key}_{card['id']}_name_0")
+        self.assertEqual(name.value, "Velocity tracking card 1")
+        name.set_value("Border clash posts")
+        next(button for button in app.button
+             if button.key and f"{card['id']}_rename_0" in button.key).click().run()
+        self.assertFalse(list(app.exception))
+        self.assertEqual(store.load_cards(self.db, "owner@example.com")[0]["name"], "Border clash posts")
+        self.assertTrue(any("Card renamed" in message.value for message in app.success))
+        self.assertEqual(app.text_input(key=f"{self.key}_{card['id']}_name_1").value, "Border clash posts")
+        self.assertTrue(any("<h3>Border clash posts</h3>" in element.proto.body for element in app.get("html")))
+        app.text_input(key=f"{self.key}_{card['id']}_name_1").set_value("   ")
+        next(button for button in app.button
+             if button.key and f"{card['id']}_rename_1" in button.key).click().run()
+        self.assertTrue(any("Enter a card name" in error.value for error in app.error))
+        self.assertEqual(store.load_cards(self.db, "owner@example.com")[0]["name"], "Border clash posts")
 
     def test_failed_create_and_load_do_not_falsely_add_a_card(self):
         app = self.app()

@@ -249,9 +249,17 @@ html .st-key-sm_velocity_modal .crt-sheet {
   box-shadow: none;
   border-radius: 0;
 }
-html .st-key-sm_velocity_modal .crt-table { border-spacing: 0; min-width: 900px; table-layout: fixed; }
+html .st-key-sm_velocity_modal .crt-table { border-spacing: 0; min-width: 1040px; table-layout: fixed; }
 html .st-key-sm_velocity_modal .crt-table th:first-child,
 html .st-key-sm_velocity_modal .crt-table td:first-child { width: 210px; min-width: 210px; max-width: 210px; }
+/* Status and % change. */
+html .st-key-sm_velocity_modal .crt-table th:nth-last-child(-n+2) { width: 92px; }
+html .st-key-sm_velocity_modal .crt-run-date,
+html .st-key-sm_velocity_modal .crt-run-time { display: block; }
+html .st-key-sm_velocity_modal .crt-run-time { margin-top: 2px; font-weight: 400; color: #6f7468; }
+html .st-key-sm_velocity_modal .crt-table th.crt-run-empty { font-weight: 400; color: #8b897c; }
+html .st-key-sm_velocity_modal .crt-reason { margin-top: 4px; font-size: 11.5px; line-height: 1.4; color: #8a5a2b; }
+html .st-key-sm_velocity_modal .crt-change { font-weight: 700; font-variant-numeric: tabular-nums; white-space: nowrap; }
 html .st-key-sm_velocity_modal .crt-table th {
   padding: 13px 6px;
   color: #515b52;

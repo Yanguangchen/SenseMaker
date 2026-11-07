@@ -839,15 +839,22 @@ This immediately saves an empty card; no name or link is required. The cards are
 420 × 300 px on desktop (the Scrape Data card dimensions rotated 90 degrees). Click a card to open its
 table and controls in a matching modal. Up to **10 cards per account** are saved,
 and each card can hold **10 Facebook posts**, one per row. Add links inside a card whenever ready.
-The table columns are **Provoker's post**, **Check 1** through **Check 8**, then **Status**.
+The table columns are **Provoker's post**, one column per run headed by the date and time it ran (UTC; up to
+eight), then **Status** and **% change**. Columns that have not run yet read **Not run yet**. Open
+**Rename card** at the top of a notepad to give the card your own name (up to 120 characters); posts and
+saved runs are unchanged.
 Click **Run** above a card's table to check the displayed views on each saved post using your Facebook
 connection from **Scrape Data**. Each run automatically saves a check to Firestore. Status is **alive**,
-**dying**, or **dead**, calculated from view gains once two consecutive view counts exist.
+**dying**, or **dead**, calculated from view gains once two consecutive view counts exist. **% change**
+compares the earliest view count shown with the latest run's count; it stays blank when the latest run has
+no count, so an older figure never looks current.
 A post does not need a sentiment analysis or negative classification to be tracked.
 
 Cards without links show an empty table. Added posts have blank cells until their first run.
 **Unavailable** means no view count could be read; **Failed** means the post could not be checked. Neither
-is treated as zero or replaced by comments. Rounded Facebook counts remain approximate. Each column
+is treated as zero or replaced by comments. When the latest run has no count, the reason is shown under the
+post link. Facebook usually displays view counts only on videos and reels, so text and photo posts are
+normally Unavailable. Rounded Facebook counts remain approximate. Each column
 represents the same run across all rows. The latest eight runs appear in the table; earlier runs stay in
 the account's Firestore run archive. Comments and likes are not collected by velocity runs yet.
 
