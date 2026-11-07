@@ -314,6 +314,7 @@ class VelocityUITests(VelocityTestCase):
         app = self.app()
         app.button(key=f"{self.key}_open_{card['id']}").click().run()
         value = "Review <script>nothing executable</script>\nFollow up tomorrow"
+        app.button(key=f"{card_key}_edit_remark").click().run()
         app.text_area(key=f"{card_key}_remark_{first['id']}").set_value(value)
         self.db.fail_writes = True
         next(button for button in app.button if button.label == "Save remark").click().run()
@@ -329,9 +330,11 @@ class VelocityUITests(VelocityTestCase):
         self.assertIn("&lt;script&gt;nothing executable&lt;/script&gt;", tables[0])
         self.assertNotIn("<script>", tables[0])
         app.selectbox(key=f"{card_key}_remark_post").select(second["id"]).run()
+        app.button(key=f"{card_key}_edit_remark").click().run()
         self.assertEqual(app.text_area(key=f"{card_key}_remark_{second['id']}").value, "")
         fresh = self.app()
         fresh.button(key=f"{self.key}_open_{card['id']}").click().run()
+        fresh.button(key=f"{card_key}_edit_remark").click().run()
         self.assertEqual(fresh.text_area(key=f"{card_key}_remark_{first['id']}").value, value)
         fresh.text_area(key=f"{card_key}_remark_{first['id']}").set_value("")
         next(button for button in fresh.button if button.label == "Save remark").click().run()

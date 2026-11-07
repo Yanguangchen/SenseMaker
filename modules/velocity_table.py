@@ -50,6 +50,10 @@ def engagement_change_percent(values: list[int | None]) -> float | None:
     return 100 * (values[-1] - values[-2]) / values[-2]
 
 
+view_status = engagement_status
+views_change_percent = engagement_change_percent
+
+
 def velocity_card_sheet(card: dict) -> str:
     runs = card.get("runs", [])[-SHOWN_RUNS:]
     head = "<tr><th scope=col>Provoker's post</th>"

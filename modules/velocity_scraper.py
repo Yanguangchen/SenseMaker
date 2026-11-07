@@ -17,6 +17,7 @@ from modules.facebook_session import (
     facebook_storage_path, launch_facebook_browser,
 )
 from modules.velocity_tracking import normalize_post_url
+from modules.velocity_comment_analysis import MAX_COMMENTS, bounded_text
 
 log = logging.getLogger(__name__)
 _NUMBER = r"\d[\d.,]*(?:\s?[KkMm])?"
@@ -52,6 +53,7 @@ def parse_engagement(labels: list[str]) -> dict:
 # Only inspect the requested post's container. Exclude nested comments, post
 # message text and other articles; never take counts from another post.
 POST_ENGAGEMENT_JS = r"""requested => {
+    document.querySelectorAll('[data-sm-velocity-scope]').forEach(el => el.removeAttribute('data-sm-velocity-scope'));
     const identity = value => {
         try {
             const u = new URL(value, location.href);
@@ -127,6 +129,7 @@ POST_ENGAGEMENT_JS = r"""requested => {
         ? anchors.find(a => panel.contains(a) && a.innerText.trim() === 'View Post'
             && identity(a.href) && identity(a.href) !== finalId) : null;
     const containers = panel && !root.contains(panel) ? [root, panel] : [root];
+    containers.forEach(el => el.setAttribute('data-sm-velocity-scope', 'true'));
     const excluded = '[data-ad-preview="message"], [data-ad-comet-preview="message"], '
         + '[data-testid="post_message"], [data-testid*="comment"], [role="article"]';
     for (const container of containers) for (const el of container.querySelectorAll('span, div, [role="button"], [aria-label], [title]')) {
@@ -146,6 +149,69 @@ POST_ENGAGEMENT_JS = r"""requested => {
     }
     return {matched: true, labels: [...new Set(labels)], ...(parentLink ? {parent_url: parentLink.href} : {})};
 }"""
+
+
+# Read text only inside the post containers identified by POST_ENGAGEMENT_JS.
+# Author names, timestamps, action buttons and neighboring posts are excluded.
+POST_COMMENTS_JS = r"""limit => {
+    const visible = el => !!el.getClientRects().length && getComputedStyle(el).visibility !== 'hidden';
+    const roots = [...document.querySelectorAll('[data-sm-velocity-scope]')];
+    const containers = [...new Set(roots.flatMap(root => [...root.querySelectorAll(
+        '[aria-label^="Comment by"], [aria-label^="Reply by"], [data-testid="comment"], [role="article"]')]))]
+        .filter(el => visible(el) && (el.matches('[aria-label^="Comment by"], [aria-label^="Reply by"], [data-testid="comment"]')
+            || [...el.querySelectorAll('a[href]')].some(a => a.closest('[role="article"]') === el
+                && /[?&](?:comment_id|reply_comment_id)=/.test(a.href))));
+    const result = [];
+    for (const el of containers) {
+        const owned = node => !containers.some(other => other !== el && el.contains(other) && other.contains(node));
+        const explicit = [...el.querySelectorAll('[data-ad-comet-preview="comment"], [data-testid="comment_body"], [data-testid="comment-text"]')].filter(owned);
+        const bodies = explicit.length ? explicit : [...el.querySelectorAll('[dir="auto"]')]
+            .filter(node => owned(node) && !node.closest('a, button, [role="button"]')
+                && !node.querySelector('[dir="auto"], h3, a[role="link"]'));
+        const text = bodies.filter(visible).map(node => node.innerText.trim()).filter(Boolean).join('\n').slice(0, 2000);
+        if (!text) continue;
+        const link = [...el.querySelectorAll('a[href]')].find(a => owned(a) && /[?&](?:comment_id|reply_comment_id)=/.test(a.href));
+        const params = link ? new URL(link.href, location.href).searchParams : null;
+        result.push({id: params?.get('reply_comment_id') || params?.get('comment_id') || '', text});
+        if (result.length >= limit) break;
+    }
+    return result;
+}"""
+
+
+async def read_post_comments(page, url: str, total: int | None) -> dict:
+    """Read at most 20 displayed comments, with three scoped expansion clicks."""
+    comments, seen = [], set()
+    for attempt in range(4):
+        snapshot = await page.evaluate(POST_ENGAGEMENT_JS, url)
+        if snapshot.get("login_required") or not snapshot.get("matched"):
+            break
+        for comment in await page.evaluate(POST_COMMENTS_JS, MAX_COMMENTS):
+            text = bounded_text(comment.get("text", ""))
+            ident = comment.get("id") or text
+            if text and ident not in seen:
+                comments.append({"id": comment.get("id", ""), "text": text})
+                seen.add(ident)
+            if len(comments) >= MAX_COMMENTS:
+                break
+        if len(comments) >= MAX_COMMENTS or attempt == 3:
+            break
+        more = page.locator('[data-sm-velocity-scope]').get_by_role("button", name=re.compile(
+            r"^(?:View|See|Load) (?:(?:all|more|previous|earlier|\d+)\s+){1,3}comments(?:\s*\(\d+\))?$", re.I))
+        if not await more.count() and attempt == 0 and not comments and total:
+            # Some permalinks initially collapse their comments behind the count.
+            more = page.locator('[data-sm-velocity-scope]').get_by_role("button", name=re.compile(
+                rf"^{_NUMBER}\s+comments?$", re.I))
+        if not await more.count():
+            break
+        try:
+            await more.first.click(timeout=1500)
+        except Exception:
+            break  # Retain the sample already collected if an expansion fails.
+        await page.wait_for_timeout(500)
+    return {"comment_sample": comments, "comment_collection": {
+        "status": "ok" if comments else "empty" if total == 0 else "unavailable", "limit": MAX_COMMENTS,
+    }}
 
 
 async def _navigate(page, url: str, timeout: int) -> None:
@@ -218,6 +284,13 @@ async def collect_engagement(email: str, posts: list[dict], *, hosted: bool, pro
             try:
                 async with asyncio.timeout(55):
                     result = await read_post_engagement(page, post["url"])
+                # Keep successfully read totals even if comment collection fails.
+                try:
+                    async with asyncio.timeout(10):
+                        result.update(await read_post_comments(page, result.get("resolved_url", post["url"]), result.get("comments")))
+                except Exception as exc:
+                    log.warning("Velocity comments could not be read (%s)", type(exc).__name__)
+                    result.update(comment_sample=[], comment_collection={"status": "error", "limit": MAX_COMMENTS})
             except FacebookLoginError:
                 raise
             except Exception as exc:

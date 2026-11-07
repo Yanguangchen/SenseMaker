@@ -26,7 +26,7 @@ from modules.analysis_library import (
     select_history, select_records,
 )
 from modules.analysis_dataset_ui import render_dataset_editor
-from modules.recent_collection import collection_snapshot
+from modules.recent_collection import collection_snapshot, standard_dataset_title
 from modules.record_management_ui import render_record_management
 from modules.dataset_cards import (
     apply_dataset_card_theme, featured_datasets, local_dataset_date, render_dataset_cards, viewer_timezone,
@@ -1485,45 +1485,49 @@ def _render_reddit_settings() -> tuple[int, int]:
     return int(limit), int(comments)
 
 
-def _render_cloud_save(records: List[Dict[str, Any]], title_key: str, save_key: str, noun: str = "posts") -> None:
+def _render_cloud_save(records: List[Dict[str, Any]], title_key: str, save_key: str, noun: str = "posts",
+                       *, source: str = "Facebook") -> None:
+    recent = st.session_state.get("last_collected_dataset")
+    default_title = (str(recent.get("title") or "").strip()
+                     if isinstance(recent, dict) and str(recent.get("title") or "").strip()
+                     else standard_dataset_title(source))
     custom_title = st.text_input(
-        "Custom title",
+        "Dataset title (optional)",
         value=st.session_state.get(title_key, ""),
         key=title_key,
-        help="This title will be saved on each object uploaded to Firestore.",
+        placeholder=f"Default: {default_title}",
+        help="Leave blank to use the standardized dataset name automatically.",
     )
     if st.button("Save data to cloud", key=save_key):
         try:
-            if not custom_title.strip():
-                st.error("Please enter a custom title before saving.")
+            resolved_title = custom_title.strip() or default_title
+            write_summary = _write_results_to_firestore(records, custom_title=resolved_title)
+            confirmation = (
+                "Saved to Firestore: "
+                f"{write_summary['inserted']} {noun} "
+                f"(skipped: {write_summary['skipped']})."
+            )
+            if _focus_modal_open("facebook"):
+                st.session_state["facebook_save_confirmation"] = confirmation
+                _close_focus_modal()
+                st.rerun()
             else:
-                write_summary = _write_results_to_firestore(records, custom_title=custom_title)
-                confirmation = (
-                    "Saved to Firestore: "
-                    f"{write_summary['inserted']} {noun} "
-                    f"(skipped: {write_summary['skipped']})."
-                )
-                if _focus_modal_open("facebook"):
-                    st.session_state["facebook_save_confirmation"] = confirmation
-                    _close_focus_modal()
-                    st.rerun()
-                else:
-                    st.success(confirmation)
+                st.success(confirmation)
         except Exception as exc:
             error_text = str(exc).strip() or repr(exc)
             st.error(f"Firestore write failed: {error_text}")
 
 
-def _render_auto_save_title(key: str) -> str:
+def _render_auto_save_title(key: str, source: str = "Dataset") -> str:
     return st.text_input("Dataset title (optional)", key=key, max_chars=160,
-                         placeholder="Leave blank for a name with the source and collection time",
-                         help="Collected records save automatically. This title groups them in Sentiment Analysis and Clean & manage data.")
+                         placeholder=f"Leave blank for standardized name ({source} · YYYY-MM-DD HH:MM:SS UTC)",
+                         help="Collected records save automatically using the standardized nomenclature if left blank.")
 
 
 def _autosave_collection(collection: dict[str, Any], source: str, custom_title: str = "") -> None:
     """Attempt once per collection (or explicit retry), retaining results on failure."""
     save = collection.setdefault("cloud_save", {
-        "title": custom_title.strip() or f"{source} · {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}",
+        "title": custom_title.strip() or standard_dataset_title(source),
         "state": "pending", "count": 0,
     })
     # Removed X records must be saved too, to clear their previous text/analysis.
@@ -1959,7 +1963,7 @@ def _render_collect_controls(
         scrape_results = [r for r in scrape_results if r.get("source_type") not in NON_CONTENT_TYPES]
         st.write(f"**Records collected:** {len(scrape_results)}")
         if scrape_results:
-            _render_cloud_save(scrape_results, title_key, save_key)
+            _render_cloud_save(scrape_results, title_key, save_key, source=platform.title())
             st.dataframe(pd.DataFrame(scrape_results), use_container_width=True, hide_index=True)
             with st.expander("Raw JSON Output"):
                 st.json(scrape_results)
@@ -2032,7 +2036,7 @@ def _render_news_workspace() -> None:
         limit = limit_col.number_input("Articles per search", min_value=10, max_value=MAX_ARTICLES,
                                        value=50, step=10, key="news_limit")
 
-    custom_title = _render_auto_save_title("news_custom_title_value")
+    custom_title = _render_auto_save_title("news_custom_title_value", "Online news")
     if st.button("Search Google News", key="collect_news_articles", type="primary", use_container_width=True,
                  disabled=_collection_save_pending("news_scan")) and not _collection_save_pending("news_scan"):
         if not searches:
@@ -2179,8 +2183,8 @@ def _save_x_collection_draft() -> None:
 
 def _set_x_collection_step(step: int) -> None:
     _save_x_collection_draft()
-    if not st.session_state.get("x_dataset_name"):
-        return
+    if step >= 2 and not st.session_state.get("x_dataset_name", "").strip():
+        st.session_state["x_dataset_name"] = standard_dataset_title("X")
     if step == 3 and not st.session_state.get("x_collection_options", {}).get("searches"):
         return
     st.session_state["x_collection_step"] = step
@@ -2201,9 +2205,12 @@ def _render_x_collection_setup() -> dict[str, Any] | None:
     step = st.session_state.get("x_collection_step", 1)
     title = st.session_state.get("x_dataset_name", "")
     options = st.session_state.get("x_collection_options", {})
-    if step not in {1, 2, 3} or not title.strip():
+    if step not in {1, 2, 3}:
         step = 1
-    elif step == 3 and not options.get("searches"):
+    elif step >= 2 and not title.strip():
+        title = standard_dataset_title("X")
+        st.session_state["x_dataset_name"] = title
+    if step == 3 and not options.get("searches"):
         step = 2
     st.session_state["x_collection_step"] = step
     st.caption(f"Step {step} of 3 · Name your dataset → Choose options → Collect posts")
@@ -2212,11 +2219,11 @@ def _render_x_collection_setup() -> dict[str, Any] | None:
         with st.container(border=True, key="x_dataset_step"):
             st.markdown("#### 1. Name your dataset")
             name = st.text_input("Dataset name", value=title, key="x_custom_title_value", max_chars=160,
-                                 placeholder="e.g. Brand feedback — November",
-                                 help="Collected posts save automatically under this name, ready for analysis.")
+                                 placeholder="Leave blank for standardized name (X · YYYY-MM-DD HH:MM:SS UTC)",
+                                 help="Collected posts save automatically. Leave blank to use the standardized dataset name.")
             _save_x_collection_draft()
-            st.caption("Choose a name you will recognize in Sentiment Analysis. Reusing a name groups records together.")
-            st.button("Continue to options", key="x_name_next", type="primary", disabled=not name.strip(),
+            st.caption("Leave blank to use the standardized nomenclature automatically, or enter a custom name.")
+            st.button("Continue to options", key="x_name_next", type="primary",
                       on_click=_set_x_collection_step, args=(2,))
         return None
 
@@ -2440,7 +2447,7 @@ def _render_website_collect_step() -> None:
     st.caption(f"Collecting {len(urls)} page{'s' if len(urls) != 1 else ''}. Go back to change the links.")
     with st.expander(f"Links for this collection ({len(urls)})"):
         st.code("\n".join(urls))
-    custom_title = _render_auto_save_title("website_custom_title")
+    custom_title = _render_auto_save_title("website_custom_title", "Custom website")
     if st.button("Collect website pages", key="collect_website_pages", type="primary",
                  use_container_width=True,
                  disabled=not urls or _collection_save_pending("website_collection")) and not _collection_save_pending("website_collection"):

@@ -809,6 +809,7 @@ Analysis results use the layout of the client's appendix templates, auto-filled 
 | Tab | Filled from |
 |---|---|
 | **Comment Sentiment Analysis** | Negative (Anger + Anxiety), Neutral and Positive (Joy) shares; tone from the dominant emotion and topics; key insight, engagement quality, and threat level (High: review priority 8+ or an explicit boycott call; Medium: any Thailand signal or priority 5+) with the main risk |
+| **Word cloud** | Floating, draggable words from all analyzed records, including positive and neutral posts when there are no negative posts. Select a word for exact counts and source excerpts. Filter sentiment, switch English translations/original text, hide words, pause motion, or download the frequency CSV. Respects reduced-motion preferences. |
 | **Negative Post Reports** | One NPR per negative or flagged record (`NPR-` + the first 6 characters of its record ID): text capture, comments and views vs the prior check, sentiment across the post and its analysed comments, word cloud, and classification |
 
 **Download report (HTML)** saves sentiment analysis and every Negative Post Report as one page to share or print.
@@ -825,7 +826,7 @@ platform's comment total (Reddit's thread total, or the count shown on the captu
 reactions and shares when the page shows them, and the number of comments collected. Saving a post that is
 already stored adds a check without changing its text or analysis. Records saved before checks existed start
 with their original collection as Check 1. These collection checks support the negative-post report.
-The dedicated Velocity Tracking workspace has its own views-only card runs, described below.
+The dedicated Velocity Tracking workspace has its own likes + comments card runs, described below.
 
 Left blank for the analyst, as on the paper template: reach (not public on these platforms), the poster's
 account (not collected), time reported to the Core Team, crisis type, issue source, actions taken and the
@@ -844,29 +845,41 @@ All approved users can see each other's existing cards and saved results. Teamma
 controls. Use **Refresh cards & checks** to load another user's new cards or results. Shared cards do not
 use your own ten-card allowance, and Facebook login sessions remain private.
 Use **Rename card → Card name → Save name** inside the notepad to change its name.
-The table columns are **Provoker's post**, the completion date and time (UTC) of the latest eight runs,
-**Status**, then **Views change (%)**. Unused run columns show **—**.
-Click **Run** above a card's table to check the displayed views on each saved post using your Facebook
-connection from **Scrape Data**. Each run automatically saves a check to Firestore. Status is **alive**,
-**dying**, or **dead**, calculated from view gains once two consecutive view counts exist.
-**Views change (%)** compares the latest run with the previous run: `(latest − previous) / previous × 100`.
+Each notepad has **Velocity** and **Analysis** tabs. Velocity shows **Provoker's post**, the completion
+date and time (UTC) of the latest eight runs, **Status**, **Likes + comments change (%)**, and **Remark**.
+Unused run columns show **—**. Click **Run** to read likes/reactions and comment totals using your Facebook
+connection from **Scrape Data** (Browserbase when hosted). Each run saves their combined total to Firestore.
+Status is **alive**, **dying**, or **dead**, calculated from engagement gains once two consecutive totals exist.
+**Likes + comments change (%)** compares the latest run with the previous run: `(latest − previous) / previous × 100`.
 It shows **—** when either count is missing or the previous count is zero.
 A post does not need a sentiment analysis or negative classification to be tracked.
 
 Cards without links show an empty table. Added posts have blank cells until their first run.
-**Unavailable** means no view count could be read; **Failed** means the post could not be checked. Neither
-is treated as zero or replaced by comments. Rounded Facebook counts remain approximate. Each column
+**Unavailable** means one or both engagement counts could not be read; **Failed** means the post could not be checked. Neither
+is treated as zero. Rounded Facebook counts remain approximate. Each column
 represents the same run across all rows. The latest eight runs appear in the table; earlier runs stay in
-the account's Firestore run archive. Comments and likes are not collected by velocity runs yet.
+the account's Firestore run archive. Earlier view-count runs are retained but never compared with engagement totals.
+
+**Analysis** shows one row per post: **Negative** (red), **Neutral** (gray), **Positive** (green),
+**Remarks**, then **Word cloud**. Run collects up to **20 readable comment texts per post** from the same
+browser visit and analyzes them with the selected AI provider/model. This is a sample of comments
+Facebook displays, not a complete or representative census. Each text is bounded to 2,000 UTF-8 bytes.
+Anger/anxiety map to negative, joy to positive, and neutral stays neutral. Counts and percentages use
+only successfully analyzed comments; empty, unreadable, failed, and partial samples are labeled explicitly.
+The word cloud ranks AI-extracted topics by the number of sampled comments mentioning them.
+Use **Post for remark → Edit remarks** to open the notes modal, then **Save remark**. Notes survive later runs
+and appear in both tables; shared cards show saved analysis and notes with creator-only editing.
+The tab displays the latest run. Full samples and per-comment results remain in that run's archive;
+older analysis summaries are excluded from the card document to keep it within Firestore's size limit.
+Velocity comment analysis does not add records to Sentiment Analysis or reset the sentiment timeline.
 
 When a count is missing, **Why counts are unavailable** shows the saved reason and a link to the post.
-Photo viewers are supported, including layouts with comment articles. A photo or text post still needs
-a view count displayed by Facebook; reactions, comments, and shares cannot provide a view-based velocity.
-If the post cannot be identified or opened, the run reports **Failed**; if it opens without a readable view
-count, it reports **Unavailable**. A Facebook sign-in prompt asks you to reconnect in **Scrape Data**.
+Photo viewers are supported, including layouts with comment articles and links back to a parent post.
+If the post cannot be identified or opened, the run reports **Failed**; if it opens without both readable
+engagement counts, it reports **Unavailable**. A Facebook sign-in prompt asks you to reconnect in **Scrape Data**.
 
 Runs continue when switching pages. Use **Refresh cards & checks** to reload saved results. A failed
-Firestore save offers **Retry saving check**, which saves the same results without scraping again or
+Firestore save offers **Retry saving check**, which saves the same results without scraping or analyzing again or
 creating a duplicate check. **Manage posts → Remove post** removes a row;
 **Remove card** removes the preset. Collected posts and check history are kept. Existing single-post cards
 remain available and can accept more rows. Cards are independent of the datasets selected in Sentiment Analysis.

@@ -16,11 +16,13 @@ from modules.facebook_session import FacebookLoginError
 from modules.saved_links import library_owner_id
 from modules.velocity_scraper import collect_engagement
 from modules.velocity_metrics import METRIC
+from modules.config import get_ai_provider, get_ai_model
+from modules.velocity_comment_analysis import analyze_comments
 
 log = logging.getLogger(__name__)
 _lock = threading.Lock()
 _jobs: dict[str, "VelocityJob"] = {}
-BUSY = {"running", "saving", "save_failed"}
+BUSY = {"running", "analyzing", "saving", "save_failed"}
 
 
 @dataclass
@@ -52,8 +54,11 @@ def _save(email: str, job: VelocityJob) -> None:
         job.status = "complete"
 
 
-def start_run(email: str, card_id: str, *, hosted: bool) -> VelocityJob:
+def start_run(email: str, card_id: str, *, hosted: bool, provider: str | None = None,
+              model_name: str | None = None) -> VelocityJob:
     """Reload the saved links and start at most one pending run per account."""
+    provider = get_ai_provider(provider)
+    model_name = model_name or get_ai_model(provider)
     with _lock:
         owner = library_owner_id(email)
         previous = _jobs.get(owner)
@@ -67,7 +72,8 @@ def start_run(email: str, card_id: str, *, hosted: bool) -> VelocityJob:
         if not posts:
             raise ValueError("Add a Facebook post to this card before running it.")
         job = VelocityJob(token_hex(32), card_id, posts)
-        job.run = {"id": job.id, "started_at": datetime.now(timezone.utc).isoformat(), "metric": METRIC}
+        job.run = {"id": job.id, "started_at": datetime.now(timezone.utc).isoformat(), "metric": METRIC,
+                   "analysis_provider": provider, "analysis_model": model_name}
         _jobs[owner] = job
 
     def progress(completed: int, message: str) -> None:
@@ -97,6 +103,10 @@ def start_run(email: str, card_id: str, *, hosted: bool) -> VelocityJob:
                            "engagement": None, "outcome": "error",
                            "reason": "The browser stopped before this post could be checked."}
                           for post in job.posts if post["id"] not in checked)
+        job.status = "analyzing"
+        job.message = "Analyzing comment sentiment…"
+        analyze_comments(values, provider=provider, model_name=model_name,
+                         on_status=lambda message: progress(len(job.posts), f"Comment sentiment · {message}"))
         job.run.update(at=datetime.now(timezone.utc).isoformat(), results=values)
         job.status = "saving"
         job.message = "Saving check to Firestore…"

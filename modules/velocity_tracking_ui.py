@@ -13,17 +13,24 @@ from modules.saved_links import library_owner_id
 from modules.ui import show_running_glow
 from modules.velocity_table import velocity_card_sheet
 from modules.velocity_metrics import METRIC, engagement_count
+from modules.velocity_analysis_table import analysis_table
+from modules.config import get_ai_provider, get_ai_model
 
 log = logging.getLogger(__name__)
 PAPER_CSS = Path(__file__).parent / "theme" / "velocity-notepad.css"
 MODAL_KEY = "velocity_open_notepad"
+REMARK_MODAL_KEY = "velocity_open_remarks"
+ANALYSIS_TAB_KEY = "velocity_show_analysis"
 
 
 def _close_card() -> None:
     st.session_state.pop(MODAL_KEY, None)
+    st.session_state.pop(REMARK_MODAL_KEY, None)
+    st.session_state.pop(ANALYSIS_TAB_KEY, None)
 
 
 def _open_card(email: str, card_id: str) -> None:
+    _close_card()
     st.session_state[MODAL_KEY] = {"owner": library_owner_id(email), "card_id": card_id}
     # Streamlit supports one dialog at a time; source collectors stay mounted.
     st.session_state.pop("focus_workspace_modal", None)
@@ -50,8 +57,8 @@ def _render_cover(email: str, card: dict, index: int, key: str) -> None:
     name = _card_name(card, index)
     eyebrow = "SHARED VELOCITY" if card.get("shared") else "VELOCITY"
     job = jobs.latest_job(email)
-    running = job and job.card_id == card["id"] and job.status in {"running", "saving"}
-    detail = "Checking likes + comments…" if running else (f"Last run · {format_time(runs[-1]['at'])}" if runs else "Ready for your first check")
+    running = job and job.card_id == card["id"] and job.status in {"running", "analyzing", "saving"}
+    detail = job.message if running else (f"Last run · {format_time(runs[-1]['at'])}" if runs else "Ready for your first check")
     checks = "".join(f'<span class="sm-note-check{" is-filled" if i < len(runs) else ""}">{i + 1}</span>'
                      for i in range(store.SHOWN_RUNS))
     with st.container(key=f"sm_velocity_cover_{card['id']}"):
@@ -106,7 +113,7 @@ def _run_progress(email: str, job_id: str) -> None:
         st.rerun(scope="app")
         return
     job = jobs.latest_job(email)
-    if job is None or job.id != job_id or job.status not in {"running", "saving"}:
+    if job is None or job.id != job_id or job.status not in {"running", "analyzing", "saving"}:
         st.rerun(scope="app")
         return
     show_running_glow()
@@ -132,23 +139,38 @@ def _render_card_history(card: dict) -> None:
                        "Likes includes all Facebook reactions. Missing counts are not treated as zero.")
 
 
-def _render_remarks(email: str, card: dict, state: dict, key: str, card_key: str) -> None:
-    posts = store.card_posts(card)
-    if not posts:
-        return
-    with st.expander("Edit remarks"):
-        by_id = {post["id"]: post for post in posts}
-        post_id = st.selectbox("Post for remark", list(by_id), key=f"{card_key}_remark_post",
-                               format_func=lambda ident: by_id[ident]["url"])
-        with st.form(f"{card_key}_remark_form_{post_id}"):
-            remark = st.text_area("Remark", value=by_id[post_id].get("remark", ""),
-                                  key=f"{card_key}_remark_{post_id}", height=100,
-                                  max_chars=store.MAX_REMARK_CHARS,
-                                  placeholder="Add a note about this post…")
+def _close_remarks() -> None:
+    st.session_state.pop(REMARK_MODAL_KEY, None)
+    st.session_state[ANALYSIS_TAB_KEY] = True
+
+
+@st.dialog("Remarks", width="large", on_dismiss=_close_remarks)
+def _remarks_modal(email: str, key: str) -> None:
+    from modules.auth import allowed_emails, verify_access
+    try:
+        if verify_access(st.session_state.get("auth_token", ""), allowed_emails()) != email:
+            raise PermissionError()
+    except Exception:
+        _close_card()
+        st.rerun()
+    selection = st.session_state.get(MODAL_KEY, {})
+    state = st.session_state[key]
+    card = next((row for row in state["cards"] if row["id"] == selection.get("card_id") and not row.get("shared")), None)
+    post = next((row for row in store.card_posts(card) if row["id"] == st.session_state.get(REMARK_MODAL_KEY)), None) if card else None
+    if post is None or selection.get("owner") != library_owner_id(email):
+        _close_remarks()
+        st.rerun()
+    with st.container(key="sm_velocity_modal"):
+        st.caption(card["name"])
+        st.link_button("Open Facebook post", post["url"])
+        with st.form(f"{key}_remark_form_{card['id']}_{post['id']}"):
+            remark = st.text_area("Remark", value=post.get("remark", ""), height=180,
+                                  key=f"{key}_{card['id']}_remark_{post['id']}",
+                                  max_chars=store.MAX_REMARK_CHARS, placeholder="Add a note about this post…")
             save = st.form_submit_button("Save remark", disabled=state["error"])
         if save:
             try:
-                _update_owned_cards(state, store.save_remark(database.init_db(), email, card["id"], post_id, remark))
+                _update_owned_cards(state, store.save_remark(database.init_db(), email, card["id"], post["id"], remark))
             except ValueError as exc:
                 st.error(str(exc))
             except Exception:
@@ -156,7 +178,40 @@ def _render_remarks(email: str, card: dict, state: dict, key: str, card_key: str
                 st.error("The remark could not be saved. Your text is still here; try Save remark again.")
             else:
                 st.session_state[f"{key}_notice"] = "Remark saved."
+                _close_remarks()
                 st.rerun()
+        if st.button("Cancel", key=f"{key}_cancel_remark"):
+            _close_remarks()
+            st.rerun()
+
+
+def _render_remarks(card: dict, state: dict, card_key: str) -> None:
+    posts = store.card_posts(card)
+    if not posts:
+        return
+    by_id = {post["id"]: post for post in posts}
+    post_id = st.selectbox("Post for remark", list(by_id), key=f"{card_key}_remark_post",
+                           format_func=lambda ident: f"Post {list(by_id).index(ident) + 1} · {by_id[ident]['url']}")
+    if st.button("Edit remarks", key=f"{card_key}_edit_remark", disabled=state["error"]):
+        st.session_state[REMARK_MODAL_KEY] = post_id
+        st.session_state[ANALYSIS_TAB_KEY] = True
+        st.rerun()
+
+
+def _render_card_tabs(card: dict, state: dict, card_key: str) -> None:
+    velocity, analysis = st.tabs(["Velocity", "Analysis"],
+                                 default="Analysis" if st.session_state.get(ANALYSIS_TAB_KEY) else "Velocity")
+    with velocity:
+        _render_card_history(card)
+    with analysis:
+        if card.get("runs"):
+            st.caption(f"Latest run · {format_time(card['runs'][-1]['at'])}")
+        st.html(analysis_table(card))
+        st.caption("Sentiment of up to 20 readable comments per post. Percentages use successfully analyzed comments, "
+                   "not all comments on Facebook. Negative includes anger and anxiety; positive includes joy. "
+                   "Word size shows how many analyzed comments mention each topic.")
+        if not card.get("shared"):
+            _render_remarks(card, state, card_key)
 
 
 def _render_card(email: str, card: dict, index: int, state: dict, key: str, *, hosted: bool) -> None:
@@ -173,7 +228,7 @@ def _render_card(email: str, card: dict, index: int, state: dict, key: str, *, h
         if card.get("shared"):
             st.subheader(_card_name(card, index))
             st.caption(f"{len(posts)} / {store.MAX_POSTS_PER_CARD} posts · Shared by another approved user · View only")
-            _render_card_history(card)
+            _render_card_tabs(card, state, card_key)
             st.caption("The creator runs and edits this card. Use Refresh cards & checks to see their latest saved results.")
             return
         title, actions = st.columns([4, 1], vertical_alignment="center")
@@ -209,9 +264,11 @@ def _render_card(email: str, card: dict, index: int, state: dict, key: str, *, h
                     st.rerun()
 
         if st.button("Run", key=f"{card_key}_run", type="primary", disabled=state["error"] or not posts or busy,
-                     help="Read likes/reactions and comments for every saved post, then save their combined total."):
+                     help="Read engagement and up to 20 comments per post, analyze comment sentiment, and save the results."):
             try:
-                jobs.start_run(email, card["id"], hosted=hosted)
+                provider = get_ai_provider(st.session_state.get("ai_provider"))
+                model = st.session_state.get("gemini_model_name", get_ai_model(provider)) if provider == "gemini" else get_ai_model(provider)
+                jobs.start_run(email, card["id"], hosted=hosted, provider=provider, model_name=model)
             except ValueError as exc:
                 st.error(str(exc))
             except Exception:
@@ -220,7 +277,7 @@ def _render_card(email: str, card: dict, index: int, state: dict, key: str, *, h
             else:
                 st.rerun()
         if job and job.card_id == card["id"]:
-            if job.status in {"running", "saving"}:
+            if job.status in {"running", "analyzing", "saving"}:
                 _run_progress(email, job.id)
             elif job.status in {"error", "save_failed"}:
                 st.error(job.error)
@@ -229,10 +286,9 @@ def _render_card(email: str, card: dict, index: int, state: dict, key: str, *, h
                     st.rerun()
             elif job.status == "complete" and job.run.get("warning"):
                 st.warning(job.run["warning"])
-        _render_card_history(card)
-        _render_remarks(email, card, state, key, card_key)
+        _render_card_tabs(card, state, card_key)
         if posts and not card.get("runs"):
-            st.caption("Click Run to save the first view-count check. Your Facebook connection from Scrape Data is used.")
+            st.caption("Click Run to save engagement and analyze comments. Your Facebook connection from Scrape Data is used.")
 
         if len(posts) < store.MAX_POSTS_PER_CARD:
             generation = st.session_state.get(f"{card_key}_form_generation", 0)
@@ -340,7 +396,10 @@ def render_velocity_workspace(email: str, *, hosted: bool | None = None) -> None
         for index, card in enumerate(cards, 1):
             _render_cover(email, card, index, key)
     if MODAL_KEY in st.session_state:
-        _card_modal(email, key, hosted=hosted)
-    elif job and job.status in {"running", "saving"}:
+        if REMARK_MODAL_KEY in st.session_state:
+            _remarks_modal(email, key)
+        else:
+            _card_modal(email, key, hosted=hosted)
+    elif job and job.status in {"running", "analyzing", "saving"}:
         # Closing the notepad does not stop the worker or its completion refresh.
         _run_progress(email, job.id)

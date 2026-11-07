@@ -7,6 +7,7 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .toolbar { display: flex; gap: 12px; justify-content: space-between; align-items: center; padding: 14px 18px; border-bottom: 1px solid var(--line); }
 #hint { color: var(--muted); font-size: 12px; }
 .actions { display: flex; flex-shrink: 0; gap: 8px; }
+[hidden] { display: none !important; }
 .actions button { min-height: 38px; padding: 6px 12px; border: 1px solid var(--line); background: var(--bg); border-radius: 9px; }
 button:hover { background-color: var(--soft); }
 button:focus-visible, a:focus-visible { outline: 3px solid var(--selected); outline-offset: 3px; }

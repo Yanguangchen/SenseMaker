@@ -8,6 +8,7 @@ import streamlit as st
 
 from modules.engagement import checks_for
 from modules.saved_links import library_owner_id
+from modules.velocity_metrics import engagement_count
 from modules.velocity_tracking import card_posts
 
 VELOCITY_VIEW_ALERT_THRESHOLD = 500_000
@@ -61,6 +62,8 @@ def find_high_velocity_posts(
                 match = next((r for r in results if isinstance(r, dict) and r.get("post_id") == post_id), None)
                 if match is not None:
                     views = _coerce_int(match.get("views"))
+                    if views is None:
+                        views = engagement_count(match)
                     if views is not None:
                         latest_views = views
                         break

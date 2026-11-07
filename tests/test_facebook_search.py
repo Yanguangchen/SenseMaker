@@ -160,25 +160,21 @@ class FacebookSearchUITests(unittest.TestCase):
         self.assertNotIn("facebook_search_wizard_step_previous", [button.key for button in app.button])
         self.assertNotIn("facebook_search_wizard_step_next", [button.key for button in app.button])
         self.assertTrue(any(button.key == "save_last_results_btn" for button in app.button))
-        self.assertEqual(app.session_state.get("focus_workspace_modal"), "facebook")
+        self.assertEqual(app.session_state["focus_workspace_modal"], "facebook")
 
-        # Blank title keeps window open with error:
-        app.button(key="save_last_results_btn").click().run()
-        self.assertTrue(app.error)
-        self.assertEqual(app.session_state.get("focus_workspace_modal"), "facebook")
-
-        # Firestore failure keeps window open:
-        app.text_input(key="custom_title_value").set_value("Oyoshi dataset").run()
-        with patch("dashboard._write_results_to_firestore", side_effect=RuntimeError("write failed")):
+        # Firestore failure keeps window open even with standardized blank title:
+        with patch("dashboard._write_results_to_firestore", side_effect=RuntimeError("write failed")) as save_fail:
             app.button(key="save_last_results_btn").click().run()
+        self.assertTrue(save_fail.call_args.kwargs["custom_title"].startswith("Facebook · "))
         self.assertTrue(any("Firestore write failed: write failed" in e.value for e in app.error))
-        self.assertEqual(app.session_state.get("focus_workspace_modal"), "facebook")
+        self.assertEqual(app.session_state["focus_workspace_modal"], "facebook")
 
-        # Successful save closes window and shows confirmation on workspace:
-        with patch("dashboard._write_results_to_firestore", return_value={"inserted": 1, "skipped": 0}):
+        # Successful save with blank title uses standardized nomenclature and closes window:
+        with patch("dashboard._write_results_to_firestore", return_value={"inserted": 1, "skipped": 0}) as save_ok:
             app.button(key="save_last_results_btn").click().run()
         self.assertFalse(app.exception)
-        self.assertIsNone(app.session_state.get("focus_workspace_modal"))
+        self.assertTrue(save_ok.call_args.kwargs["custom_title"].startswith("Facebook · "))
+        self.assertNotIn("focus_workspace_modal", app.session_state)
         self.assertTrue(any("Saved to Firestore" in s.value for s in app.success))
 
 

@@ -14,7 +14,7 @@ Run your first end-to-end analysis with a public website article—no social med
 4. **Open Sentiment Analysis:** Select **Sentiment Analysis** in the left navigation rail and click **Start sentiment analysis** on the **Analysis** tab.
 5. **Choose and curate records:** In **Step 1 · Choose and edit data**, select **Last scraped data** (or **Manual selection** → check **Custom website** under **Filter by record sources** → click your dataset card). Keep **Include** checked for the rows you want to analyze, then click **Next →**.
 6. **Run AI analysis:** In **Step 2 · Analyze**, add any Thai watch terms (one per line) and click **Run Gemini on … included record(s)** or **Run ChatGPT on … included record(s)**.
-7. **Review & act:** Inspect **Comment Sentiment Analysis**, **Negative Post Reports**, and **Evidence by record** on the page (or export HTML, PDF, or CSV), then open **Content plan** to generate keyword-led briefs from **Latest analysis**.
+7. **Review & act:** Inspect **Comment Sentiment Analysis**, **Word cloud**, **Negative Post Reports**, and **Evidence by record** on the page (or export HTML, PDF, or CSV), then open **Content plan** to generate keyword-led briefs from **Latest analysis**.
 
 > **Tip:** Automatic cloud saving stores raw records in Firestore so your team can review them, but it never triggers AI billing automatically—analysis only runs when you explicitly click **Run Gemini** or **Run ChatGPT**.
 
@@ -202,22 +202,30 @@ Each analyzed record receives an English **translation**, **topics**, a **sentim
 | **Opposing a boycott** | Argues against a boycott. |
 | **Needs review** | Ambiguous intent, or a model classification downgraded because it lacked an exact supporting quote from the record. |
 
-- **Three report tabs** (available for both **Analysis results** and **View processed records**):
+- **Four report tabs** (available for both **Analysis results** and **View processed records**):
   1. **Comment Sentiment Analysis:** Client appendix template showing Negative / Neutral / Positive share percentages, dominant mood and topics, **Key insight**, **Engagement quality**, and **Threat level** (`Low`, `Medium` at priority 5+ or any Thailand signal, `High` at priority 8+ or an explicit boycott call).
-  2. **Negative Post Reports (`NPR-xxxxxx`):** Individual exhibit sheets for every negative (`Anger` / `Anxiety`) or flagged record, ordered by priority. Includes the captured excerpt, English translation, AI summary, views and comments vs. prior check, sentiment split, word cloud, dominant themes, and pre-filled **Impact** (`High` → `6h` check cadence; `Low` → `24h` check cadence).
-  3. **Evidence by record:** Displays **Records assessed**, **Thailand signals**, and **Boycott calls** metrics, a **Show findings** filter (`All records`, `Flagged signals`, `Boycott calls`, `Boycott reports`, `Negative sentiment`, `Reported tensions`, `Needs review`), **Export findings CSV** (`crisisradar-findings.csv`), and detailed cards with exact quotes, validation notes, translations, and source links.
+  2. **Word cloud:** Floating, draggable words from **all sentiments**, so the cloud is available even with only neutral or positive posts. Word size reflects frequency; select a word (or use Tab and Enter) for exact counts and matching source excerpts. **Cloud settings** offers sentiment filters, English translations or original text, word limits, and hidden words. **Pause motion** stops floating; reduced-motion preferences are respected. Open **Word frequencies** for counts and a CSV download. Text without spaces may appear as phrases.
+  3. **Negative Post Reports (`NPR-xxxxxx`):** Individual exhibit sheets for every negative (`Anger` / `Anxiety`) or flagged record, ordered by priority. Includes the captured excerpt, English translation, AI summary, views and comments vs. prior check, sentiment split, word cloud, dominant themes, and pre-filled **Impact** (`High` → `6h` check cadence; `Low` → `24h` check cadence).
+  4. **Evidence by record:** Displays **Records assessed**, **Thailand signals**, and **Boycott calls** metrics, a **Show findings** filter (`All records`, `Flagged signals`, `Boycott calls`, `Boycott reports`, `Negative sentiment`, `Reported tensions`, `Needs review`), **Export findings CSV** (`crisisradar-findings.csv`), and detailed cards with exact quotes, validation notes, translations, and source links.
 - **HTML & PDF exports:** Above the report tabs, click **Download report (HTML)** for an immediate standalone file, or click **Create PDF** → **Download PDF** to generate an A4 landscape PDF fitted to one page per sheet.
+- **Word cloud on small screens:** Starts with the top 20 words for readability. Use **Show all** to expand it; **Word frequencies** and its CSV always include the full selected word list.
 - **View & delete processed records:** Saved analyses for included records in your selected datasets appear automatically under **View processed records** without re-running the AI model. Expand **Delete processed records** to select and permanently delete processed records and their analyses from the shared library.
 
 ## Velocity Tracking
 
-Open **Velocity Tracking** in the sidebar to monitor view-count growth on specific Facebook posts, photos, reels, or videos using landscape notepads. All approved users can see each other's cards and saved results. Covers marked **SHARED VELOCITY** open in view-only mode; each creator retains the Run and editing controls. Click **Refresh cards & checks** to see another user's newly saved cards or results.
+Open **Velocity Tracking** in the sidebar to monitor likes + comments growth on specific Facebook posts, photos, reels, or videos using landscape notepads. All approved users can see each other's cards and saved results. Covers marked **SHARED VELOCITY** open in view-only mode; each creator retains the Run and editing controls. Click **Refresh cards & checks** to see another user's newly saved cards or results.
 
 ### Create cards, add posts & run checks
 
 1. **Create a notepad card:** Click **Create velocity tracking card** in the top toolbar to create an empty card immediately (up to **10 cards** per account; no link or title is required upfront).
 2. **Add Facebook post permalinks:** Click a card cover (**Open Velocity tracking card …**) to open its **Velocity notepad** dialog. Paste a direct link to a single Facebook post, photo, reel, or video into **Provoker's post** (group or page home URLs are rejected) and click **Add post**. Each card tracks up to **10 posts** (one per row).
-3. **Run a view check:** Click **Run** inside the notepad. CrisisRadar visits each post in the card using your Facebook connection from **Scrape Data**, reads the displayed view count, and saves a column labeled with the run's completion date and time (UTC). The latest eight runs are shown. You can close the notepad or switch workspaces while a check runs.
+3. **Run a check and analyze comments:** Click **Run** inside the notepad. CrisisRadar visits each post using your Facebook connection from **Scrape Data** (Browserbase when hosted), reads likes/reactions and comment totals, and collects up to 20 readable comments per post. It analyzes those comments using your selected AI provider/model, then saves everything. The **Velocity** tab shows engagement totals for the latest eight runs, labeled with completion date and time (UTC). You can close the notepad or switch workspaces while a check runs.
+
+### Comment analysis & remarks
+
+Open the **Analysis** tab inside any card. The latest run appears as a table: **Post | Negative (red) | Neutral (gray) | Positive (green) | Remarks | Word cloud**. Negative includes anger and anxiety; positive includes joy. Percentages use successfully analyzed comments, not the post's full comment count. The word cloud shows the most common AI-extracted topics; larger words appear in more sampled comments. Facebook may display only a subset of comments. Empty, unreadable, failed, and partially analyzed samples are labeled; missing analysis never becomes neutral sentiment.
+
+Select **Post for remark** and click **Edit remarks** to open a notes modal. **Save remark** keeps the note across runs and sessions; **Cancel** leaves the saved note intact. Shared cards show the table and notes, while only the creator can edit. Older runs remain archived; the Analysis tab shows only the latest run. Existing cards need a new **Run** to populate comment analysis. These results are separate from the Sentiment Analysis datasets and Sentiment Trends timeline.
 
 ### Manage posts, cards & check history
 
@@ -229,12 +237,12 @@ Open **Velocity Tracking** in the sidebar to monitor view-count growth on specif
 
 | Cell / Status | Meaning |
 | --- | --- |
-| **alive** | Views increased in the latest check, and the gain is equal to or larger than the previous check's gain (or it is the first measured gain). |
-| **dying** | Views increased by less than the previous check's gain, or views were flat after growing in the prior interval. |
-| **dead** | Views showed zero growth across consecutive checks. |
-| **`—` (status)** | Fewer than two consecutive numerical view counts are available for this post. |
-| **Views change (%)** | Beside **Status**, shows `(latest − previous) / previous × 100` for the latest two runs. Positive values mean views increased; negative values mean they decreased. Shows **—** if either count is missing or the previous count is zero. |
-| **Unavailable / Failed** | **Unavailable** means no view count could be read from the identified post; **Failed** means the post could not be loaded or identified. Expand **Why counts are unavailable** for the saved reason and a link to check the post. Neither is treated as zero, so a missing count never falsely marks a post **dead**. |
+| **alive** | Likes + comments increased in the latest check, and the gain is equal to or larger than the previous check's gain (or it is the first measured gain). |
+| **dying** | Likes + comments increased by less than the previous check's gain, or likes + comments were flat after growing in the prior interval. |
+| **dead** | Likes + comments showed zero growth across consecutive checks. |
+| **`—` (status)** | Fewer than two consecutive numerical engagement totals are available for this post. |
+| **Likes + comments change (%)** | Beside **Status**, shows `(latest − previous) / previous × 100` for the latest two runs. Positive values mean likes + comments increased; negative values mean they decreased. Shows **—** if either count is missing or the previous count is zero. |
+| **Unavailable / Failed** | **Unavailable** means one or both engagement counts could be read from the identified post; **Failed** means the post could not be loaded or identified. Expand **Why counts are unavailable** for the saved reason and a link to check the post. Neither is treated as zero, so a missing count never falsely marks a post **dead**. |
 
 ## Sentiment Trends & risk timeline
 
@@ -333,7 +341,7 @@ At the top of **GenCite**, check which models and server keys are active for **G
 | **Dataset exclusions could not be saved** | Click **Retry saving changes** in **Choose and edit data**, or click the refresh icon (`↻`) to reload the latest dataset state. |
 | **No records appear in Sentiment Analysis** | In **Choose and edit data**, select at least one source and dataset card (or **Last scraped data**), check **Record status** in **Settings**, or click **↻** to refresh datasets. |
 | **Run Gemini / ChatGPT button is disabled** | Confirm at least one record has **Include** checked, dataset edits have finished saving, and the chosen provider's API key is configured on the server. |
-| **Velocity check shows `Unavailable`, `Failed`, or save error** | Read **Why counts are unavailable** inside the card. Open the post on Facebook and check whether it displays views; photos or text posts showing only reactions/comments/shares cannot supply view counts. `Failed` means the post could not be opened or identified. Reconnect Facebook in **Scrape Data** if prompted. If saving to Firestore failed, click **Retry saving check**. |
+| **Velocity check shows `Unavailable`, `Failed`, or save error** | Read **Why counts are unavailable** inside the card. Open the post on Facebook and check that both likes/reactions and comment totals are displayed. `Failed` means the post could not be opened or identified. Reconnect Facebook in **Scrape Data** if prompted. If saving to Firestore failed, click **Retry saving check**. |
 | **PDF export unavailable** | Click **Download report (HTML)** and print to PDF in your browser (A4 landscape), or ask the administrator to install Playwright Chromium (`python -m playwright install chromium`). |
 
 ### Administrator configuration & CLI entrypoints

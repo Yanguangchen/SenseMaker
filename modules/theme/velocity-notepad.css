@@ -309,3 +309,25 @@ html .st-key-sm_velocity_modal .crt-status { border-radius: 3px; padding: 3px 7p
   html .sm-note-cover h3 { font-size: 20px !important; }
   .sm-note-foot { margin-top: auto; }
 }
+
+/* Latest comment analysis, scoped separately from the velocity history grid. */
+.sm-analysis-scroll { overflow-x: auto; margin: 12px 0; }
+.sm-analysis-table { width: 100%; min-width: 850px; border-collapse: collapse; table-layout: fixed; color: #35423e; }
+.sm-analysis-table th, .sm-analysis-table td { padding: 16px 12px; border-bottom: 1px solid #cbd1c5; vertical-align: top; text-align: center; }
+.sm-analysis-table th { background: #f2ecd9; font-size: 13px; }
+.sm-analysis-table td { background: #fff9eb; font-size: 13px; }
+.sm-analysis-table tr:nth-child(even) td { background: #faf5e7; }
+.sm-analysis-table th:first-child { width: 20%; }
+.sm-analysis-table th:nth-child(5) { width: 21%; }
+.sm-analysis-table th:last-child { width: 25%; }
+.sm-analysis-table small { display: block; margin-top: 8px; font-size: 11px; line-height: 1.5; }
+.sm-analysis-table b { font-size: 22px; }
+.sm-analysis-table .sm-analysis-negative { color: #b42332; -webkit-text-fill-color: #b42332; }
+.sm-analysis-table .sm-analysis-neutral { color: #666a70; -webkit-text-fill-color: #666a70; }
+.sm-analysis-table .sm-analysis-positive { color: #167044; -webkit-text-fill-color: #167044; }
+.sm-analysis-table .sm-analysis-remark { text-align: left; white-space: pre-wrap; overflow-wrap: anywhere; }
+.sm-analysis-table a { color: #315f7a; }
+.sm-analysis-cloud { display: flex; flex-wrap: wrap; justify-content: center; align-items: center; gap: 5px 10px; line-height: 1.4; }
+.sm-analysis-cloud span { color: #315f7a; overflow-wrap: anywhere; max-width: 100%; }
+.sm-analysis-cloud span:nth-child(3n+2) { color: #73558a; }
+.sm-analysis-cloud span:nth-child(3n) { color: #42705b; }

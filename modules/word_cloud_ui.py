@@ -110,7 +110,7 @@ def render_word_cloud(items: list[dict], key: str) -> None:
         return
     st.caption(f"{cloud['with_text']:,} of {cloud['records']:,} records have text · "
                f"{cloud['tokens']:,} word occurrences · {cloud['unique']:,} distinct terms · "
-               f"Showing the top {len(cloud['terms'])} · Common English words and URLs are omitted.")
+               f"Top {len(cloud['terms'])} terms available · Common English words and URLs are omitted.")
     if original or cloud["fallback"]:
         st.caption((f"{cloud['fallback']} record(s) use original text because no translation is available. "
                     if not original else "") +
@@ -121,7 +121,7 @@ def render_word_cloud(items: list[dict], key: str) -> None:
     with st.expander("Word frequencies"):
         rows = [{"Word": term["word"], "Occurrences": term["count"], "Records": term["records"]}
                 for term in cloud["terms"]]
-        st.dataframe(rows, hide_index=True, use_container_width=True)
+        st.dataframe(rows, hide_index=True, width="stretch")
         output = io.StringIO()
         writer = csv.DictWriter(output, fieldnames=["Word", "Occurrences", "Records"])
         writer.writeheader()

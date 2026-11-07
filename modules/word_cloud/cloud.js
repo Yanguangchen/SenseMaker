@@ -5,9 +5,12 @@ const card = document.querySelector(".cloud-card");
 const detail = document.getElementById("detail");
 const motion = document.getElementById("motion");
 const reset = document.getElementById("reset");
+const wordLimit = document.getElementById("word-limit");
+const hint = document.getElementById("hint");
 const reducedMotion = matchMedia("(prefers-reduced-motion: reduce)");
 const parentOrigin = new URL(location.href).origin;
-let terms = [], buttons = [], revision = null, selection = null, drag = null;
+let allTerms = [], terms = [], buttons = [], revision = null, selection = null, drag = null;
+let showAll = false;
 let paused = reducedMotion.matches, visible = true, hovered = false;
 let layoutFrame = 0, lastWidth = 0, lastHeight = 0, seed = 0;
 
@@ -78,13 +81,25 @@ function layout() {
   layoutFrame = 0;
   const width = cloud.clientWidth;
   // Streamlit mounts inactive tabs at zero width. ResizeObserver handles activation.
-  if (width < 80 || !terms.length) return;
+  if (width < 80 || !allTerms.length) return;
   lastWidth = width;
+  const compact = width < 560;
+  const count = compact && !showAll ? Math.min(20, allTerms.length) : allTerms.length;
+  wordLimit.hidden = !compact || allTerms.length <= 20;
+  wordLimit.textContent = showAll ? "Show top 20" : `Show all ${allTerms.length}`;
+  wordLimit.setAttribute("aria-expanded", String(showAll));
+  hint.textContent = count < allTerms.length
+    ? `Top ${count} of ${allTerms.length} words · Select a word for source text`
+    : "Select a word to explore its source text";
+  if (terms.length !== count) {
+    mount(allTerms.slice(0, count));
+    return;
+  }
   drag = null;
   const max = Math.max(...terms.map(term => term.count));
   const boxes = buttons.map((button, index) => {
     button.classList.remove("dragging");
-    button.style.fontSize = `${Math.round(14 + (width < 560 ? 32 : 46) * Math.sqrt(terms[index].count / max))}px`;
+    button.style.fontSize = `${Math.round(14 + (compact ? 16 : 46) * Math.sqrt(terms[index].count / max))}px`;
     button.style.maxWidth = `${width - 24}px`;
     return { index, width: button.offsetWidth, height: button.offsetHeight };
   });
@@ -138,6 +153,7 @@ function mount(nextTerms) {
 }
 motion.addEventListener("click", () => { paused = !paused; updateMotion(); });
 reset.addEventListener("click", () => { seed += 0.7; queueLayout(); });
+wordLimit.addEventListener("click", () => { showAll = !showAll; queueLayout(); });
 cloud.addEventListener("pointerover", event => { hovered = event.target.classList.contains("word"); updateMotion(); });
 cloud.addEventListener("pointerleave", () => { hovered = false; updateMotion(); });
 cloud.addEventListener("focusin", updateMotion);
@@ -166,7 +182,9 @@ window.addEventListener("message", event => {
   const args = event.data.args || {};
   if (args.revision !== revision) {
     revision = args.revision;
-    mount(args.cloud?.terms || []);
+    allTerms = args.cloud?.terms || [];
+    showAll = false;
+    mount(allTerms);
   }
 });
 const readyTimer = setInterval(() => send("componentReady", { apiVersion: 1 }), 500);

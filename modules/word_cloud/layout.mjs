@@ -12,6 +12,33 @@ export function packWords(boxes, width, initialHeight = 430, seed = 0) {
     const placed = [];
     for (const box of boxes) {
       let found = false;
+      // Try the edges of existing labels first. This fills small gaps on phones
+      // instead of stretching a narrow spiral into a long column of words.
+      const candidates = [{ ...box, x: (width - box.width) / 2, y: (height - box.height) / 2 }];
+      for (const other of placed) {
+        for (const x of [other.x, other.x + other.width - box.width, other.x + (other.width - box.width) / 2]) {
+          candidates.push({ ...box, x, y: other.y - gap - box.height },
+            { ...box, x, y: other.y + other.height + gap });
+        }
+        for (const y of [other.y, other.y + other.height - box.height, other.y + (other.height - box.height) / 2]) {
+          candidates.push({ ...box, x: other.x - gap - box.width, y },
+            { ...box, x: other.x + other.width + gap, y });
+        }
+      }
+      const score = candidate => {
+        const dx = candidate.x + box.width / 2 - width / 2;
+        const dy = (candidate.y + box.height / 2 - height / 2) * Math.max(1, width / height);
+        return (dx * dx + dy * dy) * (1 + 0.12 * Math.sin(Math.atan2(dy, dx) * 3 + seed));
+      };
+      candidates.sort((a, b) => score(a) - score(b));
+      for (const candidate of candidates) {
+        if (fits(candidate, placed, height)) {
+          placed.push(candidate);
+          found = true;
+          break;
+        }
+      }
+      if (found) continue;
       for (let step = 0; step < 1800; step++) {
         const angle = step * 2.3999632297 + seed;
         const radius = Math.sqrt(step / 1800) * 0.72;

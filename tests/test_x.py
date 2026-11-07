@@ -157,14 +157,17 @@ class XCollectionFlowTests(unittest.TestCase):
     def button_keys(self):
         return {button.key for button in self.app.button}
 
-    def test_name_is_required_and_each_step_reveals_only_its_own_controls(self):
+    def test_name_is_optional_with_standardized_default_and_each_step_reveals_only_its_own_controls(self):
         self.assertEqual([field.label for field in self.app.text_input], ["Dataset name"])
         self.assertFalse(self.app.checkbox)
         self.assertFalse(self.app.number_input)
         self.assertNotIn("collect_x_posts", self.button_keys())
-        self.assertTrue(self.app.button(key="x_name_next").disabled)
+        self.assertFalse(self.app.button(key="x_name_next").disabled)
         self.app.text_input(key="x_custom_title_value").set_value("   ").run()
-        self.assertTrue(self.app.button(key="x_name_next").disabled)
+        self.assertFalse(self.app.button(key="x_name_next").disabled)
+        self.app.button(key="x_name_next").click().run()
+        self.assertTrue(self.app.session_state["x_dataset_name"].startswith("X · "))
+        self.app.button(key="x_options_back").click().run()
         self.name_dataset("  Campaign feedback  ")
         self.assertEqual(len(self.app.checkbox), len(X_SEARCHES))
         self.assertEqual(len(self.app.number_input), 2)

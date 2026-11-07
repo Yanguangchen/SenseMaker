@@ -232,9 +232,17 @@ def save_run(db: Any, email: str, card_id: str, run: dict[str, Any]) -> list[dic
         if card:
             # URLs are already on the post rows and in the full archive. Avoid
             # duplicating long permalinks in every cell of the account document.
-            summary = {**saved, "results": [{key: value for key, value in row.items() if key != "url"}
+            summary = {**saved, "results": [{key: value for key, value in row.items()
+                                            if key not in {"url", "comment_sample", "comment_analysis_details"}}
                                            for row in saved["results"]]}
-            changed = {**card, "run_count": number, "runs": [*card.get("runs", []), summary][-SHOWN_RUNS:]}
+            # The Analysis tab displays the latest run. Keep older comment data
+            # in the run archive, so ten full cards fit Firestore's document limit.
+            earlier = [{**old, "results": [{key: value for key, value in row.items()
+                                           if key not in {"comment_analysis", "comment_collection",
+                                                          "comment_sample", "comment_analysis_details"}}
+                                          for row in old.get("results", [])]}
+                       for old in card.get("runs", [])]
+            changed = {**card, "run_count": number, "runs": [*earlier, summary][-SHOWN_RUNS:]}
             cards = [changed if row["id"] == card_id else row for row in cards]
             transaction.set(ref, {"cards": cards})
         return cards

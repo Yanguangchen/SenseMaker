@@ -115,9 +115,9 @@ class GlobalAlertsUnitTests(unittest.TestCase):
         }
         post_id = card_posts(card)[0]["id"]
         card["runs"] = [
-            {"at": "2026-11-07T10:00:00Z", "results": [{"post_id": post_id, "views": 100, "outcome": "ok"}]},
-            {"at": "2026-11-07T11:00:00Z", "results": [{"post_id": post_id, "views": 200, "outcome": "ok"}]},
-            {"at": "2026-11-07T12:00:00Z", "results": [{"post_id": post_id, "views": 500, "outcome": "ok"}]},
+            {"at": "2026-11-07T10:00:00Z", "metric": "reactions_comments", "results": [{"post_id": post_id, "reactions": 80, "comments": 20, "outcome": "ok"}]},
+            {"at": "2026-11-07T11:00:00Z", "metric": "reactions_comments", "results": [{"post_id": post_id, "reactions": 160, "comments": 40, "outcome": "ok"}]},
+            {"at": "2026-11-07T12:00:00Z", "metric": "reactions_comments", "results": [{"post_id": post_id, "reactions": 400, "comments": 100, "outcome": "ok"}]},
         ]
         sheet = velocity_card_sheet(card)
         self.assertIn('<span class="crt-status crt-status--viral">Viral</span>', sheet)
