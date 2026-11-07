@@ -3,7 +3,7 @@
 from html import escape
 
 from modules.client_report import format_time
-from modules.velocity_tracking import SHOWN_RUNS, card_posts
+from modules.velocity_tracking import card_posts
 from modules.velocity_metrics import METRIC, engagement_count
 
 
@@ -55,20 +55,18 @@ views_change_percent = engagement_change_percent
 
 
 def velocity_card_sheet(card: dict) -> str:
-    runs = card.get("runs", [])[-SHOWN_RUNS:]
+    runs = card.get("runs", [])
     head = "<tr><th scope=col>Provoker's post</th>"
-    for index in range(SHOWN_RUNS):
-        if index < len(runs):
-            timestamp = format_time(runs[index]["at"])
-            date, _, time = timestamp.partition(" · ")
-            title = f"Run {runs[index].get('number', index + 1)} · {timestamp}"
-            label = (f'<span class="crt-run-date">{escape(date)}</span>'
-                     f'<span class="crt-run-time">{escape(time)}</span>')
-            if runs[index].get("metric") != METRIC:
-                label += '<span class="crt-muted crt-small">Earlier views check</span>'
-        else:
-            title, label = "Not run yet", "—"
-        head += f'<th scope=col title="{escape(title, quote=True)}">{label}</th>'
+    for index, run in enumerate(runs):
+        timestamp = format_time(run["at"])
+        date, _, time = timestamp.partition(" · ")
+        title = f"Run {run.get('number', index + 1)} · {timestamp}"
+        label = (f'<span class="crt-run-date">{escape(date)}</span>'
+                 f'<span class="crt-run-time">{escape(time)}</span>')
+        if run.get("metric") != METRIC:
+            label += '<span class="crt-muted crt-small">Earlier views check</span>'
+        run_id = str(run.get("id", f"run-{run.get('number', index + 1)}"))
+        head += f'<th scope=col data-run-id="{escape(run_id, quote=True)}" title="{escape(title, quote=True)}">{label}</th>'
     head += ('<th scope=col>Status</th><th scope=col title="Latest run versus the previous run">'
              'Change (%)</th><th scope=col class="crt-remark">Remark</th></tr>')
     body = []
@@ -92,7 +90,6 @@ def velocity_card_sheet(card: dict) -> str:
                 title = f"{result['reactions']:,} likes/reactions + {result['comments']:,} comments"
             title += f" · {format_time(result.get('at', run['at']) if result else run['at'])}"
             cells.append(f'<td title="{escape(title, quote=True)}">{escape(label)}</td>')
-        cells += ["<td></td>"] * (SHOWN_RUNS - len(cells))
         status = engagement_status(values)
         classes = {"Viral": "viral", "alive": "live", "dying": "slowing", "dead": "dead"}
         badge = (f'<span class="crt-status crt-status--{classes[status]}">{status}</span>' if status else
@@ -115,15 +112,17 @@ def velocity_card_sheet(card: dict) -> str:
                     '<div class="crt-muted crt-small">Likes + comments</div></td>' + "".join(cells)
                     + f"<td>{badge}</td>{change_cell}{remark_cell}</tr>")
     if not body:
-        body.append(f'<tr class="crt-empty"><td colspan="{SHOWN_RUNS + 4}">'
+        body.append(f'<tr class="crt-empty"><td colspan="{len(runs) + 4}">'
                     'No posts added yet. Add a Facebook post when you\'re ready.</td></tr>')
-    note = ""
-    if card.get("run_count", 0) > SHOWN_RUNS:
-        note = f" Showing the latest {SHOWN_RUNS} runs; earlier runs remain saved."
+    width = 630 + 110 * len(runs)
+    columns = ('<colgroup><col style="width:210px">' + '<col style="width:110px">' * len(runs)
+               + '<col style="width:100px"><col style="width:100px"><col style="width:220px"></colgroup>')
     return (
         '<section class="crt-sheet crt-sheet--compact" aria-label="Velocity Tracker">'
-        '<div class="crt-table-wrap"><table class="crt-table"><thead>' + head + '</thead><tbody>'
+        f'<div class="crt-table-wrap"><table class="crt-table" style="width:{width}px;min-width:{width}px">'
+        + columns + '<thead>' + head + '</thead><tbody>'
         + "".join(body) + '</tbody></table></div>'
+        '<details class="crt-legend"><summary>legend</summary>'
         '<div class="crt-key"><span><b>Viral</b> engagement surging significantly</span><span><b>alive</b> engagement growing</span>'
         '<span><b>dying</b> gains shrinking</span><span><b>dead</b> no growth</span></div>'
         '<p class="crt-note">Each check = likes + comments. Likes includes all Facebook reactions. '
@@ -133,5 +132,6 @@ def velocity_card_sheet(card: dict) -> str:
         'Earlier views checks remain labelled and are excluded from engagement comparisons. '
         'Status compares gains between consecutive runs and needs at least two likes + comments totals. '
         'Change (%) = (latest − previous) ÷ previous × 100, using the latest two runs. '
-        'A missing count or zero previous count shows —.' + note + '</p></section>'
+        'A missing count or zero previous count shows —. '
+        'Saved dates and counts stay in place. New runs append on the right; scroll to see all runs.</p></details></section>'
     )

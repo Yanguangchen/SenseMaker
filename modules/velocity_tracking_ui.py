@@ -60,7 +60,7 @@ def _render_cover(email: str, card: dict, index: int, key: str) -> None:
     running = job and job.card_id == card["id"] and job.status in {"running", "analyzing", "saving"}
     detail = job.message if running else (f"Last run · {format_time(runs[-1]['at'])}" if runs else "Ready for your first check")
     checks = "".join(f'<span class="sm-note-check{" is-filled" if i < len(runs) else ""}">{i + 1}</span>'
-                     for i in range(store.SHOWN_RUNS))
+                     for i in range(store.CACHED_RUNS))
     with st.container(key=f"sm_velocity_cover_{card['id']}"):
         st.html(
             '<div class="sm-note-cover">'
@@ -89,7 +89,8 @@ def _card_modal(email: str, key: str, *, hosted: bool) -> None:
     selection = st.session_state.get(MODAL_KEY, {})
     state = st.session_state[key]
     card = next((row for row in state["cards"] if row["id"] == selection.get("card_id")), None)
-    if card is None or selection.get("owner") != library_owner_id(email):
+    if (card is None or selection.get("owner") != library_owner_id(email)
+            or (card.get("shared") and card.get("owner_id") not in {library_owner_id(owner) for owner in allowed_emails()})):
         _close_card()
         st.rerun()
     with st.container(key="sm_velocity_modal"):
@@ -120,7 +121,34 @@ def _run_progress(email: str, job_id: str) -> None:
     st.progress(job.completed / len(job.posts), text=job.message)
 
 
-def _render_card_history(card: dict) -> None:
+def _render_card_history(email: str, card: dict, state: dict) -> None:
+    histories = state.setdefault("run_history", {})
+    cached = histories.get(card["id"], {})
+    recent = card.get("runs", [])
+    version = (card.get("run_count", len(recent)), recent[-1]["id"] if recent else None,
+               state.get("history_refresh", 0))
+    if cached.get("version") != version:
+        try:
+            runs = (store.load_run_history(database.init_db(), email, card)
+                    if card.get("run_count", len(recent)) > len(recent) else recent)
+        except Exception:
+            log.exception("Velocity history could not be loaded")
+            st.warning("The full run history could not be refreshed. Previously loaded columns are kept. "
+                       "Retry to load every saved date and count.")
+            if st.button("Retry loading history", key=f"velocity_history_retry_{card['id']}"):
+                st.rerun()
+            if not cached:
+                return  # Never present a rolling subset as complete history.
+            # A recent subset can have gaps after several new collections. Keep
+            # the complete last-loaded prefix until the archive is available,
+            # rather than insert missing columns between visible ones later.
+            runs = cached["runs"]
+        else:
+            runs = store.merge_run_history(cached.get("runs", []), runs)
+            histories[card["id"]] = {"version": version, "runs": runs}
+    else:
+        runs = cached["runs"]
+    card = {**card, "runs": runs}
     st.html(velocity_card_sheet(card))
     if not card.get("runs"):
         return
@@ -198,11 +226,11 @@ def _render_remarks(card: dict, state: dict, card_key: str) -> None:
         st.rerun()
 
 
-def _render_card_tabs(card: dict, state: dict, card_key: str) -> None:
+def _render_card_tabs(email: str, card: dict, state: dict, card_key: str) -> None:
     velocity, analysis = st.tabs(["Velocity", "Analysis"],
                                  default="Analysis" if st.session_state.get(ANALYSIS_TAB_KEY) else "Velocity")
     with velocity:
-        _render_card_history(card)
+        _render_card_history(email, card, state)
     with analysis:
         if card.get("runs"):
             st.caption(f"Latest run · {format_time(card['runs'][-1]['at'])}")
@@ -228,7 +256,7 @@ def _render_card(email: str, card: dict, index: int, state: dict, key: str, *, h
         if card.get("shared"):
             st.subheader(_card_name(card, index))
             st.caption(f"{len(posts)} / {store.MAX_POSTS_PER_CARD} posts · Shared by another approved user · View only")
-            _render_card_tabs(card, state, card_key)
+            _render_card_tabs(email, card, state, card_key)
             st.caption("The creator runs and edits this card. Use Refresh cards & checks to see their latest saved results.")
             return
         title, actions = st.columns([4, 1], vertical_alignment="center")
@@ -286,7 +314,7 @@ def _render_card(email: str, card: dict, index: int, state: dict, key: str, *, h
                     st.rerun()
             elif job.status == "complete" and job.run.get("warning"):
                 st.warning(job.run["warning"])
-        _render_card_tabs(card, state, card_key)
+        _render_card_tabs(email, card, state, card_key)
         if posts and not card.get("runs"):
             st.caption("Click Run to save engagement and analyze comments. Your Facebook connection from Scrape Data is used.")
 
@@ -346,6 +374,8 @@ def render_velocity_workspace(email: str, *, hosted: bool | None = None) -> None
     owners = sorted(library_owner_id(owner) for owner in allowed_emails())
     if key not in st.session_state or refresh or finished or st.session_state[key].get("shared_owners") != owners:
         state = st.session_state.get(key, {"cards": []})
+        if refresh:
+            state["history_refresh"] = state.get("history_refresh", 0) + 1
         state["cards"] = [card for card in state["cards"] if not card.get("shared") or card.get("owner_id") in owners]
         try:
             state["cards"] = store.load_workspace_cards(database.init_db(), email)

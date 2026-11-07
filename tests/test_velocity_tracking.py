@@ -48,13 +48,17 @@ class MemoryRef:
         self.db.rows[self.path] = deepcopy(row)
 
     def where(self, *, filter):
-        def stream(**kwargs):
+        def stream(fields=None, **kwargs):
             if self.db.fail_reads:
                 raise RuntimeError("offline")
-            return [SimpleNamespace(id=path.rsplit("/", 1)[1], to_dict=lambda row=row: deepcopy(row))
+            return [SimpleNamespace(id=path.rsplit("/", 1)[1],
+                                    to_dict=lambda row=row: deepcopy({key: value for key, value in row.items()
+                                                                    if fields is None or key in fields}))
                     for path, row in self.db.rows.items()
-                    if path.rsplit("/", 1)[0] == self.path and row.get(filter.field_path) in filter.value]
-        return SimpleNamespace(stream=stream)
+                    if path.rsplit("/", 1)[0] == self.path and
+                    (row.get(filter.field_path) == filter.value if filter.op_string == "=="
+                     else row.get(filter.field_path) in filter.value)]
+        return SimpleNamespace(stream=stream, select=lambda fields: SimpleNamespace(stream=lambda **kwargs: stream(fields, **kwargs)))
 
 
 def post_url(index=1):

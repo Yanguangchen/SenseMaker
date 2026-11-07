@@ -11,9 +11,10 @@ from modules.client_report import platform_label
 from modules.config import get_setting
 from modules.database import (
     delete_dataset_records, delete_datasets_records, delete_records, init_db, load_record_catalog, upsert_post,
+    rename_dataset,
 )
 from modules.dataset_cards import apply_dataset_card_theme, featured_datasets, render_dataset_cards, viewer_timezone
-from modules.record_state import purge_record_caches
+from modules.record_state import purge_record_caches, rename_record_caches
 from modules.signals import NON_CONTENT_TYPES
 
 DATASET_SELECTION = "record_manager_datasets_to_delete"
@@ -347,9 +348,57 @@ def _render_dataset_deletion(rows: list[dict], dataset: str | None) -> None:
                 st.rerun()
 
 
+def _render_dataset_rename(rows: list[dict], dataset: str | None) -> None:
+    if dataset is None:
+        return
+    records = [row for row in rows if dataset_key(row) == dataset]
+    if not records:
+        return
+    with st.expander("Rename dataset"):
+        st.caption(f"Rename all {len(records)} records in this dataset. Source text, collection dates and saved analyses stay intact. "
+                   "Using an existing title groups these records with that dataset.")
+        current_title = str(records[0].get("custom_title") or "").strip()
+        with st.form(f"record_manager_rename_{dataset}"):
+            title = st.text_input("Dataset title", value=current_title, max_chars=160,
+                                  key=f"record_manager_title_{dataset}")
+            submitted = st.form_submit_button("Save dataset title")
+        if submitted:
+            try:
+                result = rename_dataset(init_db(), dataset, {row["_id"]: row["_version"] for row in records}, title)
+            except ValueError as exc:
+                st.error(str(exc))
+                return
+            except Exception:
+                st.error("The dataset title could not be saved. Refresh datasets and try again.")
+                return
+            title = title.strip()
+            rename_record_caches(st.session_state, result["renamed"], title)
+            _clear_selection()
+            _clear_dataset_selection()
+            st.session_state.pop("record_manager_needs_refresh", None)
+            complete = not any(result[key] for key in ("skipped", "missing", "unconfirmed"))
+            st.session_state["record_manager_rename_notice"] = {"title": title, "result": result, "complete": complete}
+            if complete:
+                st.session_state["record_manager_renamed_dataset"] = f"title:{title}"
+            st.rerun()
+
+
 def render_record_management() -> None:
+    renamed = st.session_state.pop("record_manager_renamed_dataset", None)
+    if renamed:
+        st.session_state["record_manager_dataset"] = renamed
+        st.session_state["record_manager_details"] = True
     title, refresh_col = st.columns([12, 1], vertical_alignment="center")
     title.subheader("Clean & manage data")
+    rename_notice = st.session_state.pop("record_manager_rename_notice", None)
+    if rename_notice:
+        result = rename_notice["result"]
+        if rename_notice["complete"]:
+            st.success(f'Dataset renamed to "{rename_notice["title"]}".')
+        else:
+            st.warning(f"Renamed {len(result['renamed'])} records. "
+                       f"{len(result['skipped'])} changed, {len(result['missing'])} were removed, "
+                       f"and {len(result['unconfirmed'])} could not be confirmed. Refresh and review the remaining records before retrying.")
     # Preserve the search when its widget is temporarily hidden by dataset details.
     if "record_manager_dataset_search" in st.session_state:
         st.session_state["record_manager_dataset_search"] = st.session_state["record_manager_dataset_search"]
@@ -474,6 +523,7 @@ def render_record_management() -> None:
     dataset = first.selectbox("Dataset", [None, *groups], key="record_manager_dataset", placeholder="All datasets",
                               format_func=lambda key: "All datasets" if key is None else
                               f"{groups[key]['title']} · {dataset_date_label(groups[key])}")
+    _render_dataset_rename(rows, dataset)
     platform = second.selectbox("Source", [None, *platforms], key="record_manager_platform", placeholder="All sources",
                                 format_func=lambda value: value or "All sources")
     status = third.selectbox("Status", [None, *statuses], key="record_manager_status", placeholder="All statuses",

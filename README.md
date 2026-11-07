@@ -311,8 +311,7 @@ additional API key or Facebook connection. It reads only the URLs you supply;
 it does not crawl the site's other pages. Social media URLs are rejected so they
 remain in their existing platform collectors.
 
-Optionally enter a **Dataset title**, then click **Collect website pages**. Collected pages save
-automatically; a blank title uses the source and collection time. Wait for the cloud-save confirmation.
+Click **Collect website pages**. Collected pages save automatically under a name generated from the source and collection time. Wait for the cloud-save confirmation.
 To reuse a URL list, enter a **New preset name** under **URL presets** and click **Save preset**.
 Presets are private to your account and available after signing in on another device.
 Choose a **Saved URL preset** and click **Load preset** to replace the URL input with its links.
@@ -320,10 +319,11 @@ After editing the input, **Update preset** replaces the selected preset's URLs; 
 with a different name creates another list. **Delete preset** requires confirmation and removes
 only the saved list. **Refresh presets** loads changes made on another device. Presets support
 up to 100 unique links; saving or loading one does not collect pages or run analysis.
-After reviewing the pages, you can edit **Dataset title** and click **Save dataset** to save
-the collected results without collecting again. Leaving the title blank keeps the current
-dataset title. A new title moves these records to that dataset without creating copies;
-reusing an existing title groups them with its other records. If saving fails, use
+To rename a saved dataset, open it in **Clean & manage data**, expand **Rename dataset**, and use
+**Dataset title → Save dataset title**. This is the only place to enter a custom dataset title.
+Renaming changes title metadata across all records in that dataset, preserving record IDs, source text,
+collection dates, analysis exclusions and saved analyses. Changed or moved records are skipped and reported.
+Reusing an existing title groups the renamed records with that dataset. If collection saving fails, use
 **Retry saving collected records** before collecting again.
 Saved pages appear in **Sentiment Analysis** and **Clean & manage data** alongside the other sources. Analyze them with your
 existing Gemini/OpenAI key, then use those results in **Content recommendations**.
@@ -393,10 +393,10 @@ this repository. See [Reddit's access policy](https://support.reddithelp.com/hc/
 
 ## X collection: recent public posts
 
-1. Open **Scrape Data → X** to open the focused collection window; **Start X collection** also opens it. The surrounding page dims and blurs. Enter a **Dataset name**, then click **Continue to options**. A name is required before collection options appear.
+1. Open **Scrape Data → X** to open the focused collection window; **Start X collection** also opens it. The surrounding page dims and blurs. The two-step flow starts with collection options; dataset naming is automatic.
 2. Choose your searches and edit their terms. The same three watches as Online News are filled in. Choose up to **100 posts per search** and leave **Replies per post** at 0 unless you want a small reply sample. Review the estimated reads and cost, then click **Continue to collect**.
-3. The final step shows your dataset name and collection summary, with **Collect posts** in its own action area. Click it to start collection. Posts and collected replies save automatically under the chosen name, then the window closes to show the results and cloud-save confirmation. A failed save keeps the window open with a retry action.
-4. Use **Back to options** or **Back to dataset name** to revise your choices. Close the window with Escape, the close button or a click outside; **Resume X collection** restores your name, options and current step within the session. Navigating between steps never starts collection. Failed saves can still be retried from any step.
+3. The final step shows your collection summary, with **Collect posts** in its own action area. Click it to start collection. Posts and collected replies save automatically under a source-and-time name, then the window closes to show the results and cloud-save confirmation. A failed save keeps the window open with a retry action.
+4. Use **Back to options** to revise your choices. Close the window with Escape, the close button or a click outside; **Resume X collection** restores your options and current step within the session. Navigating between steps never starts collection. Failed saves can still be retried from any step.
 5. Select saved records in **Sentiment Analysis**, set your watchlist and run analysis.
 
 The connector uses X's official recent-search API (`GET /2/tweets/search/recent`), which covers about
@@ -473,7 +473,7 @@ both pages. Scans are stored in `<FIREBASE_COLLECTION>_news_scans`. Compare scan
 same searches and window, because the score depends on what each search returns.
 
 Online news automatically saves the collected article records as well as the separate trend snapshot.
-An optional **Dataset title** groups the records; otherwise the source and collection time are used.
+Dataset names always use the source and collection time during collection. Custom titles are available only in **Clean & manage data → Rename dataset**.
 Keyword flags are leads for review, not confirmed events, and only headlines are scanned. After the
 cloud-save confirmation, select the articles in **Sentiment Analysis** for evidence-grounded
 sentiment, boycott and tension assessments. Recollected articles update their title and metadata;
@@ -774,9 +774,12 @@ The dashboard has **four pages**, accessible from the left toolbar:
 - Collect large batches with progress tracking; three sources run at a time
 - Headless browser toggle + scroll iterations slider (1-50)
 - Results table + raw JSON output
-- Online news, X and Custom website automatically save collected records. X requires a dataset name
-  in its first step; Online news and Custom website offer an optional dataset title.
-  Facebook and Reddit use **Save data to cloud** with a custom title.
+- Facebook extraction requires identifiable post containers and message bodies. Messenger/chat panels,
+  navigation, sidebars, author/action labels and link-only items are excluded; unreadable posts produce
+  a collection notice instead of a whole-page text fallback. Velocity comment collection uses the same chat exclusions.
+- Online news, X and Custom website automatically save collected records. Facebook and Reddit use
+  **Save data to cloud**. All collectors use automatic source-and-time names; custom titles are available
+  only in **Clean & manage data → Rename dataset**.
 - Failed automatic saves retain collected data and show **Retry saving collected records**. New collection is
   paused until saving succeeds. Retrying reuses the same records/title without recollecting or duplicating URL-based records.
   Keep the session open until the cloud-save confirmation; failed saves are not durable across a session reset.
@@ -846,8 +849,9 @@ controls. Use **Refresh cards & checks** to load another user's new cards or res
 use your own ten-card allowance, and Facebook login sessions remain private.
 Use **Rename card → Card name → Save name** inside the notepad to change its name.
 Each notepad has **Velocity** and **Analysis** tabs. Velocity shows **Provoker's post**, the completion
-date and time (UTC) of the latest eight runs, **Status**, **Likes + comments change (%)**, and **Remark**.
-Unused run columns show **—**. Click **Run** to read likes/reactions and comment totals using your Facebook
+date and time (UTC) of every saved run, **Status**, **Likes + comments change (%)**, and **Remark**.
+Each new run appends one date/data column on the right. Existing timestamps, counts, column order,
+and column widths stay fixed; scroll horizontally to see later runs. Click **Run** to read likes/reactions and comment totals using your Facebook
 connection from **Scrape Data** (Browserbase when hosted). Each run saves their combined total to Firestore.
 Status is **alive**, **dying**, or **dead**, calculated from engagement gains once two consecutive totals exist.
 **Likes + comments change (%)** compares the latest run with the previous run: `(latest − previous) / previous × 100`.
@@ -857,8 +861,9 @@ A post does not need a sentiment analysis or negative classification to be track
 Cards without links show an empty table. Added posts have blank cells until their first run.
 **Unavailable** means one or both engagement counts could not be read; **Failed** means the post could not be checked. Neither
 is treated as zero. Rounded Facebook counts remain approximate. Each column
-represents the same run across all rows. The latest eight runs appear in the table; earlier runs stay in
-the account's Firestore run archive. Earlier view-count runs are retained but never compared with engagement totals.
+represents the same run across all rows. The full history loads from the account's Firestore run archive
+when opening the card, including runs older than the eight-check card cache. Refresh failures keep already
+loaded columns and offer a retry. Earlier view-count runs are retained but never compared with engagement totals.
 
 **Analysis** shows one row per post: **Negative** (red), **Neutral** (gray), **Positive** (green),
 **Remarks**, then **Word cloud**. Run collects up to **20 readable comment texts per post** from the same
@@ -941,7 +946,7 @@ Use this sequence for the most reliable results:
    Use direct group, page or post URLs to skip Facebook search. The collector navigates
    directly to each selected URL; it does not type into Facebook's search bar.
 5) New valid links are saved and selected automatically when you finish editing. Click **Collect posts** and inspect results. Use **Clear** to deselect all sources and clear pasted links.
-6) Enter a **Custom title** and click **Save data to cloud** to persist to Firestore.
+6) Click **Save data to cloud** to persist to Firestore with its automatic dataset name.
 7) Switch to the **Sentiment Analysis** tab:
    - Click **Start sentiment analysis**. Choose **Manual selection**, sources and datasets, or **Last scraped data**. Records appear automatically.
    - Uncheck **Include** to exclude unwanted records; exclusions save automatically and are reversible.

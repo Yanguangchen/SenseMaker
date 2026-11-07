@@ -61,6 +61,7 @@ class ScraperLifecycleTests(unittest.IsolatedAsyncioTestCase):
         with patch("modules.scraper.async_playwright", return_value=sdk), \
              patch("modules.facebook_remote.remote_facebook_context", side_effect=remote), \
              patch("modules.scraper._goto_with_resilient_wait", new_callable=AsyncMock), \
+             patch("modules.scraper._click_expand_controls", new_callable=AsyncMock), \
              patch("modules.scraper._harvest_visible_posts", side_effect=stall), \
              patch("modules.scraper.REMOTE_COLLECTION_SECONDS", 0.02):
             rows = await scraper.scrape_group("https://www.facebook.com/groups/test", facebook_owner="editor@example.com")
@@ -70,12 +71,12 @@ class ScraperLifecycleTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(rows[1]["collection_stopped"])
 
     async def test_disappearing_post_is_skipped_without_waiting_thirty_seconds(self):
-        container = MagicMock(inner_text=AsyncMock(side_effect=TimeoutError))
+        container = MagicMock(evaluate=AsyncMock(side_effect=TimeoutError))
         containers = MagicMock(count=AsyncMock(return_value=1))
         containers.nth.return_value = container
         rows = await scraper._collect_from_container_list(containers, "https://www.facebook.com/groups/test", set(), None)
         self.assertEqual(rows, [])
-        container.inner_text.assert_awaited_once_with(timeout=1500)
+        container.evaluate.assert_awaited_once_with(scraper.FACEBOOK_POST_JS, timeout=1500)
 
 
 if __name__ == "__main__":

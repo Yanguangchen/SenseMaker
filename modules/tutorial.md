@@ -10,7 +10,7 @@ Run your first end-to-end analysis with a public website article—no social med
 
 1. **Sign in:** Use **Sign in with Google** in the sidebar with an email listed in your team's approved allowlist (`FAQ_EDITOR_EMAILS`).
 2. **Open Custom website:** Go to **Scrape Data** → click **Open Custom website →** (or **Start collecting website pages**). Paste a public article URL into **Website links (one per line)** and click **Next →**.
-3. **Collect & auto-save:** Optionally enter a **Dataset title**, then click **Collect website pages**. Wait for **Saved … record(s) to the cloud**.
+3. **Collect & auto-save:** Click **Collect website pages**. Dataset names are generated automatically from the source and collection time. Wait for **Saved … record(s) to the cloud**.
 4. **Open Sentiment Analysis:** Select **Sentiment Analysis** in the left navigation rail and click **Start sentiment analysis** on the **Analysis** tab.
 5. **Choose and curate records:** In **Step 1 · Choose and edit data**, select **Last scraped data** (or **Manual selection** → check **Custom website** under **Filter by record sources** → click your dataset card). Keep **Include** checked for the rows you want to analyze, then click **Next →**.
 6. **Run AI analysis:** In **Step 2 · Analyze**, add any Thai watch terms (one per line) and click **Run Gemini on … included record(s)** or **Run ChatGPT on … included record(s)**.
@@ -48,9 +48,9 @@ Open **Scrape Data** to switch between the **Collect data** tab and the **Saved 
 | --- | --- | --- | --- |
 | **Facebook** | Visible posts and comments from selected Facebook group, page, or post URLs (1–50 scrolls). | Focused step modal · Authenticated browser | Manual (**Save data to cloud**) |
 | **Oyoshi on Facebook** | Direct Facebook search results for `oyoshi` (or a custom search URL) with a strict 2–5 scroll limit. | Focused step modal · Authenticated browser | Manual (**Save data to cloud**) |
-| **X** | Recent public posts (~last 7 days, excluding reposts) and optional reply samples across watch queries. | 3-step focused modal · Official X API | Automatic |
+| **X** | Recent public posts (~last 7 days, excluding reposts) and optional reply samples across watch queries. | 2-step focused modal · Official X API | Automatic |
 | **Online news** | Google News headlines and snippets across enabled watch categories and editions, plus a risk scan. | Inline workspace · Google News RSS | Automatic |
-| **Custom website** | Main article/body text extracted from up to 100 public HTTP/HTTPS web pages per run. | 2-step focused modal · Direct HTTP | Automatic (plus **Save dataset** to rename) |
+| **Custom website** | Main article/body text extracted from up to 100 public HTTP/HTTPS web pages per run. | 2-step focused modal · Direct HTTP | Automatic; rename in **Clean & manage data** |
 | **Reddit** | Newest posts and sampled comments from `r/cambodia` feeds or threads. | Inline workspace · Official Reddit API | Manual (**Save data to cloud**) |
 
 ### Facebook (groups, pages & posts)
@@ -70,7 +70,9 @@ Click **Open Facebook →** (or **Start collecting Facebook posts** / **Continue
    - Click **Collect posts** in the final navigation row (or **← Previous** before results exist to change links). The collector opens each URL directly and displays live progress: completed sources, collected post count, current source activity, and elapsed time.
    - On hosted deployments, collection continues in the background if you switch workspaces or close the modal. Click **Cancel collection** to stop early and keep completed results.
 4. **Save to cloud**:
-   - Review **Records collected**, inspect the preview table or **Raw JSON Output**, enter a required **Custom title**, and click **Save data to cloud**. Saving from the modal closes the window and shows the confirmation banner on the overview card.
+   - Review **Records collected**, inspect the preview table or **Raw JSON Output**, and click **Save data to cloud**. The dataset receives an automatic source-and-time name. Saving from the modal closes the window and shows the confirmation banner on the overview card.
+
+Facebook collection reads only identifiable post message bodies and their comment text. Messenger chats, navigation, sidebars, author/action labels and unrelated page text are excluded. Ambiguous posts are skipped; the collector never substitutes whole-page text.
 
 ### Oyoshi on Facebook (direct search)
 
@@ -79,7 +81,7 @@ Open **Scrape Data → Oyoshi on Facebook** to collect directly from the preconf
 - **Skips link selection:** Opens straight to **Collect posts** (after **Connect Facebook** if you are not signed in).
 - **Strict scroll budget:** Defaults to **3** scroll iterations and is capped between **2** and **5** with a strict limit—no extra adaptive scroll cycles are added, keeping Browserbase usage predictable.
 - **Custom search URLs:** You can replace **Oyoshi Facebook search URL** with any valid Facebook search URL (`/search/…` with a non-empty `q=` query). Click **Open this search on Facebook** to verify the live page in a new tab. Your custom URL and scroll setting persist in the session when switching sources.
-- **Collect & save:** Click **Collect posts**, enter a **Custom title**, and click **Save data to cloud**.
+- **Collect & save:** Click **Collect posts**, then **Save data to cloud**. The dataset is named automatically.
 
 ### Saved Facebook links
 
@@ -97,20 +99,19 @@ Open the **Saved Facebook links** tab in **Scrape Data** (or expand **Inspect al
 
 ### X (recent posts & replies)
 
-Click **Open X →** or **Start X collection** (or **Resume X collection** to continue an unfinished setup) to open the 3-step focused dialog:
+Click **Open X →** or **Start X collection** (or **Resume X collection** to continue an unfinished setup) to open the 2-step focused dialog:
 
-1. **1. Name your dataset:** Enter a required **Dataset name** (e.g., `Brand feedback — November`) and click **Continue to options**. Reusing an existing dataset name groups the new posts into that dataset.
-2. **2. Choose collection options:**
+1. **1. Choose collection options:**
    - Enable or disable the built-in watch categories (**OYOSHI mentions**, **Thailand–Cambodia border tension**, **Boycott of Thai products in Cambodia**) and edit their search queries (up to 400 characters; `-is:retweet -is:reply` is appended automatically).
    - Set **Posts per search** (`10`–`100`, step `10`) and **Replies per post** (`0`–`10`, default `0`).
-   - Review the live upper-bound read estimate and cost (`$0.005` per post read; enabling replies requests at least 10 results per reply page). Click **Continue to collect** (or **Back to dataset name**).
-3. **3. Collect posts:** Review your dataset name and read estimate, then click **Collect posts** (or **Back to options**). Posts and sampled replies from approximately the last 7 days save automatically under your dataset name.
+   - Review the live upper-bound read estimate and cost (`$0.005` per post read; enabling replies requests at least 10 results per reply page). Click **Continue to collect**.
+2. **2. Collect posts:** Review the read estimate, then click **Collect posts** (or **Back to options**). Posts and sampled replies from approximately the last 7 days save automatically under a name generated from the source and collection time.
 
 ### Online news (Google News & border-tension scan)
 
 1. Open **Scrape Data → Online news**.
 2. Toggle watch categories (**OYOSHI mentions**, **Thailand–Cambodia border tension**, **Boycott of Thai products in Cambodia**) and customize their search terms.
-3. Choose the **Published** time window (`Past 24 hours`, `Past week`, `Past month`, or `Past year`), **Google News editions** (`English`, `Thai`), **Articles per search** (`10`–`100`, default `50`), and an optional **Dataset title**.
+3. Choose the **Published** time window (`Past 24 hours`, `Past week`, `Past month`, or `Past year`), **Google News editions** (`English`, `Thai`), **Articles per search** (`10`–`100`, default `50`).
 4. Click **Search Google News**. CrisisRadar deduplicates articles across searches, scans headlines and snippets for Thailand/Cambodia mentions and risk keywords (`Boycott`, `Border tension`, `Escalation`, `De-escalation`), saves all articles to Firestore, and records a dated point on the **Border tension risk** timeline.
 5. Inspect the four summary metrics (**Articles found**, **Boycott flags**, **Border tension flags**, **Border tension risk**), the **Flagged coverage by publication day** chart, and the article table. Filter the on-screen preview by **Show** (`All articles`, `Flagged articles`, `Boycott`, `Border tension & escalation`) or **Category**—all collected articles remain saved in your dataset. Expand **Open these searches in Google News** to open the live Google News feeds.
 
@@ -122,19 +123,21 @@ Click **Open Custom website →** or **Start collecting website pages** to open 
    - Paste up to **100** unique public `http` or `https` URLs into **Website links (one per line)** (links without a scheme default to `https://`; social media domains, non-standard ports, and private/local network addresses are rejected).
    - **URL presets:** Save and reuse link lists privately in your account under **URL presets**. Enter a **New preset name** and click **Save preset** to store the current URLs, or pick a **Saved URL preset** to **Preview saved URLs**, **Load preset**, **Update preset**, **Delete preset** (with **Confirm delete preset**), or **Refresh presets**. Click **Next →**.
 2. **Step 2 · Collect pages:**
-   - Optionally enter a **Dataset title** and click **Collect website pages**.
-   - Expand any collected page to read its extracted text or click **Open source page**. To rename the dataset or move the collected pages to another dataset title without re-scraping, update **Dataset title** and click **Save dataset**.
+   - Click **Collect website pages**; dataset naming is automatic.
+   - Expand any collected page to read its extracted text or click **Open source page**. To give the dataset a custom title, open it in **Clean & manage data** and use **Rename dataset**.
    - **Technical scope:** Collects up to 5 pages concurrently (30s timeout per page, 10-minute batch budget, up to 5 redirects, max 2 MB and 60,000 extracted characters per page). Supports HTML and plain text only; does not execute JavaScript, sign in, read PDFs, or bypass CAPTCHAs.
 
 ### Reddit (`r/cambodia`)
 
 1. On the **Scrape Data** card screen, expand **Other sources** and click **Open Reddit**.
 2. Set **Reddit posts per source** (`1`–`500`, default `50`) and **Comments per post** (`0`–`100`, default `20`), then click **Collect posts**.
-3. The collector fetches newest posts and a bounded sample of newest comments from `r/cambodia` via Reddit's official Data API, keeping parent post context attached to each comment. Enter a **Custom title** and click **Save data to cloud**.
+3. The collector fetches newest posts and a bounded sample of newest comments from `r/cambodia` via Reddit's official Data API, keeping parent post context attached to each comment. Click **Save data to cloud**; a source-and-time dataset name is generated automatically.
 
 ## Clean & manage data
 
 Open **Clean & manage data** in the sidebar to inspect saved datasets, filter records across the shared library, and permanently remove unwanted records or datasets after a safety review.
+
+To set a custom dataset title, open a dataset, expand **Rename dataset**, enter **Dataset title**, and click **Save dataset title**. This is the only place to name datasets manually. Renaming covers all records in the selected dataset, preserves collection dates and analyses, and skips concurrent changes for review. Reusing a title groups the renamed records with that dataset.
 
 ### Browse dataset cards & search
 
@@ -219,7 +222,7 @@ Open **Velocity Tracking** in the sidebar to monitor likes + comments growth on 
 
 1. **Create a notepad card:** Click **Create velocity tracking card** in the top toolbar to create an empty card immediately (up to **10 cards** per account; no link or title is required upfront).
 2. **Add Facebook post permalinks:** Click a card cover (**Open Velocity tracking card …**) to open its **Velocity notepad** dialog. Paste a direct link to a single Facebook post, photo, reel, or video into **Provoker's post** (group or page home URLs are rejected) and click **Add post**. Each card tracks up to **10 posts** (one per row).
-3. **Run a check and analyze comments:** Click **Run** inside the notepad. CrisisRadar visits each post using your Facebook connection from **Scrape Data** (Browserbase when hosted), reads likes/reactions and comment totals, and collects up to 20 readable comments per post. It analyzes those comments using your selected AI provider/model, then saves everything. The **Velocity** tab shows engagement totals for the latest eight runs, labeled with completion date and time (UTC). You can close the notepad or switch workspaces while a check runs.
+3. **Run a check and analyze comments:** Click **Run** inside the notepad. CrisisRadar visits each post using your Facebook connection from **Scrape Data** (Browserbase when hosted), reads likes/reactions and comment totals, and collects up to 20 readable comments per post. It analyzes those comments using your selected AI provider/model, then saves everything. The **Velocity** tab shows engagement totals for every saved run, labeled with its original completion date and time (UTC). Each new run adds a column on the right without replacing earlier dates or data. You can close the notepad or switch workspaces while a check runs.
 
 ### Comment analysis & remarks
 
@@ -230,7 +233,7 @@ Select **Post for remark** and click **Edit remarks** to open a notes modal. **S
 ### Manage posts, cards & check history
 
 - **Rename a card:** Open the notepad, expand **Rename card**, enter a **Card name**, and click **Save name**. The cover and notepad title update, keeping all posts and run history.
-- **Refresh & retry:** Click **Refresh cards & checks** to reload your cards from Firestore. The table displays the latest **8** checks, while earlier checks remain archived in Firestore. If saving a completed check fails, click **Retry saving check** to save the cached counts without scraping again or creating a duplicate column.
+- **Refresh & retry:** Click **Refresh cards & checks** to reload your cards from Firestore. The table displays **every saved check**, including older archived runs. New runs append dated columns on the right; existing dates, values, order, and column widths stay fixed. Scroll horizontally as history grows. If history cannot be loaded, use **Retry loading history**; previously loaded columns are retained. If saving a completed check fails, click **Retry saving check** to save the cached counts without scraping again or creating a duplicate column.
 - **Remove posts or cards:** Expand **Manage posts**, select a URL in **Post to remove**, and click **Remove post** to free a row. Click **Remove card** in the top-right of the notepad to delete the card cover. Removing a post or card never deletes collected records or archived check history.
 
 ### Reading check cells & status badges

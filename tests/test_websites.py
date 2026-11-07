@@ -265,11 +265,13 @@ class IntegrationTests(unittest.TestCase):
             collect.return_value = [row, {"source_type": "batch_warning", "raw_text": "Unavailable"}]
             app.text_area(key="website_links").set_value(URL).run()
             app.button(key="website_wizard_step_next").click().run()
-            app.text_input(key="website_custom_title").set_value("Product research").run()
+            self.assertNotIn("website_custom_title", [field.key for field in app.text_input])
             app.button(key="collect_website_pages").click().run()
             self.assertFalse(list(app.exception))
             self.assertEqual(len(app.warning), 1)
-            save.assert_called_once_with([row], custom_title="Product research")
+            self.assertEqual(save.call_count, 1)
+            self.assertEqual(save.call_args.args[0], [row])
+            self.assertTrue(save.call_args.kwargs["custom_title"].startswith("Custom website · "))
             self.assertTrue(any("Saved 1 record" in notice.value for notice in app.success))
             self.assertFalse(list(app.exception))
 

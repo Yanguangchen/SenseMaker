@@ -6,6 +6,38 @@ from typing import Any
 from modules.database import get_post_id
 
 
+def rename_record_caches(state: MutableMapping[str, Any], ids: list[str], title: str) -> None:
+    """Keep local collection titles aligned so a later save cannot undo a rename."""
+    changed = set(ids)
+
+    def ident(row):
+        return str(row.get("_id") or get_post_id(str(row.get("url") or "")))
+
+    def update(rows):
+        for row in rows:
+            if ident(row) in changed:
+                row["custom_title"] = title
+
+    for key in ("processed_rows", "firestore_rows", "last_scrape_results", "last_reddit_scrape_results"):
+        update(state.get(key) or [])
+    for key in ("news_scan", "x_collection", "website_collection", "last_collected_dataset"):
+        collection = state.get(key) or {}
+        rows = collection.get("rows", [])
+        update(rows)
+        relevant = [row for row in rows if row.get("url") and not str(row.get("source_type", "")).startswith("batch_")]
+        if relevant and all(ident(row) in changed for row in relevant):
+            if key == "last_collected_dataset":
+                collection["title"] = title
+            if collection.get("cloud_save"):
+                collection["cloud_save"]["title"] = title
+    for collection in (state.get("collection_titles") or {}).values():
+        if collection.get("ids") and set(collection["ids"]).issubset(changed):
+            collection["title"] = title
+    for key in ("record_manager_rows", "analysis_dataset_catalog", "analysis_last_results", "gemini_last_results",
+                "content_recommendation_plan", "latest_report_pdf", "saved_report_pdf"):
+        state.pop(key, None)
+
+
 def purge_record_caches(state: MutableMapping[str, Any], result: dict[str, list[str]]) -> None:
     removed = set(result["deleted"] + result["missing"])
     stale = removed | set(result["skipped"])

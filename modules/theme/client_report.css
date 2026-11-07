@@ -287,6 +287,33 @@
   font-size: 14.5px;
 }
 
+.crt-legend > summary {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border: 1px solid var(--crt-rule);
+  border-radius: 6px;
+  background: var(--crt-card);
+  color: var(--crt-ink);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  user-select: none;
+  list-style: none;
+}
+
+.crt-legend > summary::-webkit-details-marker { display: none; }
+
+.crt-legend > summary::before {
+  content: "▸";
+  font-size: 11px;
+  line-height: 1;
+}
+
+.crt-legend[open] > summary::before { content: "▾"; }
+.crt-legend > .crt-key { margin-top: 14px; }
+
 .crt-assessment { margin-bottom: 14px; padding-bottom: 14px; border-bottom: 2px solid #dcdfd8; }
 .crt-decision { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
 .crt-decision > b { margin-right: 6px; font-size: 16px; }

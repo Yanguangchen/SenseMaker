@@ -311,6 +311,52 @@ def _validate_dataset_key(dataset: str) -> None:
         raise ValueError("Choose a single saved dataset.")
 
 
+def rename_dataset(db: firestore.Client, dataset: str, expected_versions: Dict[str, str],
+                   title: str) -> Dict[str, List[str]]:
+    """Change dataset titles only, preserving source data, dates, and analysis.
+
+    Limit each transaction to 200 reviewed records. Concurrently changed or
+    moved records are skipped, and a partial failure reports confirmed progress.
+    """
+    _validate_dataset_key(dataset)
+    _validate_record_versions(expected_versions)
+    title = title.strip() if isinstance(title, str) else ""
+    if not title or len(title) > 160:
+        raise ValueError("Enter a dataset title between 1 and 160 characters.")
+    if not expected_versions:
+        raise ValueError("Choose a saved dataset with records to rename.")
+    collection = db.collection(_get_collection_name())
+    result: Dict[str, List[str]] = {"renamed": [], "skipped": [], "missing": [], "unconfirmed": []}
+    ids = list(expected_versions)
+    for start in range(0, len(ids), 200):
+        refs = {ident: collection.document(ident) for ident in ids[start:start + 200]}
+
+        @firestore.transactional
+        def rename(transaction: Any) -> Dict[str, List[str]]:
+            snapshots = {doc.id: doc for doc in db.get_all(list(refs.values()), field_paths=["custom_title"],
+                                                          transaction=transaction, timeout=30)}
+            part: Dict[str, List[str]] = {"renamed": [], "skipped": [], "missing": []}
+            for ident, ref in refs.items():
+                doc = snapshots[ident]
+                if not doc.exists:
+                    part["missing"].append(ident)
+                elif doc.update_time.isoformat() != expected_versions[ident] or dataset_key(doc.to_dict() or {}) != dataset:
+                    part["skipped"].append(ident)
+                else:
+                    transaction.update(ref, {"custom_title": title})
+                    part["renamed"].append(ident)
+            return part
+
+        try:
+            part = rename(db.transaction(max_attempts=3))
+        except Exception:
+            result["unconfirmed"] = ids[start:]
+            break
+        for key in part:
+            result[key].extend(part[key])
+    return result
+
+
 def delete_dataset_records(db: firestore.Client, dataset: str, expected_versions: Dict[str, str],
                            on_progress: Any = None) -> Dict[str, List[str]]:
     """Delete a reviewed dataset in bounded transactions, reporting partial progress."""

@@ -18,6 +18,7 @@ from modules.facebook_session import (
 )
 from modules.velocity_tracking import normalize_post_url
 from modules.velocity_comment_analysis import MAX_COMMENTS, bounded_text
+from modules.facebook_content import CONTENT_GUARD_JS
 
 log = logging.getLogger(__name__)
 _NUMBER = r"\d[\d.,]*(?:\s?[KkMm])?"
@@ -52,7 +53,7 @@ def parse_engagement(labels: list[str]) -> dict:
 
 # Only inspect the requested post's container. Exclude nested comments, post
 # message text and other articles; never take counts from another post.
-POST_ENGAGEMENT_JS = r"""requested => {
+POST_ENGAGEMENT_JS = "requested => {" + CONTENT_GUARD_JS + r"""
     document.querySelectorAll('[data-sm-velocity-scope]').forEach(el => el.removeAttribute('data-sm-velocity-scope'));
     const identity = value => {
         try {
@@ -80,7 +81,7 @@ POST_ENGAGEMENT_JS = r"""requested => {
     const requestedId = identity(requested);
     // Share URLs must resolve to a specific post before we can attribute counts.
     if (!finalId || (requestedId && requestedId !== finalId)) return {matched: false, labels: []};
-    const anchors = [...document.querySelectorAll('a[href]')].filter(a => visible(a));
+    const anchors = [...document.querySelectorAll('a[href]')].filter(a => visible(a) && !fbBlocked(a, true));
     const photoPage = /^\/photo(?:\.php)?\/?$/.test(location.pathname)
         || location.pathname.includes('/photos/');
     const commentSelector = '[data-testid*="comment"], [aria-label^="Comment by"], [aria-label^="Reply by"]';
@@ -101,7 +102,7 @@ POST_ENGAGEMENT_JS = r"""requested => {
         const mediaRoots = [...document.querySelectorAll('[role="dialog"], [role="main"]')]
             .sort((a, b) => Number(b.getAttribute('role') === 'dialog') - Number(a.getAttribute('role') === 'dialog'));
         for (const root of mediaRoots) {
-            if (!visible(root) || [...root.querySelectorAll('[role="article"]')]
+            if (!visible(root) || fbBlocked(root, true) || [...root.querySelectorAll('[role="article"]')]
                 .some(article => visible(article) && !inComment(article))) continue;
             const ids = new Set(anchors.filter(a => root.contains(a) && !inComment(a))
                 .map(a => identity(a.href)).filter(Boolean));
@@ -122,7 +123,7 @@ POST_ENGAGEMENT_JS = r"""requested => {
     const root = roots[0], labels = [];
     // Facebook places a photo's engagement in a sibling sidebar, outside main.
     const photoPanels = photoPage ? [...document.querySelectorAll('[role="complementary"]')]
-        .filter(panel => visible(panel) && panel.querySelector(
+        .filter(panel => visible(panel) && !fbBlocked(panel, true) && panel.querySelector(
             '[role="button"][aria-label^="React with"], [role="button"][aria-label^="Comment on"]')) : [];
     const panel = photoPanels.length === 1 ? photoPanels[0] : null;
     const parentLink = panel && panel.innerText.trim().startsWith('This photo is from a post.')
@@ -133,7 +134,7 @@ POST_ENGAGEMENT_JS = r"""requested => {
     const excluded = '[data-ad-preview="message"], [data-ad-comet-preview="message"], '
         + '[data-testid="post_message"], [data-testid*="comment"], [role="article"]';
     for (const container of containers) for (const el of container.querySelectorAll('span, div, [role="button"], [aria-label], [title]')) {
-        if (!visible(el) || inComment(el) || comments.some(comment => el.contains(comment))) continue;
+        if (!visible(el) || fbBlocked(el, true) || inComment(el) || comments.some(comment => el.contains(comment))) continue;
         const parent = el.closest(excluded);
         if ((parent && parent !== container) || el.querySelector(excluded)) continue;
         const action = el.getAttribute('aria-label') || '';
@@ -153,12 +154,12 @@ POST_ENGAGEMENT_JS = r"""requested => {
 
 # Read text only inside the post containers identified by POST_ENGAGEMENT_JS.
 # Author names, timestamps, action buttons and neighboring posts are excluded.
-POST_COMMENTS_JS = r"""limit => {
+POST_COMMENTS_JS = "limit => {" + CONTENT_GUARD_JS + r"""
     const visible = el => !!el.getClientRects().length && getComputedStyle(el).visibility !== 'hidden';
     const roots = [...document.querySelectorAll('[data-sm-velocity-scope]')];
     const containers = [...new Set(roots.flatMap(root => [...root.querySelectorAll(
         '[aria-label^="Comment by"], [aria-label^="Reply by"], [data-testid="comment"], [role="article"]')]))]
-        .filter(el => visible(el) && (el.matches('[aria-label^="Comment by"], [aria-label^="Reply by"], [data-testid="comment"]')
+        .filter(el => visible(el) && !fbBlocked(el, true) && (el.matches('[aria-label^="Comment by"], [aria-label^="Reply by"], [data-testid="comment"]')
             || [...el.querySelectorAll('a[href]')].some(a => a.closest('[role="article"]') === el
                 && /[?&](?:comment_id|reply_comment_id)=/.test(a.href))));
     const result = [];
@@ -168,7 +169,7 @@ POST_COMMENTS_JS = r"""limit => {
         const bodies = explicit.length ? explicit : [...el.querySelectorAll('[dir="auto"]')]
             .filter(node => owned(node) && !node.closest('a, button, [role="button"]')
                 && !node.querySelector('[dir="auto"], h3, a[role="link"]'));
-        const text = bodies.filter(visible).map(node => node.innerText.trim()).filter(Boolean).join('\n').slice(0, 2000);
+        const text = bodies.filter(visible).map(node => fbText(node, false, true)).filter(Boolean).join('\n').slice(0, 2000);
         if (!text) continue;
         const link = [...el.querySelectorAll('a[href]')].find(a => owned(a) && /[?&](?:comment_id|reply_comment_id)=/.test(a.href));
         const params = link ? new URL(link.href, location.href).searchParams : null;

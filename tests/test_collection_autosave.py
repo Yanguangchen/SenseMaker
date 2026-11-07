@@ -207,18 +207,13 @@ class CollectionAutosaveUITests(unittest.TestCase):
         return [record(kind, news_category="boycott", news_categories=["boycott"],
                        news_assessment=assess_article("Thailand update")), record("batch_warning", "warning")]
 
-    def set_title(self, app, source, title_key, title):
+    def prepare_collection(self, app, source, title_key):
         if source == "x" and ("x_focus_open" not in app.session_state or not app.session_state["x_focus_open"]):
-            # AppTest 1.50 retains closed dialog widgets after st.rerun().
-            # Refresh without submitting their stale button triggers.
             app._run()
             app.button(key="open_x_collection").click().run()
-        if source == "x" and "x_collect_back" in [button.key for button in app.button]:
-            app.button(key="x_collect_back").click().run()
-            app.button(key="x_options_back").click().run()
-        app.text_input(key=title_key).set_value(title).run()
-        if source == "x":
-            app.button(key="x_name_next").click().run()
+        self.assertNotIn(title_key, [field.key for field in app.text_input])
+        app.session_state[title_key] = "Ignored old title input"
+        if source == "x" and "x_options_next" in [button.key for button in app.button]:
             app.button(key="x_options_next").click().run()
 
     def test_each_collector_saves_once_and_rerenders_do_not_recreate_or_resave_records(self):
@@ -228,13 +223,16 @@ class CollectionAutosaveUITests(unittest.TestCase):
                 rows = self.rows(source)
                 app, collect = self.app(stack, source, rows, save)
                 save.assert_not_called()
-                self.set_title(app, source, title_key, "My dataset")
+                self.prepare_collection(app, source, title_key)
                 app.button(key=collect_key).click().run()
                 self.assertFalse(app.exception)
-                save.assert_called_once_with(rows[:1], custom_title="My dataset")
+                self.assertEqual(save.call_count, 1)
+                self.assertEqual(save.call_args.args[0], rows[:1])
+                self.assertIn(" · ", save.call_args.kwargs["custom_title"])
+                self.assertNotEqual(save.call_args.kwargs["custom_title"], "Ignored old title input")
                 self.assertEqual(app.session_state[state_key]["cloud_save"]["state"], "saved")
                 self.assertTrue(any("Saved 1 record" in notice.value for notice in app.success))
-                self.set_title(app, source, title_key, "Next collection")
+                self.prepare_collection(app, source, title_key)
                 app.run()
                 self.assertEqual(save.call_count, 1)
                 self.assertEqual(collect.call_count, 1)
@@ -245,13 +243,14 @@ class CollectionAutosaveUITests(unittest.TestCase):
                 save = MagicMock(side_effect=[RuntimeError("offline"), {"inserted": 1, "skipped": 0}])
                 rows = self.rows(source)
                 app, collect = self.app(stack, source, rows, save)
-                self.set_title(app, source, title_key, "Original title")
+                self.prepare_collection(app, source, title_key)
                 app.button(key=collect_key).click().run()
                 self.assertFalse(app.exception)
                 self.assertTrue(app.button(key=collect_key).disabled)
                 self.assertEqual(app.session_state[state_key]["rows"], rows)
                 self.assertTrue(any("Cloud saving failed" in item.value for item in app.error))
-                self.set_title(app, source, title_key, "Next title")
+                original_title = save.call_args.kwargs["custom_title"]
+                self.prepare_collection(app, source, title_key)
                 self.assertEqual(save.call_count, 1)
                 app.button(key="retry_x_save_dialog" if source == "x" else retry_key).click().run()
                 self.assertFalse(app.exception)
@@ -261,7 +260,7 @@ class CollectionAutosaveUITests(unittest.TestCase):
                 self.assertFalse(app.button(key=collect_key).disabled)
                 self.assertEqual(app.session_state[state_key]["cloud_save"]["state"], "saved")
                 self.assertEqual(collect.call_count, 1)
-                self.assertEqual(save.call_args.kwargs["custom_title"], "Original title")
+                self.assertEqual(save.call_args.kwargs["custom_title"], original_title)
 
 
 class WebsiteDatasetSaveUITests(unittest.TestCase):
@@ -280,75 +279,40 @@ class WebsiteDatasetSaveUITests(unittest.TestCase):
         self.app.text_area(key="website_links").set_value("https://example.com/a\nhttps://example.com/b").run()
         self.app.button(key="website_wizard_step_next").click().run()
 
-    def collect_pages(self, title=""):
-        self.app.text_input(key="website_custom_title").set_value(title).run()
+    def test_website_titles_are_automatic_without_a_rename_or_resave_control(self):
+        self.assertNotIn("website_custom_title", [field.key for field in self.app.text_input])
+        self.app.session_state["website_custom_title"] = "Ignored legacy title"
         self.app.button(key="collect_website_pages").click().run()
         self.assertFalse(self.app.exception)
-
-    def test_save_changes_dataset_after_review_and_preserves_existing_analysis(self):
-        from dashboard import _fetch_firestore_posts
-        self.collect_pages("Original")
-        for row in self.db.rows.values():
-            row.update(status="processed", analysis={"sentiment": "Neutral"})
-        self.app.session_state["analysis_dataset_catalog"] = {"stale": True}
-        self.app.session_state["record_manager_rows"] = ["stale"]
-        self.app.text_input(key="website_custom_title").set_value("  Reviewed pages  ").run()
-        self.assertEqual(self.db.writes, 2)
-        self.app.button(key="save_website_dataset").click().run()
-        self.assertFalse(self.app.exception)
-        self.collect.assert_called_once()
-        self.assertEqual(len(self.db.rows), 2)
-        self.assertEqual({row["custom_title"] for row in load_record_catalog(self.db)}, {"Reviewed pages"})
-        with patch("dashboard.st.session_state", {}):
-            saved = _fetch_firestore_posts("processed", 50, dataset="title:Reviewed pages")
-        self.assertEqual(len(saved), 2)
-        self.assertTrue(all(row["analysis"] == {"sentiment": "Neutral"} for row in saved))
-        self.assertEqual(self.app.session_state["last_collected_dataset"]["title"], "Reviewed pages")
-        self.assertNotIn("analysis_dataset_catalog", self.app.session_state)
-        self.assertNotIn("record_manager_rows", self.app.session_state)
-        self.app.run()
-        self.assertEqual(self.db.writes, 4)
-
-    def test_blank_title_keeps_the_generated_dataset_title(self):
-        self.collect_pages()
         title = self.app.session_state["website_collection"]["cloud_save"]["title"]
-        self.app.button(key="save_website_dataset").click().run()
-        self.assertFalse(self.app.exception)
         self.assertTrue(title.startswith("Custom website · "))
         self.assertEqual({row["custom_title"] for row in self.db.rows.values()}, {title})
-        self.assertEqual(len(self.db.rows), 2)
+        self.assertNotIn("save_website_dataset", [button.key for button in self.app.button])
+        self.app.run()
+        self.assertEqual(self.db.writes, 2)
+        self.collect.assert_called_once()
 
-    def test_partial_manual_save_retries_the_chosen_title_without_recollecting(self):
-        self.collect_pages("Original")
-        self.db.fail_write = self.db.writes + 2
-        self.app.text_input(key="website_custom_title").set_value("Reviewed pages").run()
-        self.app.button(key="save_website_dataset").click().run()
+    def test_failed_automatic_save_retries_the_same_title_without_recollecting(self):
+        self.db.fail_write = 2
+        self.app.button(key="collect_website_pages").click().run()
         self.assertFalse(self.app.exception)
+        title = self.app.session_state["website_collection"]["cloud_save"]["title"]
         self.assertTrue(self.app.button(key="collect_website_pages").disabled)
-        self.assertTrue(self.app.button(key="save_website_dataset").disabled)
-        self.assertEqual(self.app.session_state["website_collection"]["rows"], self.rows)
-        self.assertTrue(any("Cloud saving failed" in notice.value for notice in self.app.error))
-        self.app.text_input(key="website_custom_title").set_value("Next collection").run()
         self.app.button(key="retry_website_save").click().run()
         self.assertFalse(self.app.exception)
         self.collect.assert_called_once()
-        self.assertEqual({row["custom_title"] for row in self.db.rows.values()}, {"Reviewed pages"})
-        self.assertEqual(self.app.session_state["last_collected_dataset"]["title"], "Reviewed pages")
-        self.assertFalse(self.app.button(key="save_website_dataset").disabled)
+        self.assertEqual({row["custom_title"] for row in self.db.rows.values()}, {title})
         self.assertFalse(self.app.button(key="collect_website_pages").disabled)
 
-    def test_unsaved_session_results_can_be_saved_and_empty_results_cannot(self):
-        self.app.session_state["website_collection"] = {
-            "urls": [row["url"] for row in self.rows[:2]], "rows": self.rows,
-        }
-        self.app.text_input(key="website_custom_title").set_value("Recovered pages").run()
+    def test_unsaved_session_results_can_be_saved_with_an_automatic_title(self):
+        self.app.session_state["website_collection"] = {"urls": [row["url"] for row in self.rows[:2]], "rows": self.rows}
+        self.app.run()
         self.app.button(key="save_website_dataset").click().run()
         self.assertFalse(self.app.exception)
         self.collect.assert_not_called()
-        self.assertEqual({row["custom_title"] for row in self.db.rows.values()}, {"Recovered pages"})
+        self.assertTrue(all(row["custom_title"].startswith("Custom website · ") for row in self.db.rows.values()))
         self.collect.return_value = self.rows[2:]
         self.app.button(key="collect_website_pages").click().run()
-        self.assertFalse(self.app.exception)
         self.assertNotIn("save_website_dataset", [button.key for button in self.app.button])
         self.assertEqual(self.db.writes, 2)
 

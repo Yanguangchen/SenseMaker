@@ -76,7 +76,7 @@ class ScrapeNavigationTests(unittest.TestCase):
     def test_x_and_website_cards_open_their_steps_and_restore_drafts(self):
         self.app.button(key="scrape_open_x").click().run()
         self.assertTrue(self.app.session_state["x_focus_open"])
-        self.app.text_input(key="x_custom_title_value").set_value("My X draft").run()
+        self.app.text_input(key="x_query_oyoshi").set_value("My X draft").run()
         self.app.button(key="scrape_all_sources").click().run()
         self.app.run()  # Streamlit 1.50 can keep dismissed dialog nodes for one run.
         self.assertFalse(self.app.session_state["x_focus_open"])
@@ -86,7 +86,7 @@ class ScrapeNavigationTests(unittest.TestCase):
         self.app.button(key="scrape_all_sources").click().run()
         self.app.run()
         self.app.button(key="scrape_open_x").click().run()
-        self.assertEqual(self.app.text_input(key="x_custom_title_value").value, "My X draft")
+        self.assertEqual(self.app.text_input(key="x_query_oyoshi").value, "My X draft")
         self.app.button(key="scrape_all_sources").click().run()
         self.app.run()
         self.app.button(key="scrape_open_website").click().run()

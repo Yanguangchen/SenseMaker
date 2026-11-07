@@ -20,7 +20,7 @@ MAX_CARDS = 10
 MAX_POSTS_PER_CARD = 10
 MAX_NAME_CHARS = 120
 MAX_REMARK_CHARS = 1000
-SHOWN_RUNS = 8
+CACHED_RUNS = 8  # Small card-document cache; the table loads the complete archive.
 
 
 def normalize_post_url(value: str) -> str:
@@ -74,11 +74,62 @@ def load_workspace_cards(db: Any, email: str) -> list[dict[str, Any]]:
             continue
         for index, card in enumerate(load_cards(db, owners[owner_id]), 1):
             shared = {**card, "id": hashlib.sha256(f"{owner_id}:{card['id']}".encode()).hexdigest(),
-                      "shared": True, "owner_id": owner_id}
+                      "shared": True, "owner_id": owner_id, "source_card_id": card["id"]}
             if card.get("name", "Velocity tracking card") == "Velocity tracking card":
                 shared["name"] = f"Velocity tracking card {index}"
             cards.append(shared)
     return cards
+
+
+def _column_run(run: dict[str, Any]) -> dict[str, Any]:
+    """Keep only immutable fields needed to display a velocity column."""
+    fields = {"post_id", "at", "views", "reactions", "comments", "engagement", "outcome", "reason", "reason_code"}
+    return {**{key: run[key] for key in ("id", "at", "number", "metric") if key in run},
+            "results": [{key: value for key, value in row.items() if key in fields}
+                        for row in run.get("velocity_results", run.get("results", []))]}
+
+
+def merge_run_history(*histories: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Deduplicate by immutable run ID, never by the displayed date/time."""
+    runs = {}
+    for history in histories:
+        for run in history:
+            runs.setdefault(run["id"], _column_run(run))
+    return sorted(runs.values(), key=lambda run: (run.get("number", 0), run.get("at", ""), run["id"]))
+
+
+def load_run_history(db: Any, email: str, card: dict[str, Any]) -> list[dict[str, Any]]:
+    """Load all saved columns for one owned or approved teammate's card.
+
+    New archives expose a compact projection, avoiding comment bodies on history
+    reads. Older archives are read in full only when that projection is absent.
+    The bounded card cache is merged for compatibility with older saved cards.
+    """
+    from modules.auth import allowed_emails
+
+    owners = {library_owner_id(owner): owner for owner in allowed_emails()}
+    viewer = library_owner_id(email)
+    owner = card.get("owner_id") if card.get("shared") else viewer
+    card_id = card.get("source_card_id") if card.get("shared") else card.get("id")
+    if viewer not in owners or owner not in owners:
+        raise PermissionError("Sign in with an approved account to view velocity history.")
+    if not isinstance(card_id, str) or not re.fullmatch(r"[a-f0-9]{64}", card_id):
+        raise ValueError("Choose a saved velocity card.")
+    if card.get("shared") and card["id"] != hashlib.sha256(f"{owner}:{card_id}".encode()).hexdigest():
+        raise ValueError("Choose a saved velocity card.")
+    archive = _ref(db, owners[owner]).collection("runs")
+    query = archive.where(filter=FieldFilter("card_id", "==", card_id)).select(
+        ["id", "at", "number", "metric", "velocity_results"])
+    runs = []
+    for doc in query.stream(timeout=30, retry=None):
+        run = doc.to_dict() or {}
+        if "velocity_results" not in run:
+            run = archive.document(doc.id).get(timeout=15, retry=None).to_dict() or {}
+        runs.append({**run, "id": doc.id})
+    history = merge_run_history(runs, card.get("runs", []))
+    if len(history) < card.get("run_count", 0):
+        raise ValueError("Some saved runs are missing from the archive. Refresh history to try again.")
+    return history
 
 
 def _post(url: str) -> dict[str, str]:
@@ -209,7 +260,7 @@ def remove_card(db: Any, email: str, card_id: str) -> list[dict[str, Any]]:
 
 
 def save_run(db: Any, email: str, card_id: str, run: dict[str, Any]) -> list[dict[str, Any]]:
-    """Archive a run once and atomically update the card's latest eight checks.
+    """Archive a run once and atomically update the card's bounded recent cache.
 
     Retrying a save never creates another column. Read the current card inside the
     transaction so concurrent post edits are preserved. Deleted cards stay deleted.
@@ -227,12 +278,14 @@ def save_run(db: Any, email: str, card_id: str, run: dict[str, Any]) -> list[dic
             return cards
         card = next((row for row in cards if row["id"] == card_id), None)
         number = int(card.get("run_count", 0)) + 1 if card else 1
-        saved = {**run, "card_id": card_id, "number": number}
+        saved = {**run, "card_id": card_id, "number": number,
+                 "velocity_results": _column_run(run)["results"]}
         transaction.set(history, saved)
         if card:
             # URLs are already on the post rows and in the full archive. Avoid
             # duplicating long permalinks in every cell of the account document.
-            summary = {**saved, "results": [{key: value for key, value in row.items()
+            summary = {**{key: value for key, value in saved.items() if key != "velocity_results"},
+                       "results": [{key: value for key, value in row.items()
                                             if key not in {"url", "comment_sample", "comment_analysis_details"}}
                                            for row in saved["results"]]}
             # The Analysis tab displays the latest run. Keep older comment data
@@ -242,7 +295,7 @@ def save_run(db: Any, email: str, card_id: str, run: dict[str, Any]) -> list[dic
                                                           "comment_sample", "comment_analysis_details"}}
                                           for row in old.get("results", [])]}
                        for old in card.get("runs", [])]
-            changed = {**card, "run_count": number, "runs": [*earlier, summary][-SHOWN_RUNS:]}
+            changed = {**card, "run_count": number, "runs": [*earlier, summary][-CACHED_RUNS:]}
             cards = [changed if row["id"] == card_id else row for row in cards]
             transaction.set(ref, {"cards": cards})
         return cards

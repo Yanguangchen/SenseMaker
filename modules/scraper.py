@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 import asyncio
-import hashlib
 import os
 import random
+import re
 from contextlib import AsyncExitStack
 from datetime import datetime, timezone
 from typing import Any, Awaitable, Callable, Dict, List, Optional
@@ -17,6 +17,7 @@ from modules.facebook_session import (
     launch_facebook_browser, save_facebook_session,
 )
 from modules.reddit import is_reddit_url, scrape_reddit
+from modules.facebook_content import FACEBOOK_POST_JS, POST_MESSAGE_SELECTOR
 
 PostData = Dict[str, Any]
 PersistCallback = Callable[[PostData], Optional[Awaitable[None]]]
@@ -60,7 +61,7 @@ def _normalize_facebook_url(raw_url: str, base_url: str) -> str:
     absolute = urljoin(base_url, raw_url)
     parsed = urlparse(absolute)
     query = parse_qs(parsed.query)
-    allowed_keys = {"story_fbid", "fbid", "id"}
+    allowed_keys = {"story_fbid", "fbid", "id", "v"}
     kept = [f"{key}={query[key][0]}" for key in sorted(allowed_keys) if key in query and query[key]]
     clean_query = "&".join(kept)
     path = parsed.path.rstrip("/")
@@ -68,146 +69,6 @@ def _normalize_facebook_url(raw_url: str, base_url: str) -> str:
     if clean_query:
         return f"{parsed.scheme}://{parsed.netloc}{path}?{clean_query}"
     return f"{parsed.scheme}://{parsed.netloc}{path}"
-
-
-def _fallback_content_url(base_url: str, raw_text: str, index: int) -> str:
-    """
-    Build a stable synthetic URL when no permalink is available.
-    """
-    seed = f"{base_url}|{raw_text.strip()}|{index}"
-    text_hash = hashlib.md5(seed.encode("utf-8")).hexdigest()[:16]
-    return f"{base_url.rstrip('/')}#content-{text_hash}"
-
-
-async def _extract_permalink(container: Any, base_url: str) -> Optional[str]:
-    """
-    Try multiple selectors to locate a post permalink inside an article container.
-    """
-    permalink_selectors = [
-        'a[href*="/posts/"]',
-        'a[href*="/permalink/"]',
-        'a[href*="story_fbid="]',
-        'a[href*="/reel/"]',
-        'a[href*="/videos/"]',
-        'a[href*="/photo/"]',
-        'a[href*="/photos/"]',
-        'a[href*="/groups/"]',
-    ]
-
-    for selector in permalink_selectors:
-        links = container.locator(selector)
-        count = await links.count()
-        for i in range(count):
-            try:
-                href = await links.nth(i).get_attribute("href", timeout=1000)
-            except Exception:
-                continue
-            if not href:
-                continue
-            try:
-                return _normalize_facebook_url(href, base_url=base_url)
-            except Exception:
-                continue
-    return None
-
-
-async def _extract_comments(container: Any, raw_text: str, max_comments: int = 12) -> List[str]:
-    """Extract a best-effort list of comments from a post container."""
-    # Many Facebook layouts lazy-render comment DOM only after expanding comments.
-    expand_selectors = [
-        'div[role="button"][aria-label*="Comment"]',
-        'div[role="button"][aria-label*="Comments"]',
-        'div[role="button"][aria-label*="View more comments"]',
-        'div[role="button"][aria-label*="See more comments"]',
-        'a[role="link"][aria-label*="Comment"]',
-    ]
-    for selector in expand_selectors:
-        buttons = container.locator(selector)
-        count = min(await buttons.count(), 3)
-        for i in range(count):
-            try:
-                await buttons.nth(i).click(timeout=800)
-                await asyncio.sleep(0.2)
-            except Exception:
-                continue
-
-    selectors = [
-        'div[aria-label*="Comment"] div[dir="auto"]',
-        'ul li div[dir="auto"]',
-        'div[data-ad-comet-preview="message"] div[dir="auto"]',
-        'div[role="article"] ul div[dir="auto"]',
-    ]
-    comments: List[str] = []
-    seen: set[str] = set()
-
-    for selector in selectors:
-        nodes = container.locator(selector)
-        count = await nodes.count()
-        for i in range(count):
-            text = (await nodes.nth(i).inner_text()).strip()
-            if not text:
-                continue
-            if len(text) < 3:
-                continue
-            if text in seen:
-                continue
-            # Avoid re-capturing the original post text as a "comment".
-            if text == raw_text or text in raw_text:
-                continue
-            seen.add(text)
-            comments.append(text)
-            if len(comments) >= max_comments:
-                return comments
-    return comments
-
-
-async def _collect_from_permalink_links(
-    page: Any,
-    target_url: str,
-    seen_urls: set[str],
-    persist_cb: Optional[PersistCallback],
-) -> List[PostData]:
-    """
-    Fallback collector: harvest post-like links directly from page anchors.
-    Useful when Facebook profile layouts do not expose many role=article containers.
-    """
-    collected: List[PostData] = []
-    link_selector = (
-        'a[href*="/posts/"],'
-        'a[href*="/permalink/"],'
-        'a[href*="story_fbid="],'
-        'a[href*="/reel/"],'
-        'a[href*="/videos/"]'
-    )
-    links = page.locator(link_selector)
-    count = min(await links.count(), 250)
-    for i in range(count):
-        href = await links.nth(i).get_attribute("href")
-        if not href:
-            continue
-        try:
-            normalized = _normalize_facebook_url(href, base_url=target_url)
-        except Exception:
-            continue
-        if normalized in seen_urls:
-            continue
-        seen_urls.add(normalized)
-
-        link_text = (await links.nth(i).inner_text()).strip()
-        payload: PostData = {
-            "url": normalized,
-            "raw_text": link_text or "Permalink discovered from profile/page feed.",
-            "comments": [],
-            "comment_count": 0,
-            "source_type": "permalink_fallback",
-            "scraped_at": _now_iso(),
-        }
-        collected.append(payload)
-        if persist_cb:
-            maybe = persist_cb(payload)
-            if asyncio.iscoroutine(maybe):
-                await maybe
-    return collected
 
 
 async def _collect_from_container_list(
@@ -222,22 +83,16 @@ async def _collect_from_container_list(
     for i in range(count):
         container = container_list.nth(i)
         try:
-            raw_text = (await container.inner_text(timeout=1500)).strip()
+            snapshot = await container.evaluate(FACEBOOK_POST_JS, timeout=1500)
         except Exception:
-            continue  # Virtualized posts may disappear between count() and read.
-        if not raw_text or len(raw_text) < 20:
+            continue  # Virtualized posts can disappear while their DOM is read.
+        if not snapshot:
             continue
-
-        permalink = await _extract_permalink(container, base_url=target_url)
-        resolved_url = permalink or _fallback_content_url(target_url, raw_text, i)
+        resolved_url = _normalize_facebook_url(snapshot["url"], target_url)
         if resolved_url in seen_urls:
             continue
         seen_urls.add(resolved_url)
-
-        try:
-            comments = await asyncio.wait_for(_extract_comments(container, raw_text=raw_text), timeout=4)
-        except Exception:
-            comments = []
+        raw_text, comments = snapshot["raw_text"], snapshot["comments"]
         payload: PostData = {
             "url": resolved_url,
             "raw_text": raw_text,
@@ -257,22 +112,15 @@ async def _collect_from_container_list(
 
 
 async def _click_expand_controls(page: Any) -> None:
-    """Expand collapsed content areas to expose more feed/comment nodes."""
-    selectors = [
-        'div[role="button"][aria-label*="See more"]',
-        'div[role="button"][aria-label*="More posts"]',
-        'div[role="button"][aria-label*="View more comments"]',
-        'div[role="button"][aria-label*="See previous comments"]',
-    ]
-    for selector in selectors:
-        buttons = page.locator(selector)
-        count = min(await buttons.count(), 8)
-        for i in range(count):
-            try:
-                await buttons.nth(i).click(timeout=1000)
-                await asyncio.sleep(0.2)
-            except Exception:
-                continue
+    """Expand only post-message text in an identified public feed container."""
+    buttons = page.locator(POST_MESSAGE_SELECTOR).get_by_role("button", name=re.compile(r"^See more$", re.I))
+    for index in range(min(await buttons.count(), 8)):
+        button = buttons.nth(index)
+        try:
+            if await button.evaluate(FACEBOOK_POST_JS, timeout=1000):
+                await button.click(timeout=800)
+        except Exception:
+            continue
 
 
 async def _harvest_visible_posts(
@@ -284,7 +132,7 @@ async def _harvest_visible_posts(
     """Collect currently visible post containers from multiple Facebook layouts."""
     batch: List[PostData] = []
     locator_candidates = [
-        page.locator('div[role="article"]'),
+        page.locator('[role="article"]'),
         page.locator('div[data-ad-preview="message"]'),
         page.locator('div[data-pagelet*="FeedUnit"]'),
     ]
@@ -346,35 +194,12 @@ async def _wait_for_feed_settle(page: Any, rounds: int = 3) -> None:
 
 
 async def _collect_page_level_fallback(target_url: str, page: Any) -> Optional[PostData]:
-    """
-    Last-resort fallback so test runs still return one entry when selectors miss.
-    """
-    try:
-        title = (await page.title()).strip()
-    except Exception:
-        title = ""
-
-    body_text = ""
-    try:
-        body_text = (await page.locator("body").inner_text()).strip()
-    except Exception:
-        body_text = ""
-
-    # Keep payload concise while still useful in dashboard previews.
-    snippet_source = body_text if body_text else title
-    snippet = " ".join(snippet_source.split())[:1200].strip()
-    if not snippet:
-        snippet = "No extractable post containers found. Fallback page-level record."
-
-    payload: PostData = {
-        "url": target_url,
-        "raw_text": f"{title}\n\n{snippet}".strip(),
-        "comments": [],
-        "comment_count": 0,
-        "source_type": "page_fallback",
-        "scraped_at": _now_iso(),
+    """Report selector misses without ever capturing page chrome or chat text."""
+    return {
+        "url": target_url, "target_url": target_url,
+        "raw_text": "No identifiable Facebook post text was found. Messenger, navigation and other page panels were excluded.",
+        "comments": [], "comment_count": 0, "source_type": "batch_warning", "scraped_at": _now_iso(),
     }
-    return payload
 
 
 def _build_emergency_fallback(target_url: str, reason: str = "") -> PostData:
@@ -497,6 +322,7 @@ async def scrape_group(
                 for cycle in range(max_cycles):
                     report_progress(f"Scroll {cycle + 1} of {'up to ' if not strict_scroll_limit else ''}{max_cycles}")
                     before = len(seen_urls)
+                    await _click_expand_controls(page)
                     # Harvest each scroll cycle because older nodes may be virtualized out.
                     collected.extend(
                         await _harvest_visible_posts(
@@ -506,7 +332,6 @@ async def scrape_group(
                             persist_cb=remember_post,
                         )
                     )
-                    await _click_expand_controls(page)
                     await page.mouse.wheel(0, random.randint(1600, 3200))
                     await page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
                     await _wait_for_feed_settle(page, rounds=2)
@@ -539,17 +364,6 @@ async def scrape_group(
                         persist_cb=remember_post,
                     )
                 )
-
-                # Fallback for sparse profile layouts where only one visible container is exposed.
-                if len(collected) <= 1:
-                    collected.extend(
-                        await _collect_from_permalink_links(
-                            page=page,
-                            target_url=target_url,
-                            seen_urls=seen_urls,
-                            persist_cb=remember_post,
-                        )
-                    )
 
                 if not collected:
                     fallback_payload = await _collect_page_level_fallback(target_url=target_url, page=page)

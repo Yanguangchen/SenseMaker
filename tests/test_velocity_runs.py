@@ -79,9 +79,13 @@ class RunStoreTests(VelocityTestCase):
         self.assertEqual(other, second)
         self.assertEqual(store.load_cards(self.db, "someone@example.com"), [])
         self.assertEqual(len([key for key in self.db.rows if "/runs/" in key]), 10)
-        sheet = velocity_card_sheet(saved)
+        with patch("modules.auth.allowed_emails", return_value={EMAIL}):
+            history = store.load_run_history(self.db, EMAIL, saved)
+        sheet = velocity_card_sheet({**saved, "runs": history})
         self.assertIn("Run 10", sheet)
-        self.assertIn("Showing the latest 8 runs", sheet)
+        self.assertEqual([run["number"] for run in history], list(range(1, 11)))
+        self.assertIn('title="Run 1 ·', sheet)
+        self.assertNotIn("Showing the latest 8 runs", sheet)
 
     def test_finishing_after_card_removal_archives_without_restoring_card(self):
         card = store.add_card(self.db, EMAIL, url=post_url())[0]
@@ -134,9 +138,12 @@ class RunStoreTests(VelocityTestCase):
         self.assertIn('title="Needs likes + comments totals from both the latest and previous runs.">—</td>', sheet)
         self.assertNotIn('>Check 1</th>', sheet)
         empty = velocity_card_sheet({"posts": []})
-        self.assertIn('colspan="12"', empty)
+        self.assertIn('colspan="4"', empty)
         self.assertIn('class="crt-remark">Remark</th>', empty)
-        self.assertEqual(empty.count('title="Not run yet"'), 8)
+        self.assertNotIn('title="Not run yet"', empty)
+        self.assertIn('<details class="crt-legend"><summary>legend</summary><div class="crt-key">', empty)
+        self.assertIn("Each check = likes + comments.", empty)
+        self.assertIn("</p></details></section>", empty)
 
     def test_dates_normalize_to_utc_and_growth_from_zero_is_not_infinite(self):
         card = store.add_card(self.db, EMAIL, url=post_url())[0]
