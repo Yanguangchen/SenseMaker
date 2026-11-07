@@ -60,6 +60,8 @@ class FacebookSearchUITests(unittest.TestCase):
         self.assertEqual(app.text_input(key="facebook_search_url").value, OYOSHI_SEARCH_URL)
         self.assertEqual(app.slider(key="facebook_search_scroll_times").value, 3)
         self.assertFalse(app.button(key="collect_facebook_posts").disabled)
+        self.assertNotIn("facebook_search_wizard_step_next", [button.key for button in app.button])
+        self.assertNotIn("facebook_search_wizard_step_previous", [button.key for button in app.button])
         app.button(key="collect_facebook_posts").click().run()
         self.assertFalse(app.exception)
         self.assertEqual(self.collect.call_args.kwargs["urls"], [OYOSHI_SEARCH_URL])
@@ -122,7 +124,9 @@ class FacebookSearchUITests(unittest.TestCase):
             launch.assert_called_once()
             self.assertTrue(app.button(key="collect_facebook_posts").disabled)
             self.assertFalse(app.button(key="cancel_facebook_collection").disabled)
-            asyncio.run(run_collection(Mock(), Mock()))
+            activity = Mock()
+            asyncio.run(run_collection(Mock(), Mock(), activity))
+            self.assertIs(run.call_args.kwargs["on_activity"], activity)
             self.assertEqual(run.call_args.kwargs["facebook_owner"], "owner@example.com")
             self.assertEqual(run.call_args.kwargs["scroll_times"], 3)
             self.assertTrue(run.call_args.kwargs["strict_scroll_limit"])
@@ -189,6 +193,60 @@ class FacebookSearchCollectorTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(collect.call_args.kwargs["scroll_min"], 2)
         self.assertEqual(collect.call_args.kwargs["scroll_max"], 2)
         self.assertTrue(collect.call_args.kwargs["strict_scroll_limit"])
+
+    async def test_source_activity_reports_live_counts_before_source_completion(self):
+        from dashboard import _run_multi_scrape_async
+
+        events = []
+        async def collect(target_url, on_progress, **kwargs):
+            on_progress("Opening source", 0)
+            on_progress("Scroll 1 of 2", 3)
+            self.assertEqual(events[-1], ("activity", target_url, "Scroll 1 of 2", 3))
+            self.assertFalse(any(event[0] == "finished" for event in events))
+            return [{"url": f"{target_url}#post-{index}", "source_type": "container_post"} for index in range(3)] + [
+                {"url": target_url, "source_type": "batch_warning"}]
+
+        with patch("dashboard.scrape_group", side_effect=collect):
+            await _run_multi_scrape_async(
+                [OYOSHI_SEARCH_URL], headless=True, scroll_times=2,
+                on_activity=lambda *args: events.append(("activity", *args)),
+                on_progress=lambda *args: events.append(("finished", *args)),
+            )
+        self.assertEqual(events[-2], ("activity", OYOSHI_SEARCH_URL, "Source finished", 3))
+        self.assertEqual(events[-1], ("finished", 1, 1, OYOSHI_SEARCH_URL))
+
+
+class LocalCollectionProgressTests(unittest.TestCase):
+    def test_local_collection_renders_activity_and_clears_running_status_on_completion(self):
+        from dashboard import _show_collection_progress
+
+        snapshots = []
+        def render(completed, total, activity, started_at):
+            snapshots.append((completed, total, dict(activity)))
+            _show_collection_progress(completed, total, activity, started_at)
+
+        async def collect(target_url, on_progress, **kwargs):
+            on_progress("Scroll 1 of 2", 1)
+            return [{"url": target_url, "raw_text": "Collected post", "source_type": "container_post"}]
+
+        script = (
+            "from dashboard import _render_collect_controls\n"
+            "from modules.facebook_session import FacebookSession\n"
+            f"_render_collect_controls('facebook', 'owner@example.com', [{OYOSHI_SEARCH_URL!r}], True, "
+            "FacebookSession('connected', '123'), use_headless=True, scroll_times=2, "
+            "reddit_limit=50, reddit_comments=20)\n"
+        )
+        with patch("dashboard.IS_CLOUD", False), patch("dashboard.scrape_group", side_effect=collect), \
+             patch("dashboard._show_collection_progress", side_effect=render):
+            app = AppTest.from_string(script).run()
+            app.button(key="collect_facebook_posts").click().run()
+            self.assertFalse(app.exception)
+            self.assertIn((0, 1, {OYOSHI_SEARCH_URL: ("Scroll 1 of 2", 1)}), snapshots)
+            self.assertEqual(snapshots[-1], (1, 1, {OYOSHI_SEARCH_URL: ("Source finished", 1)}))
+            self.assertFalse(app.get("progress"))
+            self.assertFalse(app.button(key="collect_facebook_posts").disabled)
+            self.assertEqual(len(app.session_state["last_scrape_results"]), 1)
+            self.assertIn("save_last_results_btn", [button.key for button in app.button])
 
 
 if __name__ == "__main__":

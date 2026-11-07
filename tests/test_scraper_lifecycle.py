@@ -18,10 +18,13 @@ class ScraperLifecycleTests(unittest.IsolatedAsyncioTestCase):
                 async def remote(*args, **kwargs):
                     yield context
                 sdk = MagicMock(__aenter__=AsyncMock(), __aexit__=AsyncMock(return_value=False))
+                progress = []
                 async def harvest(**kwargs):
                     url = f"https://www.facebook.com/example/posts/{len(kwargs['seen_urls'])}"
                     kwargs["seen_urls"].add(url)
-                    return [{"url": url, "raw_text": "New Oyoshi post", "source_type": "container_post"}]
+                    post = {"url": url, "raw_text": "New Oyoshi post", "source_type": "container_post"}
+                    await kwargs["persist_cb"](post)
+                    return [post]
                 with patch("modules.scraper.async_playwright", return_value=sdk), \
                      patch("modules.facebook_remote.remote_facebook_context", side_effect=remote), \
                      patch("modules.scraper._goto_with_resilient_wait", new_callable=AsyncMock) as goto, \
@@ -29,10 +32,16 @@ class ScraperLifecycleTests(unittest.IsolatedAsyncioTestCase):
                      patch("modules.scraper._click_expand_controls", new_callable=AsyncMock), \
                      patch("modules.scraper._wait_for_feed_settle", new_callable=AsyncMock):
                     rows = await scraper.scrape_group(OYOSHI_SEARCH_URL, scroll_min=limit, scroll_max=limit,
-                                                      strict_scroll_limit=True, facebook_owner="owner@example.com")
+                                                      strict_scroll_limit=True, facebook_owner="owner@example.com",
+                                                      on_progress=lambda message, posts: progress.append((message, posts)))
                 goto.assert_awaited_once_with(page, target_url=OYOSHI_SEARCH_URL, timeout_ms=60_000)
                 self.assertEqual(page.mouse.wheel.await_count, limit)
                 self.assertEqual(len(rows), limit * 2 + 1)
+                self.assertEqual(progress[0], ("Connecting to Facebook", 0))
+                self.assertIn(("Opening source", 0), progress)
+                self.assertIn((f"Scroll 1 of {limit}", 1), progress)
+                self.assertIn((f"Scroll {limit} of {limit}", limit * 2), progress)
+                self.assertEqual(progress[-1], ("Finishing source", len(rows)))
 
     async def test_stalled_collection_preserves_posts_and_releases_the_remote_context(self):
         context = MagicMock(new_page=AsyncMock())

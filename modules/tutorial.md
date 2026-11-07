@@ -27,6 +27,7 @@ Run your first end-to-end analysis with a public website article (no social logi
 | **Tutorial** | Browse or search this guide by chapter. |
 
 - **Sidebar & theme:** Click the **CrisisRadar** header (or press `Escape`) to collapse/expand the sidebar. Use the top-right menu (**Settings**) to switch between light and dark themes, and **Sign out** in the sidebar when finished.
+- **Browserbase usage:** The bar above the workspaces shows shared project browser minutes, remaining configured allowance, proxy traffic and the concurrency limit. It refreshes every minute; click **↻** to refresh sooner. Amber means at least 80% used; red means the allowance has been reached. A failed refresh marks the last reading as stale. The initial allowance is the Free plan's 1 hour; the administrator should update it when changing plans.
 
 ## Scrape Data: overview & Facebook
 
@@ -45,7 +46,7 @@ Open **Scrape Data** to choose from five main source cards—**Facebook**, **Oyo
 
 1. **Connect Facebook:** Open **Scrape Data → Facebook**. If not connected yet, click **Log in to Facebook**, complete sign-in in the browser window, and click **Save Facebook login**. If your status is **Saved**, you can use **Check Facebook connection** to verify it before collecting.
 2. **Your links:** Select saved URLs in **Sources** (or **Select all**), or paste direct group, page, or post URLs into **Add links (one per line)**. Valid pasted URLs save and select automatically when you finish editing. Click **Next →**.
-3. **Collect posts:** Set **Scroll Iterations** (1–50), click **Collect posts**, then enter a **Custom title** and click **Save data to cloud**.
+3. **Collect posts:** Set **Scroll Iterations** (1–50), then click **Collect posts** in the final navigation row. Watch the current source, scroll progress, post count and elapsed time while collection runs. When it finishes, enter a **Custom title** and click **Save data to cloud**.
 
 - **Direct navigation:** The collector opens each selected Facebook URL directly rather than typing into Facebook's search bar.
 - **Link management:** **Clear** deselects links and clears pasted input while keeping your saved library. **Remove … saved links** deletes selected URLs from your account library without deleting previously saved posts.

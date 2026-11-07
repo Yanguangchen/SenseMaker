@@ -25,6 +25,7 @@ class DashboardAccessTests(unittest.TestCase):
         # The dataset browser loads metadata on entry; keep access tests offline.
         self.stack.enter_context(patch("modules.record_management_ui.init_db", self.database))
         self.stack.enter_context(patch("modules.record_management_ui.load_record_catalog", return_value=[]))
+        self.usage_bar = self.stack.enter_context(patch("modules.browserbase_usage_ui.render_browserbase_usage_bar"))
 
     def run_dashboard(self):
         app = AppTest.from_file(str(Path(__file__).resolve().parents[1] / "dashboard.py")).run(timeout=30)
@@ -36,6 +37,7 @@ class DashboardAccessTests(unittest.TestCase):
         app = self.run_dashboard()
         self.assertEqual(len(app.tabs), 0)
         self.database.assert_not_called()
+        self.usage_bar.assert_not_called()
 
     def test_approved_identity_can_open_all_tabs(self):
         self.component.return_value = lambda **kwargs: {"id_token": "signed-token", "event_id": "login"}
@@ -45,6 +47,7 @@ class DashboardAccessTests(unittest.TestCase):
             self.assertEqual([button.label for button in app.button if button.key and button.key.startswith("scrape_open_")],
                              ["Open Facebook →", "Open Oyoshi on Facebook →", "Open X →", "Open Online news →", "Open Custom website →", "Open Reddit"])
             verify.assert_called_once_with("signed-token", {"editor@example.com"})
+            self.usage_bar.assert_called_once_with("editor@example.com")
 
     def test_hosted_deployment_enables_configured_remote_login_and_keeps_collection_headless(self):
         self.component.return_value = lambda **kwargs: {"id_token": "signed-token", "event_id": "login"}

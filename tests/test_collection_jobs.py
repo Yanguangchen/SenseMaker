@@ -33,9 +33,10 @@ class CollectionWorkerTests(unittest.TestCase):
 
     def test_cancel_waits_for_cleanup_keeps_completed_sources_and_is_idempotent(self):
         started, cleaning, finish_cleanup = threading.Event(), threading.Event(), threading.Event()
-        async def run(progress, partial):
+        async def run(progress, partial, activity):
             partial([{"url": "finished-source", "raw_text": "completed post"}])
             progress(1, 2, "finished-source")
+            activity("second", "Scroll 2 of 5", 3)
             started.set()
             try:
                 await asyncio.Event().wait()
@@ -46,6 +47,8 @@ class CollectionWorkerTests(unittest.TestCase):
         job_id = jobs.start_collection("editor@example.com", ["first", "second"], run)
         job = jobs.collection_job("editor@example.com", job_id)
         self.assertTrue(started.wait(2))
+        self.assertEqual(job.completed, 1)
+        self.assertEqual(job.activity, {"second": ("Scroll 2 of 5", 3)})
         jobs.cancel_collection("other@example.com", job_id)
         self.assertEqual(job.status, "running")
         jobs.cancel_collection("editor@example.com", job_id)
@@ -60,7 +63,7 @@ class CollectionWorkerTests(unittest.TestCase):
         self.assertIsNone(jobs.active_collection("editor@example.com"))
 
     def test_completed_results_remain_available_to_the_owner_across_tab_reruns(self):
-        async def run(progress, partial):
+        async def run(progress, partial, activity):
             progress(1, 1, "first")
             return [{"url": "first"}]
         job_id = jobs.start_collection("editor@example.com", ["first"], run)
@@ -94,9 +97,40 @@ class CollectionProgressUITests(unittest.TestCase):
             app.button(key="open_facebook_steps").click().run()
             self.assertFalse(list(app.exception))
             self.assertTrue(app.button(key="collect_facebook_posts").disabled)
+            self.assertEqual(app.button(key="collect_facebook_posts").label, "Collecting posts…")
+            self.assertTrue(app.button(key="facebook_wizard_step_previous").disabled)
+            self.assertNotIn("facebook_wizard_step_next", [button.key for button in app.button])
             self.assertFalse(app.button(key="cancel_facebook_collection").disabled)
             self.assertFalse(any("Old busy error" in warning.value for warning in app.warning))
             self.assertEqual(app.session_state["facebook_collection_job"], "existing")
+
+    def test_running_progress_refreshes_scroll_posts_and_elapsed_in_overview_and_dialog(self):
+        url = "https://www.facebook.com/groups/test"
+        job = jobs.CollectionJob("existing", (url,), started_at=100,
+                                 activity={url: ("Scroll 2 of up to 16", 7)})
+        with patch("dashboard.active_collection", return_value=job), \
+             patch("dashboard.collection_job", return_value=job), patch("dashboard.time.time", return_value=175):
+            app = AppTest.from_string(self.script).run()
+            self.assertFalse(app.exception)
+            progress = app.get("progress")[0].proto
+            self.assertEqual(progress.value, 0)
+            self.assertIn("0 of 1 sources finished · 7 posts collected · 1m 15s elapsed", progress.text)
+            self.assertTrue(any("Scroll 2 of up to 16" in caption.value for caption in app.caption))
+            job.activity = {url: ("Scroll 3 of up to 16", 12)}
+            app.button(key="open_facebook_steps").click().run()
+            self.assertFalse(app.exception)
+            self.assertIn("12 posts collected", app.get("progress")[0].proto.text)
+            self.assertTrue(any("Scroll 3 of up to 16" in caption.value for caption in app.caption))
+
+    def test_stopping_progress_keeps_partial_count_and_disables_cancel(self):
+        job = jobs.CollectionJob("existing", ("first", "second"), status="cancelling", completed=1,
+                                 results=[{"url": "post", "raw_text": "Kept"}, {"source_type": "batch_error"}])
+        with patch("dashboard.active_collection", return_value=job), patch("dashboard.collection_job", return_value=job):
+            app = AppTest.from_string(self.script).run()
+            self.assertFalse(app.exception)
+            self.assertEqual(app.get("progress")[0].proto.value, 50)
+            self.assertIn("Stopping collection · 1 of 2 sources finished · 1 posts collected", app.get("progress")[0].proto.text)
+            self.assertTrue(app.button(key="cancel_facebook_collection").disabled)
 
     def test_new_collection_clears_the_previous_error_and_attaches_to_worker(self):
         job = jobs.CollectionJob("new", ("https://www.facebook.com/groups/test",))

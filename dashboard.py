@@ -19,6 +19,7 @@ import streamlit as st
 
 from modules.auth import require_access
 from modules.ui import apply_brand, running_glow, show_running_glow
+from modules.browserbase_usage_ui import render_browserbase_usage_bar
 from modules.analysis_library import (
     SOURCE_LABELS, dataset_date_label, dataset_key, dataset_options, matches_sources,
     select_history, select_records,
@@ -506,6 +507,7 @@ async def _run_multi_scrape_async(
     facebook_owner: str | None = None,
     on_results: Optional[Callable[[List[Dict[str, Any]]], None]] = None,
     strict_scroll_limit: bool = False,
+    on_activity: Optional[Callable[[str, str, int], None]] = None,
 ) -> List[Dict[str, Any]]:
     # Persistent remote profiles must not be opened concurrently.
     semaphore = asyncio.Semaphore(1 if facebook_owner else max(1, concurrency))
@@ -521,6 +523,7 @@ async def _run_multi_scrape_async(
                 reddit_limit=reddit_limit, reddit_comments=reddit_comments,
                 **({"facebook_owner": facebook_owner} if facebook_owner else {}),
                 **({"strict_scroll_limit": True} if strict_scroll_limit else {}),
+                **({"on_progress": lambda message, posts: on_activity(url, message, posts)} if on_activity else {}),
             )
             # Preserve which input URL produced each row.
             for row in rows:
@@ -542,7 +545,12 @@ async def _run_multi_scrape_async(
     async def bounded_scrape(url: str) -> List[Dict[str, Any]]:
         nonlocal completed
         async with semaphore:
+            if on_activity:
+                on_activity(url, "Starting collection", 0)
             rows = await scrape_one(url)
+            if on_activity:
+                posts = sum(row.get("source_type") not in NON_CONTENT_TYPES for row in rows)
+                on_activity(url, "Source finished", posts)
             completed += 1
             if on_progress:
                 on_progress(completed, len(urls), url)
@@ -1380,6 +1388,7 @@ div[data-testid="stDialog"] [role="dialog"] {
 
 def _apply_ui_theme() -> None:
     st.markdown(_UI_THEME, unsafe_allow_html=True)
+    st.html(Path(__file__).parent / "modules" / "theme" / "button-shimmer.css")
     apply_brand()
 
 
@@ -1492,6 +1501,19 @@ def _render_autosave_status(collection: dict[str, Any], retry_key: str,
             st.rerun()
 
 
+def _show_collection_progress(completed: int, total: int, activity: dict[str, tuple[str, int]],
+                              started_at: float, *, posts: int = 0, stopping: bool = False) -> None:
+    elapsed = max(0, int(time.time() - started_at))
+    duration = f"{elapsed // 60}m {elapsed % 60:02d}s" if elapsed >= 60 else f"{elapsed}s"
+    posts = max(posts, sum(count for _message, count in activity.values()))
+    status = "Stopping collection" if stopping else "Collection running"
+    st.progress(completed / max(total, 1), text=(
+        f"{status} · {completed} of {total} sources finished · {posts} posts collected · {duration} elapsed"))
+    for url, (message, _count) in activity.items():
+        if message != "Source finished":
+            st.caption(f"{message} · {url}")
+
+
 @st.fragment(run_every=2)
 def _render_facebook_collection_progress(email: str, job_id: str) -> None:
     from modules.auth import allowed_emails, verify_access
@@ -1515,7 +1537,9 @@ def _render_facebook_collection_progress(email: str, job_id: str) -> None:
         st.rerun(scope="app")
     total = len(job.urls)
     show_running_glow()
-    st.progress(job.completed / max(total, 1), text=f"Collection running · {job.completed} of {total} sources finished")
+    _show_collection_progress(job.completed, total, job.activity, job.started_at,
+                              posts=sum(row.get("source_type") not in NON_CONTENT_TYPES for row in job.results),
+                              stopping=job.status == "cancelling")
     if job.status == "cancelling":
         st.info("Stopping collection and releasing your Facebook connection…")
     else:
@@ -1724,7 +1748,6 @@ def _facebook_steps_modal(user_email: str, session: FacebookSession,
             links_valid = bool(st.session_state.get(FACEBOOK_LINKS_VALID_KEY, True))
             st.caption(f"Collecting from {len(targets)} selected link{'s' if len(targets) != 1 else ''}. "
                        "Go back to change them.")
-        can_continue = False
         if not _facebook_ready(session):
             st.info("Your Facebook connection needs attention. Go back to the first step to reconnect.")
         settings = st.columns(2)
@@ -1743,11 +1766,10 @@ def _facebook_steps_modal(user_email: str, session: FacebookSession,
             use_headless=use_headless, scroll_times=scroll_times,
             reddit_limit=50, reddit_comments=20,
             strict_scroll_limit=search,
+            previous_step=(step_key, labels[index - 1]) if index > 0 else None,
         )
-    posts = [r for r in (st.session_state.get("last_scrape_results") or [])
-             if r.get("source_type") not in NON_CONTENT_TYPES]
-    if not (index >= len(labels) - 1 and bool(posts)):
-        _render_step_nav(step_key, labels, index, can_continue)
+        return  # The final navigation action is Collect posts.
+    _render_step_nav(step_key, labels, index, can_continue)
 
 
 def _render_collect_controls(
@@ -1755,6 +1777,7 @@ def _render_collect_controls(
     facebook_session: FacebookSession, *, use_headless: bool, scroll_times: int,
     reddit_limit: int, reddit_comments: int,
     strict_scroll_limit: bool = False,
+    previous_step: tuple[str, str] | None = None,
 ) -> None:
     # Keep each source's results and save controls independent when switching sources.
     result_key = "last_scrape" if platform == "facebook" else "last_reddit_scrape"
@@ -1767,8 +1790,16 @@ def _render_collect_controls(
     collection_id = st.session_state.get("facebook_collection_job") if hosted_facebook else None
     if collection_id:
         _render_facebook_collection_progress(user_email, collection_id)
-    if st.button(
-        "Collect posts", key=f"collect_{platform}_posts", type="primary", use_container_width=True,
+    action = st.container()
+    posts = [row for row in (st.session_state.get(f"{result_key}_results") or [])
+             if row.get("source_type") not in NON_CONTENT_TYPES]
+    if previous_step and (not posts or active_job):
+        previous, action = action.columns(2)
+        previous.button("← Previous", key=f"{previous_step[0]}_previous", use_container_width=True,
+                        disabled=bool(active_job), on_click=_go_to_step, args=previous_step)
+    if action.button(
+        "Collecting posts…" if active_job else "Collect posts",
+        key=f"collect_{platform}_posts", type="primary", use_container_width=True,
         disabled=not links_valid or not target_urls or (platform == "facebook" and IS_CLOUD and (
             facebook_session.status != "connected" or bool(st.session_state.get("facebook_login_job")) or bool(active_job))),
     ):
@@ -1782,15 +1813,33 @@ def _render_collect_controls(
             # Remove warnings from the previous attempt as soon as a new run starts.
             st.session_state[f"{result_key}_results"] = None
             if hosted_facebook:
-                async def run(progress, partial):
+                async def run(progress, partial, activity):
                     return await _run_multi_scrape_async(
                         urls=list(target_urls), headless=True, scroll_times=scroll_times,
                         facebook_owner=user_email, on_progress=progress, on_results=partial,
-                        strict_scroll_limit=strict_scroll_limit,
+                        strict_scroll_limit=strict_scroll_limit, on_activity=activity,
                     )
                 st.session_state["facebook_collection_job"] = start_collection(user_email, target_urls, run)
                 st.rerun()
-            progress = st.progress(0, text=f"Starting collection for {len(target_urls)} links…")
+            progress_area = st.empty()
+            activity: dict[str, tuple[str, int]] = {}
+            completed = 0
+            started_at = time.time()
+
+            def render_progress() -> None:
+                with progress_area.container():
+                    _show_collection_progress(completed, len(target_urls), activity, started_at)
+
+            def update_activity(url: str, message: str, posts: int) -> None:
+                activity[url] = (message, posts)
+                render_progress()
+
+            def update_progress(done: int, total: int, url: str) -> None:
+                nonlocal completed
+                completed = done
+                render_progress()
+
+            render_progress()
             with running_glow(), st.spinner("Running scraper..."):
                 try:
                     results = _run_multi_scrape_sync(
@@ -1800,17 +1849,16 @@ def _render_collect_controls(
                         reddit_limit=int(reddit_limit), reddit_comments=int(reddit_comments),
                         facebook_owner=user_email if platform == "facebook" and IS_CLOUD else None,
                         strict_scroll_limit=strict_scroll_limit,
-                        on_progress=lambda done, total, _url: progress.progress(
-                            done / total, text=f"Processed {done} of {total} links"
-                        ),
+                        on_progress=update_progress, on_activity=update_activity,
                     )
                     st.session_state[f"{result_key}_results"] = results
                     _remember_collection(results, platform.title())
-                    if any(row.get("facebook_connection_error") for row in results):
-                        # Refresh connection controls from the saved check result,
-                        # while retaining any posts collected before the failure.
+                    progress_area.empty()
+                    if platform == "facebook":
+                        # Refresh the action row and connection status after collection.
                         st.rerun()
                 except Exception as exc:
+                    progress_area.empty()
                     st.session_state[f"{result_key}_results"] = []
                     _remember_collection([], platform.title())
                     error_text = str(exc).strip() or repr(exc)
@@ -2699,6 +2747,7 @@ def main() -> None:
         # Finish the script normally so Streamlit mounts the sign-in iframe.
         # st.stop() here can leave new component frames at about:blank.
         return
+    render_browserbase_usage_bar(user_email)
     try:
         facebook_session = (remote_facebook_session(user_email) if IS_CLOUD else
                             _get_facebook_session(_facebook_storage_path()))

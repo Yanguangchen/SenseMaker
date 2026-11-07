@@ -555,6 +555,18 @@ are disabled. Login windows close after about three minutes or on cancellation.
 Facebook tasks using the same profile run one at a time. Provider free-plan
 usage limits apply. Local Facebook login continues to open Chrome on your computer.
 
+A Browserbase usage bar appears above the workspaces after sign-in. It reads project browser
+minutes, proxy traffic and the concurrency limit through the read-only Browserbase API, with
+a shared 60-second cache, automatic refresh and a manual refresh button. Failed refreshes
+label the last successful reading as stale instead of showing zero usage.
+Set `BROWSERBASE_PROJECT_ID` if your key can access more than one project.
+The public API does not return the plan's browser-hour allowance: set `BROWSERBASE_PLAN`
+to `free` (the initial default, 1 hour), `developer` (100 hours), or `startup` (500 hours).
+For a custom allowance, set `BROWSERBASE_BROWSER_HOURS_LIMIT`. Confirm these settings against
+your [Browserbase plan](https://docs.browserbase.com/account/billing/plans) after upgrading.
+The bar compares project usage with this configured allowance; paid plans can incur overages,
+so the bar does not stop collections or claim to be an enforced spending cap.
+
 Saved links, collected posts and Browserbase profile metadata remain in Firestore;
 no database migration or Railway volume is needed. Container restarts can interrupt
 in-progress work. Browser sign-in is restored on reconnect, while unsaved Streamlit

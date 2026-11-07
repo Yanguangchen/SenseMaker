@@ -230,6 +230,9 @@ class SourceWorkspaceTests(unittest.TestCase):
             app.button(key="select_all_links_facebook").click().run()
             app.button(key="facebook_wizard_step_next").click().run()
             # Step navigation is accessible before posts are collected:
+            self.assertNotIn("facebook_wizard_step_next", [button.key for button in app.button])
+            self.assertEqual(sum(button.key == "collect_facebook_posts" for button in app.button), 1)
+            self.assertFalse(app.button(key="collect_facebook_posts").disabled)
             app.button(key="facebook_wizard_step_previous").click().run()
             app.button(key="clear_selected_links_facebook").click().run()
             self.assertFalse(list(app.exception))

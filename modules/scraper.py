@@ -424,6 +424,7 @@ async def scrape_group(
     reddit_comments: int = 20,
     facebook_owner: str | None = None,
     strict_scroll_limit: bool = False,
+    on_progress: Optional[Callable[[str, int], None]] = None,
 ) -> List[PostData]:
     """Route Reddit to its API; use browser collection for existing web sources."""
     if is_reddit_url(target_url):
@@ -442,9 +443,17 @@ async def scrape_group(
     collected: List[PostData] = []
     seen_urls: set[str] = set()
     partial_records: dict[str, PostData] = {}
+    progress_message = "Starting browser"
+
+    def report_progress(message: str) -> None:
+        nonlocal progress_message
+        progress_message = message
+        if on_progress:
+            on_progress(message, len(partial_records))
 
     async def remember_post(record: PostData) -> None:
         partial_records[record["url"]] = record
+        report_progress(progress_message)
         if persist_cb:
             maybe = persist_cb(record)
             if asyncio.iscoroutine(maybe):
@@ -456,6 +465,7 @@ async def scrape_group(
     if is_facebook and os.getenv("SENSEMAKER_HOSTED") == "1" and not remote:
         from modules.facebook_session import FacebookLoginError
         raise FacebookLoginError("Sign in to CrisisRadar and connect Facebook before collecting posts.")
+    report_progress("Connecting to Facebook" if is_facebook else "Starting browser")
     async with async_playwright() as p, AsyncExitStack() as resources:
         if remote:
             from modules.facebook_remote import remote_facebook_context
@@ -477,6 +487,7 @@ async def scrape_group(
 
         try:
             async with asyncio.timeout(REMOTE_COLLECTION_SECONDS if remote else None):
+                report_progress("Opening source")
                 await _goto_with_resilient_wait(page, target_url=target_url, timeout_ms=60_000)
 
                 min_cycles = max(1, scroll_min)
@@ -484,6 +495,7 @@ async def scrape_group(
                 no_growth_cycles = 0
 
                 for cycle in range(max_cycles):
+                    report_progress(f"Scroll {cycle + 1} of {'up to ' if not strict_scroll_limit else ''}{max_cycles}")
                     before = len(seen_urls)
                     # Harvest each scroll cycle because older nodes may be virtualized out.
                     collected.extend(
@@ -518,6 +530,7 @@ async def scrape_group(
                     if cycle + 1 >= min_cycles and no_growth_cycles >= 3:
                         break
 
+                report_progress("Reading remaining posts")
                 collected.extend(
                     await _harvest_visible_posts(
                         page=page,
@@ -542,10 +555,7 @@ async def scrape_group(
                     fallback_payload = await _collect_page_level_fallback(target_url=target_url, page=page)
                     if fallback_payload:
                         collected.append(fallback_payload)
-                        if persist_cb:
-                            maybe = persist_cb(fallback_payload)
-                            if asyncio.iscoroutine(maybe):
-                                await maybe
+                        await remember_post(fallback_payload)
         except TimeoutError:
             seen = {record["url"] for record in collected}
             collected.extend(record for url, record in partial_records.items() if url not in seen)
@@ -562,6 +572,7 @@ async def scrape_group(
             if not collected:
                 collected.append(_build_emergency_fallback(target_url, reason=str(exc)))
         finally:
+            report_progress("Finishing source")
             try:
                 if is_facebook and not remote:
                     # Facebook renews its cookies during use; keep that renewal

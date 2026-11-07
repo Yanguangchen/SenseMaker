@@ -1,0 +1,45 @@
+/* A quiet sweep for actions that run analysis, generate content, or collect data. */
+:is(
+  .st-key-run_analysis_selected_btn,
+  .st-key-gencite_run,
+  .st-key-gencite_run_again,
+  .st-key-gencite_test_keywords,
+  [class*="st-key-gencite_generate_"],
+  .st-key-content_generate,
+  [class*="st-key-collect_"]
+) button:not(:disabled) {
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
+}
+
+@keyframes sm-button-shimmer {
+  0% { transform: translateX(-110%); opacity: 0; }
+  6% { opacity: 1; }
+  28% { transform: translateX(110%); opacity: 0; }
+  100% { transform: translateX(110%); opacity: 0; }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  :is(
+    .st-key-run_analysis_selected_btn,
+    .st-key-gencite_run,
+    .st-key-gencite_run_again,
+    .st-key-gencite_test_keywords,
+    [class*="st-key-gencite_generate_"],
+    .st-key-content_generate,
+    [class*="st-key-collect_"]
+  ) button:not(:disabled)::after {
+    content: "";
+    position: absolute;
+    inset: -1px;
+    z-index: -1;
+    pointer-events: none;
+    background: linear-gradient(110deg,
+      transparent 25%, rgb(139 123 255 / 0.14) 42%,
+      rgb(255 255 255 / 0.45) 50%, rgb(125 211 252 / 0.14) 58%, transparent 75%);
+    transform: translateX(-110%);
+    opacity: 0;
+    animation: sm-button-shimmer 5.5s ease-in-out 0.5s infinite;
+  }
+}

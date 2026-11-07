@@ -22,6 +22,7 @@ class CollectionJob:
     status: str = "running"
     completed: int = 0
     results: list[dict[str, Any]] = field(default_factory=list)
+    activity: dict[str, tuple[str, int]] = field(default_factory=dict)
     error: str = ""
     started_at: float = field(default_factory=time.time)
     finished_at: float = 0
@@ -79,13 +80,17 @@ def start_collection(email: str, urls: list[str], run: Callable[..., Awaitable[l
     def partial(rows: list[dict[str, Any]]) -> None:
         job.results = list(rows)
 
+    def activity(url: str, message: str, posts: int) -> None:
+        # Replace the snapshot so UI polling never iterates a changing dictionary.
+        job.activity = {**job.activity, url: (message, posts)}
+
     async def execute() -> None:
         with _lock:
             job.loop = asyncio.get_running_loop()
             job.task = asyncio.current_task()
         if job.cancel.is_set():
             raise asyncio.CancelledError()
-        job.results = await run(progress, partial)
+        job.results = await run(progress, partial, activity)
 
     def worker() -> None:
         status = "complete"
