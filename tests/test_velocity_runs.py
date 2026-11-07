@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock, patch
 from modules import velocity_jobs as jobs, velocity_tracking as store
 from modules.facebook_session import FacebookLoginError
 from modules.saved_links import library_owner_id
-from modules.velocity_table import velocity_card_sheet, view_status
+from modules.velocity_table import velocity_card_sheet, view_status, views_change_percent
 from tests import test_velocity_tracking as fixtures
 
 VelocityTestCase = fixtures.VelocityTestCase
@@ -24,6 +24,20 @@ def run_for(card, index=1, views=100):
 
 
 class RunStoreTests(VelocityTestCase):
+    def test_rename_preserves_posts_and_runs_including_later_run_saves(self):
+        first = store.add_card(self.db, EMAIL, "First", post_url())[0]
+        other = store.add_card(self.db, EMAIL, "Other")[1]
+        store.save_run(self.db, EMAIL, first["id"], run_for(first))
+        before = store.load_cards(self.db, EMAIL)[0]
+        renamed = store.rename_card(self.db, EMAIL, first["id"], "  Launch   monitoring  ")
+        self.assertEqual(renamed, [{**before, "name": "Launch monitoring"}, other])
+        store.save_run(self.db, EMAIL, first["id"], run_for(first, 2, 200))
+        saved = store.load_cards(self.db, EMAIL)[0]
+        self.assertEqual(saved["name"], "Launch monitoring")
+        self.assertEqual(saved["run_count"], 2)
+        self.assertEqual(store.card_posts(saved), store.card_posts(first))
+        self.assertEqual(len([key for key in self.db.rows if "/runs/" in key]), 2)
+
     def test_runs_are_per_card_idempotent_and_keep_all_archives(self):
         first = store.add_card(self.db, EMAIL, "First", post_url())[0]
         second = store.add_card(self.db, EMAIL, "Second", post_url())[1]
@@ -72,6 +86,40 @@ class RunStoreTests(VelocityTestCase):
                                ([100, None], None), ([100, None, 200], None), ([None, 200, 300], "alive")):
             with self.subTest(values=values):
                 self.assertEqual(view_status(values), status)
+
+    def test_percentage_uses_latest_pair_and_never_skips_missing_counts(self):
+        for values, expected in (([], None), ([100], None), ([100, 150], 50), ([200, 150], -25),
+                                 ([100, 100], 0), ([100, 0], -100), ([0, 100], None), ([0, 0], None),
+                                 ([100, None], None), ([100, None, 200], None),
+                                 ([100, 200, 250], 25), ([None, 200, 300], 50)):
+            with self.subTest(values=values):
+                self.assertEqual(views_change_percent(values), expected)
+
+    def test_headers_show_run_times_and_change_column_follows_status(self):
+        card = store.add_card(self.db, EMAIL, url=post_url())[0]
+        store.add_post(self.db, EMAIL, card["id"], post_url(2))
+        for index, views in enumerate((100, 125), 1):
+            store.save_run(self.db, EMAIL, card["id"], run_for(card, index, views))
+        sheet = velocity_card_sheet(store.load_cards(self.db, EMAIL)[0])
+        self.assertIn('class="crt-run-date">07 Nov 2026</span>', sheet)
+        self.assertIn('class="crt-run-time">01:01 UTC</span>', sheet)
+        self.assertIn('class="crt-run-time">01:02 UTC</span>', sheet)
+        self.assertIn('>Status</th><th scope=col title="Latest run versus the previous run">Views change (%)</th>', sheet)
+        self.assertIn('>+25.0%</td>', sheet)
+        self.assertIn('title="Needs view counts from both the latest and previous runs.">—</td>', sheet)
+        self.assertNotIn('>Check 1</th>', sheet)
+        empty = velocity_card_sheet({"posts": []})
+        self.assertIn('colspan="11"', empty)
+        self.assertEqual(empty.count('title="Not run yet"'), 8)
+
+    def test_dates_normalize_to_utc_and_growth_from_zero_is_not_infinite(self):
+        card = store.add_card(self.db, EMAIL, url=post_url())[0]
+        card["runs"] = [run_for(card, 1, 0), run_for(card, 2, 10)]
+        card["runs"][1]["at"] = "2026-11-08T00:02:00+08:00"
+        sheet = velocity_card_sheet(card)
+        self.assertIn('class="crt-run-date">07 Nov 2026</span>', sheet)
+        self.assertIn('class="crt-run-time">16:02 UTC</span>', sheet)
+        self.assertIn('title="Percentage change is undefined because the previous view count is zero.">—</td>', sheet)
 
 
 def inline_thread(*, target, args=(), **kwargs):

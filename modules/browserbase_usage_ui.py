@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import hashlib
-import html
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -15,7 +14,7 @@ from modules.config import get_setting
 
 def _usage_markup(usage: BrowserbaseUsage, allowance_label: str, limit: float | None, *, stale: bool) -> str:
     used = usage.browser_minutes
-    tone, status = "normal", "Usage available"
+    tone = "normal"
     meter = ""
     if limit is None:
         summary = f"<b>{used:,.0f}</b> browser min used"
@@ -23,7 +22,6 @@ def _usage_markup(usage: BrowserbaseUsage, allowance_label: str, limit: float | 
     else:
         ratio = used / limit
         tone = "full" if ratio >= 1 else "near" if ratio >= 0.8 else "normal"
-        status = "Allowance used" if ratio >= 1 else "Nearing allowance" if ratio >= 0.8 else "Within allowance"
         summary = f"<b>{used:,.0f}</b> / {limit:,.0f} browser min"
         remaining = (f"{used - limit:,.0f} min over allowance" if used > limit else f"{limit - used:,.0f} min remaining")
         remaining += f" · {ratio:.0%} used"
@@ -33,15 +31,12 @@ def _usage_markup(usage: BrowserbaseUsage, allowance_label: str, limit: float | 
                  f'aria-valuetext="{used:g} of {limit:g} browser minutes used">'
                  f'<span style="width:{percent:.2f}%"></span></div>')
     checked = datetime.fromtimestamp(usage.checked_at, timezone.utc).strftime("%H:%M UTC")
-    freshness = f"Last successful update {checked} · Refresh unavailable" if stale else f"Updated {checked} · Refreshes every minute"
+    meta = f'<div class="sm-bb-meta">Last successful update {checked} · Refresh unavailable</div>' if stale else ""
     return (
         f'<div class="sm-bb sm-bb--{tone}">'
-        '<div class="sm-bb-heading"><strong>Browserbase</strong>'
-        f'<span>{html.escape(allowance_label)}</span><span class="sm-bb-status">{status}</span></div>'
+        '<div class="sm-bb-heading"><strong>Browserbase</strong></div>'
         f'<div class="sm-bb-summary"><span>{summary}</span><span>{remaining}</span></div>{meter}'
-        '<div class="sm-bb-meta">Shared project usage'
-        f' · {usage.concurrency} concurrent browsers max · Proxy {usage.proxy_bytes / 1_000_000:,.1f} MB'
-        f' · {freshness}</div></div>'
+        f'{meta}</div>'
     )
 
 

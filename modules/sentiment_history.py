@@ -9,6 +9,7 @@ from uuid import uuid4
 from firebase_admin import firestore
 
 from modules.database import _get_collection_name
+from modules.news_risk import news_history_collection
 
 SENTIMENT_VALUES = {"Joy": 1, "Neutral": 0, "Anger": -1, "Anxiety": -1}
 RISK_SIGNALS = ("tension", "boycott_call", "boycott_report")
@@ -106,6 +107,30 @@ def load_history(db: Any) -> list[dict[str, Any]]:
     rows = [doc.to_dict() for doc in db.collection(history_collection())
             .order_by("completed_at").stream(timeout=30)]
     return [row for row in rows if row]
+
+
+def reset_timeline(db: Any) -> dict[str, int]:
+    """Delete saved trend summaries, preserving source records and their analyses.
+
+    Read both collections before deleting anything. Only the enumerated documents
+    are removed, so later runs can start a new timeline. Large histories require
+    multiple commits; callers must refresh both histories even if a commit fails.
+    """
+    histories = {
+        "analysis_runs": history_collection(),
+        "news_scans": news_history_collection(),
+    }
+    references = {
+        kind: [doc.reference for doc in db.collection(name).select([]).stream(timeout=30)]
+        for kind, name in histories.items()
+    }
+    documents = [ref for refs in references.values() for ref in refs]
+    for start in range(0, len(documents), 400):
+        batch = db.batch()
+        for ref in documents[start:start + 400]:
+            batch.delete(ref)
+        batch.commit(timeout=30)
+    return {kind: len(refs) for kind, refs in references.items()}
 
 
 def news_sentiment_rows(scans: list[dict[str, Any]]) -> list[dict[str, Any]]:

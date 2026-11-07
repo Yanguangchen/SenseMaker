@@ -839,10 +839,14 @@ This immediately saves an empty card; no name or link is required. The cards are
 420 × 300 px on desktop (the Scrape Data card dimensions rotated 90 degrees). Click a card to open its
 table and controls in a matching modal. Up to **10 cards per account** are saved,
 and each card can hold **10 Facebook posts**, one per row. Add links inside a card whenever ready.
-The table columns are **Provoker's post**, **Check 1** through **Check 8**, then **Status**.
+Use **Rename card → Card name → Save name** inside the notepad to change its name.
+The table columns are **Provoker's post**, the completion date and time (UTC) of the latest eight runs,
+**Status**, then **Views change (%)**. Unused run columns show **—**.
 Click **Run** above a card's table to check the displayed views on each saved post using your Facebook
 connection from **Scrape Data**. Each run automatically saves a check to Firestore. Status is **alive**,
 **dying**, or **dead**, calculated from view gains once two consecutive view counts exist.
+**Views change (%)** compares the latest run with the previous run: `(latest − previous) / previous × 100`.
+It shows **—** when either count is missing or the previous count is zero.
 A post does not need a sentiment analysis or negative classification to be tracked.
 
 Cards without links show an empty table. Added posts have blank cells until their first run.
@@ -876,6 +880,12 @@ teal **Online News** line beside the blue **AI analysis** line. Its score is
 `100 × (positive − negative headlines) / headlines`, from the keyword tone scan, so
 earlier saved searches appear automatically. Both kinds of point count equally in
 the average, and red rings mark points with border-tension or boycott flags.
+
+To start fresh, open **Sentiment Trends → Settings → Reset timeline**, then
+**Confirm reset timeline**. This permanently removes saved analysis-run and news-scan
+summaries from both timelines for everyone using the shared library. Collected records,
+datasets, and per-record analysis results are kept. New analyses and news searches
+start a new timeline; **Cancel** keeps the existing history.
 
 ### Tab 4 — GenCite
 

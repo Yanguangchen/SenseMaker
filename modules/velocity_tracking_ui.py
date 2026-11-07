@@ -131,6 +131,23 @@ def _render_card(email: str, card: dict, index: int, state: dict, key: str, *, h
                 _close_card()
                 st.rerun()
 
+        with st.expander("Rename card"):
+            with st.form(f"{card_key}_rename"):
+                name = st.text_input("Card name", value=_card_name(card, index), key=f"{card_key}_name",
+                                     max_chars=store.MAX_NAME_CHARS)
+                rename = st.form_submit_button("Save name", disabled=state["error"])
+            if rename:
+                try:
+                    state["cards"] = store.rename_card(database.init_db(), email, card["id"], name)
+                except ValueError as exc:
+                    st.error(str(exc))
+                except Exception:
+                    log.exception("Velocity card could not be renamed")
+                    st.error("The card could not be renamed. Refresh cards & checks before trying again.")
+                else:
+                    st.session_state[f"{key}_notice"] = "Card renamed."
+                    st.rerun()
+
         if st.button("Run", key=f"{card_key}_run", type="primary", disabled=state["error"] or not posts or busy,
                      help="Check the displayed views for every saved post in this card and save a new check."):
             try:

@@ -249,9 +249,13 @@ html .st-key-sm_velocity_modal .crt-sheet {
   box-shadow: none;
   border-radius: 0;
 }
-html .st-key-sm_velocity_modal .crt-table { border-spacing: 0; min-width: 900px; table-layout: fixed; }
+html .st-key-sm_velocity_modal .crt-table { border-spacing: 0; min-width: 1160px; table-layout: fixed; }
 html .st-key-sm_velocity_modal .crt-table th:first-child,
 html .st-key-sm_velocity_modal .crt-table td:first-child { width: 210px; min-width: 210px; max-width: 210px; }
+html .st-key-sm_velocity_modal .crt-table th:nth-last-child(-n+2) { width: 100px; }
+html .st-key-sm_velocity_modal .crt-run-date,
+html .st-key-sm_velocity_modal .crt-run-time { display: block; white-space: nowrap; font-size: 11px; }
+html .st-key-sm_velocity_modal .crt-run-time { margin-top: 4px; font-weight: 400; }
 html .st-key-sm_velocity_modal .crt-table th {
   padding: 13px 6px;
   color: #515b52;

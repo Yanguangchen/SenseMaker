@@ -7,7 +7,13 @@ from unittest.mock import AsyncMock, MagicMock, patch
 from streamlit.testing.v1 import AppTest
 
 import main as cli_main
-from modules.tutorial_ui import GUIDE_PATH, guide_sections, search_sections
+from modules.tutorial_ui import (
+    GUIDE_PATH,
+    chapter_subsections,
+    guide_sections,
+    search_preview,
+    search_sections,
+)
 
 
 class TutorialWorkspaceTests(unittest.TestCase):
@@ -15,10 +21,25 @@ class TutorialWorkspaceTests(unittest.TestCase):
 
     def test_guide_sections_and_multiword_search(self):
         sections = guide_sections(GUIDE_PATH.read_text(encoding="utf-8"))
-        self.assertGreaterEqual(len(sections), 5)
+        self.assertGreaterEqual(len(sections), 10)
         matches = search_sections(sections, "sentiment filter sources")
         self.assertTrue(any("Sentiment Analysis" in title for title, _ in matches))
         self.assertEqual(search_sections(sections, "nonexistentkeywordxyz"), [])
+
+    def test_chapter_subsections_and_search_preview_helpers(self):
+        sections = guide_sections(GUIDE_PATH.read_text(encoding="utf-8"))
+        for title, body in sections:
+            subtopics = chapter_subsections(body)
+            self.assertGreaterEqual(len(subtopics), 3, f"Expected subtopics in chapter: {title}")
+        sample_body = (
+            "Intro paragraph about Facebook groups.\n\n"
+            "### Step modal\n\n"
+            "| Col | Value |\n| --- | --- |\n| A | B |\n\n"
+            "> **Tip:** Use Oyoshi Japan Campaign for campaign discovery."
+        )
+        self.assertEqual(chapter_subsections(sample_body), ["Step modal"])
+        self.assertIn("Oyoshi Japan Campaign", search_preview(sample_body, "Oyoshi"))
+        self.assertIn("Facebook groups", search_preview(sample_body, ""))
 
     def test_chapter_navigation_search_and_read_chapter_flow(self):
         app = AppTest.from_string(self.script).run()

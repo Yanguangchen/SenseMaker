@@ -70,6 +70,22 @@ class VelocityTestCase(unittest.TestCase):
 
 
 class VelocityStoreTests(VelocityTestCase):
+    def test_rename_rejects_invalid_names_other_accounts_and_removed_cards(self):
+        card = store.add_card(self.db, "owner@example.com", "Original", post_url())[0]
+        original = deepcopy(self.db.rows)
+        for name in ("", "   ", "x" * (store.MAX_NAME_CHARS + 1)):
+            with self.subTest(name=name), self.assertRaisesRegex(ValueError, "card name"):
+                store.rename_card(self.db, "owner@example.com", card["id"], name)
+        with self.assertRaisesRegex(ValueError, "saved velocity card"):
+            store.rename_card(self.db, "owner@example.com", "bad-id", "New name")
+        with self.assertRaisesRegex(ValueError, "no longer exists"):
+            store.rename_card(self.db, "other@example.com", card["id"], "New name")
+        self.assertEqual(self.db.rows, original)
+        store.remove_card(self.db, "owner@example.com", card["id"])
+        with self.assertRaisesRegex(ValueError, "no longer exists"):
+            store.rename_card(self.db, "owner@example.com", card["id"], "New name")
+        self.assertEqual(store.load_cards(self.db, "owner@example.com"), [])
+
     def test_cards_survive_reload_are_private_and_enforce_limit_against_saved_state(self):
         for index in range(10):
             store.add_card(self.db, " OWNER@example.com ", f"Post {index}", post_url(index))
@@ -199,6 +215,37 @@ class VelocityUITests(VelocityTestCase):
         app = AppTest.from_string(self.script).run()
         self.assertFalse(list(app.exception))
         return app
+
+    def test_rename_updates_cover_and_survives_a_new_session(self):
+        card = store.add_card(self.db, "owner@example.com", url=post_url())[0]
+        app = self.app()
+        app.button(key=f"{self.key}_open_{card['id']}").click().run()
+        app.text_input(key=f"{self.key}_{card['id']}_name").set_value("Launch monitoring")
+        next(button for button in app.button if button.label == "Save name").click().run()
+        self.assertFalse(list(app.exception))
+        self.assertTrue(any(message.value == "Card renamed." for message in app.success))
+        self.assertEqual(app.button(key=f"{self.key}_open_{card['id']}").label, "Open Launch monitoring")
+        self.assertTrue(any(title.value == "Launch monitoring" for title in app.subheader))
+        saved = store.load_cards(self.db, "owner@example.com")[0]
+        self.assertEqual(saved, {**card, "name": "Launch monitoring"})
+        fresh = self.app()
+        self.assertEqual(fresh.button(key=f"{self.key}_open_{card['id']}").label, "Open Launch monitoring")
+
+    def test_failed_rename_keeps_saved_name_and_allows_retry(self):
+        card = store.add_card(self.db, "owner@example.com", "Original")[0]
+        app = self.app()
+        app.button(key=f"{self.key}_open_{card['id']}").click().run()
+        app.text_input(key=f"{self.key}_{card['id']}_name").set_value("New name")
+        self.db.fail_writes = True
+        next(button for button in app.button if button.label == "Save name").click().run()
+        self.assertFalse(list(app.exception))
+        self.assertTrue(any("could not be renamed" in error.value for error in app.error))
+        self.assertEqual(store.load_cards(self.db, "owner@example.com")[0]["name"], "Original")
+        self.assertEqual(app.button(key=f"{self.key}_open_{card['id']}").label, "Open Original")
+        self.db.fail_writes = False
+        next(button for button in app.button if button.label == "Save name").click().run()
+        self.assertFalse(list(app.exception))
+        self.assertEqual(store.load_cards(self.db, "owner@example.com")[0]["name"], "New name")
 
     def test_create_blank_cards_reload_and_add_posts_later(self):
         app = self.app()

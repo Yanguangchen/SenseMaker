@@ -70,6 +70,7 @@ from modules.signals import NON_CONTENT_TYPES, SIGNAL_LABELS, is_analyzable, is_
 from modules.saved_links import is_facebook_link, library_owner_id, load_saved_links, parse_links, remove_saved_links, save_links
 from modules.sentiment_history import (
     NEWS_SOURCE, chart_spec, combined_history, load_history, news_sentiment_rows, persist_analysis_run,
+    reset_timeline,
 )
 from modules.google_news import (
     EDITIONS, MAX_ARTICLES, NEWS_CATEGORIES, TIME_WINDOWS, browse_url, build_scan_snapshot, collect_news,
@@ -423,6 +424,71 @@ def _render_sentiment_history(source_urls: list[str] | None = None) -> None:
                            else AI_PROVIDERS.get(row["provider"], row["provider"])),
                 "Watch terms": ", ".join(row.get("targets", [])),
             } for row in reversed(rows)]), use_container_width=True, hide_index=True)
+
+
+def _reset_sentiment_timeline() -> None:
+    if not st.session_state.pop("confirm_timeline_reset", False):
+        return
+    try:
+        counts = reset_timeline(init_db())
+    except Exception:
+        logging.getLogger(__name__).exception("Sentiment trends timeline reset could not be completed")
+        st.session_state["timeline_reset_notice"] = (
+            "error", "The timeline reset could not be completed. Some history may already have been removed. "
+            "Review the refreshed timelines and try again.",
+        )
+    else:
+        st.session_state["timeline_reset_notice"] = (
+            "success", f"Timeline reset. Removed {counts['analysis_runs']} analysis run(s) and "
+            f"{counts['news_scans']} news scan(s). New analyses and news searches will start a fresh timeline.",
+        )
+    finally:
+        _load_sentiment_history.clear()
+        _load_news_history.clear()
+
+
+def _render_sentiment_trends_settings() -> None:
+    st.subheader("Timeline settings")
+    notice_area = st.empty()
+    with st.container(border=True, key="timeline_reset_settings"):
+        st.markdown("#### Reset timeline")
+        st.write("Start fresh by clearing the saved AI analysis runs and Online News scans from "
+                 "both the sentiment and border tension risk timelines.")
+        st.caption("Collected records, datasets, and per-record analysis results are kept. "
+                   "This resets shared history for everyone using this library.")
+        if st.button("Reset timeline", key="reset_sentiment_timeline"):
+            st.session_state["confirm_timeline_reset"] = True
+        if st.session_state.get("confirm_timeline_reset"):
+            confirmation = st.empty()
+            with confirmation.container():
+                st.warning("Permanently delete all saved timeline history for this library? "
+                           "This clears both timelines for all users and cannot be undone.")
+                confirm, cancel = st.columns(2)
+                confirmed = confirm.button("Confirm reset timeline", key="confirm_reset_sentiment_timeline",
+                                           type="primary")
+                cancel.button("Cancel", key="cancel_reset_sentiment_timeline",
+                              on_click=lambda: st.session_state.pop("confirm_timeline_reset", None))
+            if confirmed:
+                # Run after main() has rechecked access, rather than in a pre-run callback.
+                _reset_sentiment_timeline()
+                confirmation.empty()
+    notice = st.session_state.pop("timeline_reset_notice", None)
+    if notice:
+        getattr(notice_area, notice[0])(notice[1])
+
+
+def _render_sentiment_trends() -> None:
+    sentiment_tab, risk_tab, settings_tab = st.tabs([
+        "Sentiment over time", "Border tension risk over time", "Settings",
+    ])
+    # Apply a confirmed reset before reading either timeline in this run.
+    with settings_tab:
+        _render_sentiment_trends_settings()
+    with sentiment_tab:
+        # The saved timeline is independent of the inputs for the next analysis.
+        _render_sentiment_history()
+    with risk_tab:
+        _render_news_risk_history()
 
 
 def _render_gemini_settings() -> None:
@@ -2768,12 +2834,7 @@ def main() -> None:
 
     # Render after processing so the trends page includes the latest saved run.
     with trends_tab:
-        sentiment_trend_tab, risk_trend_tab = st.tabs(["Sentiment over time", "Border tension risk over time"])
-        with sentiment_trend_tab:
-            # The saved timeline is independent of the inputs for the next analysis.
-            _render_sentiment_history()
-        with risk_trend_tab:
-            _render_news_risk_history()
+        _render_sentiment_trends()
 
     with content_tab:
         render_content_workspace()

@@ -1,0 +1,310 @@
+/* CrisisRadar Tutorial workspace styling — theme-aware for Light and Dark modes. */
+
+.sm-tutorial-banner {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 20px 24px;
+  margin-bottom: 18px;
+  border: 1px solid color-mix(in srgb, currentColor 14%, transparent);
+  border-radius: 20px;
+  background:
+    radial-gradient(60rem 20rem at 0% -20%, rgb(139 123 255 / 0.12), transparent 60%),
+    radial-gradient(48rem 18rem at 100% 0%, rgb(56 189 248 / 0.09), transparent 60%),
+    color-mix(in srgb, currentColor 3%, transparent);
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.08);
+}
+
+.sm-tutorial-banner__top {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.sm-tutorial-eyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 11px;
+  border: 1px solid color-mix(in srgb, currentColor 18%, transparent);
+  border-radius: 999px;
+  background: color-mix(in srgb, currentColor 5%, transparent);
+  font-size: 0.72rem;
+  font-weight: 650;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.sm-tutorial-eyebrow::before {
+  content: "";
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #6a4df4;
+  box-shadow: 0 0 8px rgb(106 77 244 / 0.7);
+}
+
+.sm-tutorial-meta-pill {
+  font-size: 0.78rem;
+  font-weight: 500;
+  opacity: 0.78;
+}
+
+.sm-tutorial-flow {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(155px, 1fr));
+  gap: 8px;
+}
+
+.sm-tutorial-flow__step {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 9px 12px;
+  border: 1px solid color-mix(in srgb, currentColor 12%, transparent);
+  border-radius: 12px;
+  background: color-mix(in srgb, currentColor 2.5%, transparent);
+  font-size: 0.82rem;
+  line-height: 1.3;
+}
+
+.sm-tutorial-flow__num {
+  display: grid;
+  place-items: center;
+  flex: 0 0 22px;
+  width: 22px;
+  height: 22px;
+  border-radius: 7px;
+  background: linear-gradient(135deg, #6a4df4, #2f72e0);
+  color: #fff;
+  font-size: 0.72rem;
+  font-weight: 700;
+}
+
+.sm-tutorial-flow__text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.sm-tutorial-flow__text strong {
+  font-weight: 650;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.sm-tutorial-flow__text span {
+  font-size: 0.73rem;
+  opacity: 0.72;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* ---------- Contents rail ---------- */
+
+.st-key-tutorial_contents [data-testid="stRadio"] [role="radiogroup"] {
+  gap: 5px;
+}
+
+.st-key-tutorial_contents [data-testid="stRadio"] label[data-baseweb="radio"] {
+  width: 100%;
+  margin: 0;
+  padding: 9px 12px;
+  border: 1px solid transparent;
+  border-radius: 11px;
+  background: transparent;
+  transition: background-color 160ms ease, border-color 160ms ease, transform 160ms ease;
+}
+
+.st-key-tutorial_contents [data-testid="stRadio"] label[data-baseweb="radio"]:hover {
+  background: color-mix(in srgb, currentColor 6%, transparent);
+  border-color: color-mix(in srgb, currentColor 14%, transparent);
+}
+
+.st-key-tutorial_contents [data-testid="stRadio"] label[data-baseweb="radio"]:has(input:checked) {
+  background: linear-gradient(135deg, rgb(106 77 244 / 0.15), rgb(47 114 224 / 0.08));
+  border-color: color-mix(in srgb, currentColor 35%, #6a4df4);
+  box-shadow: inset 3px 0 0 #6a4df4;
+}
+
+.st-key-tutorial_contents [data-testid="stRadio"] label[data-baseweb="radio"]:has(input:checked) p {
+  font-weight: 650;
+}
+
+/* ---------- Reader card & chapter header ---------- */
+
+.sm-tutorial-chapter-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+
+.sm-tutorial-chapter-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 10px;
+  border-radius: 999px;
+  background: rgb(106 77 244 / 0.14);
+  border: 1px solid rgb(106 77 244 / 0.32);
+  font-size: 0.72rem;
+  font-weight: 650;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+}
+
+.sm-tutorial-subtopics {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin: 6px 0 14px;
+  padding: 10px 12px;
+  border: 1px solid color-mix(in srgb, currentColor 11%, transparent);
+  border-radius: 12px;
+  background: color-mix(in srgb, currentColor 2.5%, transparent);
+}
+
+.sm-tutorial-subtopics__label {
+  font-size: 0.73rem;
+  font-weight: 650;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  opacity: 0.68;
+  margin-right: 4px;
+}
+
+.sm-tutorial-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 9px;
+  border: 1px solid color-mix(in srgb, currentColor 15%, transparent);
+  border-radius: 999px;
+  background: color-mix(in srgb, currentColor 4%, transparent);
+  font-size: 0.76rem;
+  font-weight: 500;
+  line-height: 1.35;
+}
+
+/* ---------- Reader Markdown typography & tables ---------- */
+
+.st-key-tutorial_reader [data-testid="stMarkdownContainer"] h3 {
+  margin-top: 1.55rem;
+  margin-bottom: 0.65rem;
+  padding-bottom: 0.4rem;
+  border-bottom: 1px solid color-mix(in srgb, currentColor 13%, transparent);
+  font-size: 1.12rem;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+}
+
+.st-key-tutorial_reader [data-testid="stMarkdownContainer"] h4 {
+  margin-top: 1.15rem;
+  margin-bottom: 0.45rem;
+  font-size: 0.98rem;
+  font-weight: 650;
+}
+
+.st-key-tutorial_reader [data-testid="stMarkdownContainer"] p,
+.st-key-tutorial_reader [data-testid="stMarkdownContainer"] li {
+  line-height: 1.65;
+}
+
+.st-key-tutorial_reader [data-testid="stMarkdownContainer"] ul,
+.st-key-tutorial_reader [data-testid="stMarkdownContainer"] ol {
+  margin-bottom: 1rem;
+  padding-left: 1.35rem;
+}
+
+.st-key-tutorial_reader [data-testid="stMarkdownContainer"] li + li {
+  margin-top: 0.35rem;
+}
+
+.st-key-tutorial_reader [data-testid="stMarkdownContainer"] blockquote {
+  margin: 0.95rem 0;
+  padding: 10px 14px;
+  border-left: 3px solid #6a4df4;
+  border-radius: 0 12px 12px 0;
+  background: color-mix(in srgb, currentColor 4%, transparent);
+}
+
+.st-key-tutorial_reader [data-testid="stMarkdownContainer"] blockquote p {
+  margin: 0;
+  font-size: 0.92rem;
+}
+
+.st-key-tutorial_reader [data-testid="stMarkdownContainer"] table {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  margin: 0.9rem 0 1.2rem;
+  border: 1px solid color-mix(in srgb, currentColor 15%, transparent);
+  border-radius: 12px;
+  overflow: hidden;
+  font-size: 0.9rem;
+}
+
+.st-key-tutorial_reader [data-testid="stMarkdownContainer"] thead th {
+  padding: 10px 13px;
+  background: color-mix(in srgb, currentColor 6.5%, transparent);
+  border-bottom: 1px solid color-mix(in srgb, currentColor 15%, transparent);
+  font-size: 0.76rem;
+  font-weight: 650;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  text-align: left;
+}
+
+.st-key-tutorial_reader [data-testid="stMarkdownContainer"] tbody td {
+  padding: 9px 13px;
+  border-bottom: 1px solid color-mix(in srgb, currentColor 9%, transparent);
+  vertical-align: top;
+}
+
+.st-key-tutorial_reader [data-testid="stMarkdownContainer"] tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.st-key-tutorial_reader [data-testid="stMarkdownContainer"] tbody tr:nth-child(even) td {
+  background: color-mix(in srgb, currentColor 2%, transparent);
+}
+
+.st-key-tutorial_reader [data-testid="stMarkdownContainer"] code {
+  padding: 2px 6px;
+  border: 1px solid color-mix(in srgb, currentColor 14%, transparent);
+  border-radius: 6px;
+  background: color-mix(in srgb, currentColor 5%, transparent);
+  font-size: 0.84em;
+}
+
+/* ---------- Reader footer navigation hints ---------- */
+
+.sm-tutorial-nav-hints {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  margin-bottom: 6px;
+  font-size: 0.78rem;
+  opacity: 0.75;
+}
+
+.sm-tutorial-nav-hints > div:last-child {
+  text-align: right;
+}
+
+@media (max-width: 900px) {
+  .st-key-tutorial_contents {
+    max-height: 240px;
+    overflow-y: auto;
+  }
+  .sm-tutorial-flow {
+    grid-template-columns: repeat(auto-fit, minmax(135px, 1fr));
+  }
+}

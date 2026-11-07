@@ -90,6 +90,27 @@ def add_card(db: Any, email: str, name: str = "", url: str = "") -> list[dict[st
     return save(db.transaction(max_attempts=3))
 
 
+def rename_card(db: Any, email: str, card_id: str, name: str) -> list[dict[str, Any]]:
+    """Rename an owned card while preserving its current posts and saved runs."""
+    name = " ".join(name.split())
+    if not name or len(name) > MAX_NAME_CHARS:
+        raise ValueError(f"Enter a card name between 1 and {MAX_NAME_CHARS} characters.")
+    if not re.fullmatch(r"[a-f0-9]{64}", card_id):
+        raise ValueError("Choose a saved velocity card.")
+    ref = _ref(db, email)
+
+    @firestore.transactional
+    def save(transaction: Any) -> list[dict[str, Any]]:
+        cards = (ref.get(transaction=transaction, timeout=15, retry=None).to_dict() or {}).get("cards", [])
+        if not any(card["id"] == card_id for card in cards):
+            raise ValueError("This card no longer exists. Refresh cards & checks.")
+        updated = [{**card, "name": name} if card["id"] == card_id else card for card in cards]
+        transaction.set(ref, {"cards": updated})
+        return updated
+
+    return save(db.transaction(max_attempts=3))
+
+
 def add_post(db: Any, email: str, card_id: str, url: str) -> list[dict[str, Any]]:
     return _edit_posts(db, email, card_id, post=_post(url))
 

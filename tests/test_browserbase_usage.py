@@ -100,11 +100,11 @@ class BrowserbaseUsageUITests(unittest.TestCase):
         self.addCleanup(self.stack.close)
         self.settings = {"BROWSERBASE_API_KEY": "server-only-key", "BROWSERBASE_PROJECT_ID": "project"}
         self.stack.enter_context(patch("modules.browserbase_usage_ui.get_setting", side_effect=lambda k, d="": self.settings.get(k, d)))
-        self.stack.enter_context(patch("modules.browserbase_usage_ui.browser_allowance", return_value=("Free allowance", 60)))
+        self.stack.enter_context(patch("modules.browserbase_usage.get_setting", side_effect=lambda k, d="": self.settings.get(k, d)))
         self.verify = self.stack.enter_context(patch("modules.auth.verify_access", return_value="editor@example.com"))
         self.stack.enter_context(patch("modules.auth.allowed_emails", return_value={"editor@example.com"}))
         self.load = self.stack.enter_context(patch("modules.browserbase_usage_ui.load_browserbase_usage",
-                                                return_value=BrowserbaseUsage(48, 0, 3, 100)))
+                                                return_value=BrowserbaseUsage(4800, 0, 25, 100)))
 
     def app(self, script=None):
         app = AppTest.from_string(script or self.script)
@@ -114,25 +114,29 @@ class BrowserbaseUsageUITests(unittest.TestCase):
     def test_bar_shows_remaining_and_refreshes_only_safe_aggregates(self):
         app = self.app()
         self.assertFalse(app.exception)
-        self.assertIn("12 min remaining · 80% used", app.markdown[0].value)
-        self.assertIn("3 concurrent browsers max", app.markdown[0].value)
+        self.assertNotIn("Developer allowance", app.markdown[0].value)
+        self.assertNotIn("Within allowance", app.markdown[0].value)
+        self.assertIn("/ 6,000 browser min", app.markdown[0].value)
+        self.assertIn("1,200 min remaining · 80% used", app.markdown[0].value)
+        self.assertNotIn("Shared project usage", app.markdown[0].value)
+        self.assertNotIn("Refreshes every minute", app.markdown[0].value)
         self.assertNotIn("server-only-key", str(app))
-        self.load.return_value = BrowserbaseUsage(60, 0, 3, 120)
+        self.load.return_value = BrowserbaseUsage(6000, 0, 25, 120)
         app.button(key="refresh_browserbase_usage").click().run()
         self.assertFalse(app.exception)
         self.load.clear.assert_called_once_with("server-only-key", "project")
-        self.assertIn("Allowance used", app.markdown[0].value)
+        self.assertIn("sm-bb--full", app.markdown[0].value)
         self.assertIn("0 min remaining · 100% used", app.markdown[0].value)
 
     def test_outage_keeps_last_success_as_stale_and_recovers(self):
         app = self.app()
         self.load.return_value = BrowserbaseUsage(error="Usage unavailable")
         app.run()
-        self.assertIn("12 min remaining", app.markdown[0].value)
+        self.assertIn("1,200 min remaining", app.markdown[0].value)
         self.assertIn("Refresh unavailable", app.markdown[0].value)
-        self.load.return_value = BrowserbaseUsage(52, 0, 3, 160)
+        self.load.return_value = BrowserbaseUsage(5200, 0, 25, 160)
         app.run()
-        self.assertIn("8 min remaining", app.markdown[0].value)
+        self.assertIn("800 min remaining", app.markdown[0].value)
         self.assertNotIn("Refresh unavailable", app.markdown[0].value)
 
     def test_credential_change_does_not_reuse_another_projects_stale_reading(self):

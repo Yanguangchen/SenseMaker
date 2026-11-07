@@ -53,7 +53,7 @@ class DashboardAccessTests(unittest.TestCase):
                 patch("modules.velocity_tracking.load_cards", return_value=cards), \
                 patch("modules.velocity_tracking.load_card_records", return_value={post_id: post}):
             app = self.run_dashboard()
-            self.assertEqual([tab.label for tab in app.tabs], ["Scrap data", "Collect data", "Saved Facebook links", "Clean & manage data", "Sentiment Analysis", "Analysis", "Settings", "Velocity Tracking", "Sentiment Trends", "Sentiment over time", "Border tension risk over time", "Content recommendations", "GenCite", "Analyze", "Recommendations", "Saved analyses", "Tutorial"])
+            self.assertEqual([tab.label for tab in app.tabs], ["Scrap data", "Collect data", "Saved Facebook links", "Clean & manage data", "Sentiment Analysis", "Analysis", "Settings", "Velocity Tracking", "Sentiment Trends", "Sentiment over time", "Border tension risk over time", "Settings", "Content recommendations", "GenCite", "Analyze", "Recommendations", "Saved analyses", "Tutorial"])
             self.assertTrue(any('data-sm-view="Velocity Tracking"' in element.value for element in app.sidebar.markdown))
             velocity = next(tab for tab in app.tabs if tab.label == "Velocity Tracking")
             covers = [element.proto.body for element in velocity.get("html") if 'class="sm-note-cover"' in element.proto.body]
@@ -112,7 +112,7 @@ class DashboardAccessTests(unittest.TestCase):
         with patch("modules.auth.verify_access", return_value="editor@example.com") as verify:
             self.run_dashboard()
             refreshed = self.run_dashboard()
-        self.assertEqual(len(refreshed.tabs), 17)
+        self.assertEqual(len(refreshed.tabs), 18)
         self.assertEqual(verify.call_count, 2)
 
     def test_server_sign_out_clears_browser_storage_before_another_login(self):
@@ -179,7 +179,7 @@ class DashboardAccessTests(unittest.TestCase):
             self.database.assert_not_called()
             app.run(timeout=30)
             self.assertFalse(list(app.exception))
-            self.assertEqual(len(app.tabs), 17)
+            self.assertEqual(len(app.tabs), 18)
             self.assertEqual(app.session_state["scrape_results"], ["unsaved work"])
         self.assertNotEqual(calls[0]["key"], calls[1]["key"])
         self.assertTrue(all(not call["clear_session"] for call in calls))
@@ -193,7 +193,7 @@ class DashboardAccessTests(unittest.TestCase):
             self.assertEqual(app.session_state["auth_token"], "token")
             app.button[0].click().run()
             self.assertFalse(list(app.exception))
-            self.assertEqual(len(app.tabs), 17)
+            self.assertEqual(len(app.tabs), 18)
 
     def test_revoked_or_disabled_sessions_clear_saved_login_and_private_data(self):
         for error in (auth.RevokedIdTokenError("Revoked"),
@@ -222,7 +222,7 @@ class DashboardAccessTests(unittest.TestCase):
             event = {"id_token": "second", "event_id": "other-tab-login"}
             app.run(timeout=30)
             self.assertFalse(list(app.exception))
-            self.assertEqual(len(app.tabs), 17)
+            self.assertEqual(len(app.tabs), 18)
             self.assertNotIn("firestore_rows", app.session_state)
             self.assertEqual(app.session_state["auth_email"], "another@example.com")
             self.assertEqual(app.session_state["auth_token"], "second")
