@@ -35,13 +35,14 @@ from modules.navigation import dashboard_views
 from modules.scrape_navigation import FACEBOOK_USAGE_WARNING, render_scrape_navigation
 from modules.content_recommendations_ui import render_content_workspace
 from modules.tutorial_ui import render_tutorial_workspace
+from modules.velocity_tracking_ui import render_velocity_workspace
 from modules.ai_errors import AIError, redact
 from modules.config import AI_PROVIDERS, get_ai_key, get_ai_model, get_ai_provider, get_setting, load_environment
 from modules.database import delete_processed_posts, get_post_id, init_db, upsert_post
 from modules.gencite_ui import render_gencite_workspace
 from modules.client_report import (
     CSS_PATH as REPORT_CSS, content_type, negative_records, npr_sheet, platform_label, report_document,
-    report_number, report_record, sentiment_sheet, velocity_sheet,
+    report_number, report_record, sentiment_sheet,
 )
 from modules.engagement import checks_for
 from modules.report_pdf import PDFExportError, render_pdf
@@ -1002,14 +1003,12 @@ def _render_client_report(items: List[Dict[str, Any]], key: str, report_date: st
     negatives = negative_records(records)
     st.html(REPORT_CSS)
     _render_report_downloads(records, key, report_date)
-    sentiment_tab, velocity_tab, reports_tab, evidence_tab = st.tabs([
-        "Comment Sentiment Analysis", "Velocity Tracker", f"Negative Post Reports ({len(negatives)})",
+    sentiment_tab, reports_tab, evidence_tab = st.tabs([
+        "Comment Sentiment Analysis", f"Negative Post Reports ({len(negatives)})",
         "Evidence by record",
     ])
     with sentiment_tab:
         st.html(sentiment_sheet(records, report_date))
-    with velocity_tab:
-        st.html(velocity_sheet(records, report_date))
     with reports_tab:
         if not negatives:
             st.info("No negative or flagged records in this set, so there are no Negative Post Reports.")
@@ -1034,7 +1033,7 @@ def _render_report_downloads(records: List[Dict[str, Any]], key: str, report_dat
     with st.container(horizontal=True, key=f"{key}_downloads"):
         st.download_button(
             "Download report (HTML)", document.encode("utf-8"), f"{name}.html", "text/html", key=f"{key}_download",
-            help="All three templates with every Negative Post Report, ready to share or print.",
+            help="Sentiment analysis and every Negative Post Report, ready to share or print.",
         )
         stored = st.session_state.get(pdf_key)
         if stored and stored[0] == digest:
@@ -2753,7 +2752,7 @@ def main() -> None:
                             _get_facebook_session(_facebook_storage_path()))
     except Exception:
         facebook_session = FacebookSession()
-    scrape_tab, records_tab, analysis_tab, trends_tab, content_tab, gencite_tab, tutorial_tab = dashboard_views(user_email, facebook_session)
+    scrape_tab, records_tab, analysis_tab, velocity_tab, trends_tab, content_tab, gencite_tab, tutorial_tab = dashboard_views(user_email, facebook_session)
 
     with scrape_tab:
         _render_scrape_workspace(user_email, facebook_session)
@@ -2763,6 +2762,9 @@ def main() -> None:
 
     with analysis_tab:
         _render_analysis_tab(user_email)
+
+    with velocity_tab:
+        render_velocity_workspace(user_email, hosted=IS_CLOUD)
 
     # Render after processing so the trends page includes the latest saved run.
     with trends_tab:

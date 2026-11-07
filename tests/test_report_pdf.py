@@ -49,8 +49,8 @@ class ReportPdfTests(unittest.TestCase):
                 self.skipTest("Chromium is not installed for this Playwright version")
             raise
         self.assertTrue(pdf.startswith(b"%PDF"))
-        # Comment Sentiment Analysis, Velocity Tracker, then one Negative Post Report each.
-        self.assertEqual(len(re.findall(rb"/Type\s*/Page\b(?!s)", pdf)), 4)
+        # Comment Sentiment Analysis, then one Negative Post Report each.
+        self.assertEqual(len(re.findall(rb"/Type\s*/Page\b(?!s)", pdf)), 3)
 
     def test_page_loads_only_google_fonts(self):
         allowed = ["https://fonts.googleapis.com/css2?family=Inter", "https://fonts.gstatic.com/s/inter/a.woff2",

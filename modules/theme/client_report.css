@@ -204,6 +204,14 @@
 
 /* ---------- Velocity Tracker ---------- */
 
+/* Embedded post cards retain the table without the full report-page spacing. */
+.crt-sheet--compact { margin: 0; padding: 20px; box-shadow: none; }
+.crt-sheet--compact .crt-eyebrow { display: none; }
+.crt-sheet--compact .crt-title { margin: 0 0 18px; font-size: 20px; }
+.crt-sheet--compact .crt-title .crt-fill { border-bottom-width: 1px; }
+.crt-sheet--compact .crt-tracker-foot { gap: 16px; }
+.crt-sheet--compact .crt-box { padding: 14px; }
+
 .crt-table-wrap {
   overflow-x: auto;
   margin: 0 0 22px;

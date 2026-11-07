@@ -330,8 +330,9 @@ class TimelineUITests(unittest.TestCase):
             analysis = next(tab for tab in app.tabs if tab.label == "Sentiment Analysis")
             self.assertEqual(chart_count(trends), 1)
             self.assertEqual(chart_count(analysis), 0)
-            self.assertTrue({"Comment Sentiment Analysis", "Velocity Tracker", "Evidence by record"}
+            self.assertTrue({"Comment Sentiment Analysis", "Velocity Tracking", "Evidence by record"}
                             <= {tab.label for tab in app.tabs})
+            self.assertNotIn("Velocity Tracker", {tab.label for tab in analysis.tabs})
             restored = AppTest.from_file(path, default_timeout=30).run()
             self.assertFalse(list(restored.exception))
             self.assertEqual({metric.label: metric.value for metric in restored.metric}["Analysis runs"], "2")

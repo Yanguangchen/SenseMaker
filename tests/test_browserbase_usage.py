@@ -62,7 +62,8 @@ class BrowserbaseUsageTests(unittest.TestCase):
                 self.assertTrue(load_browserbase_usage(str(value), "project").error)
 
     def test_plan_and_custom_allowances_are_explicit_and_invalid_values_are_unknown(self):
-        for settings, expected in [({}, ("Free allowance", 60)),
+        for settings, expected in [({}, ("Developer allowance", 6000)),
+                                   ({"BROWSERBASE_PLAN": "free"}, ("Free allowance", 60)),
                                    ({"BROWSERBASE_PLAN": "developer"}, ("Developer allowance", 6000)),
                                    ({"BROWSERBASE_PLAN": "startup"}, ("Startup allowance", 30000)),
                                    ({"BROWSERBASE_PLAN": "custom"}, ("Allowance unavailable", None)),

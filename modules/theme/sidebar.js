@@ -56,7 +56,20 @@
 
   const keydown = (event) => {
     // Escape and focus belong to the active dialog, not the background rail.
-    if (document.querySelector('[role="dialog"]')) return;
+    const dialog = document.querySelector('[role="dialog"]');
+    if (dialog) {
+      // Streamlit can retain an old modal layer after Run rerenders the app.
+      // Use the native close control so Escape also dismisses reopened notepads.
+      if (event.key === "Escape" && dialog.querySelector('.st-key-sm_velocity_modal')) {
+        const close = dialog.querySelector('button[aria-label="Close"]');
+        if (close) {
+          event.preventDefault();
+          event.stopImmediatePropagation();
+          close.click();
+        }
+      }
+      return;
+    }
     if (event.key === "Escape" && !collapsed) {
       collapsed = true;
       try { sessionStorage.setItem(storageKey, "true"); } catch { /* Optional preference. */ }

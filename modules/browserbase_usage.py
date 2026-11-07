@@ -36,7 +36,7 @@ def browser_allowance() -> tuple[str, float | None]:
         except ValueError:
             return "Allowance unavailable", None
         return "Configured allowance", hours * 60
-    plan = get_setting("BROWSERBASE_PLAN", "free").lower()
+    plan = get_setting("BROWSERBASE_PLAN", "developer").lower()
     hours = PLAN_HOURS.get(plan)
     return (f"{plan.title()} allowance", hours * 60) if hours is not None else ("Allowance unavailable", None)
 

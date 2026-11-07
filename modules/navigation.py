@@ -31,6 +31,7 @@ def dashboard_views(email: str, facebook_session: FacebookSession | None = None)
     panel = _icon('<rect x="3" y="4" width="18" height="16" rx="3"/><path d="M9 4v16"/>')
     chart = _icon('<path d="M4 4v16h16M8 14l4-5 4 3 4-7"/>')
     trend = _icon('<path d="m3 17 6-6 4 4 8-12M15 3h6v6"/>')
+    speed = _icon('<path d="M4 18a9 9 0 1 1 16 0M12 12l5-5M5 12H3M12 5V3M19 12h2"/><circle cx="12" cy="12" r="2"/>')
     content = _icon('<path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9zM14 3v6h6M8 13h8M8 17h5"/>')
     voice = _icon('<path d="M21 12a8 8 0 0 1-11.6 7.1L4 20l1-4.6A8 8 0 1 1 21 12z"/><path d="M9 10h6M9 14h4"/>')
     guide = _icon('<path d="M12 6c-3-2-6-2-9-1v15c3-1 6-1 9 1 3-2 6-2 9-1V5c-3-1-6-1-9 1zM12 6v15"/>')
@@ -73,6 +74,10 @@ def dashboard_views(email: str, facebook_session: FacebookSession | None = None)
             'aria-label="Sentiment Analysis" title="Sentiment Analysis">'
             f'<span class="sm-rail-icon">{chart}</span>'
             '<span class="sm-rail-label">Sentiment Analysis</span></button>'
+            '<button class="sm-rail-button" type="button" data-sm-view="Velocity Tracking" '
+            'aria-label="Velocity Tracking" title="Velocity Tracking">'
+            f'<span class="sm-rail-icon">{speed}</span>'
+            '<span class="sm-rail-label">Velocity Tracking</span></button>'
             '<button class="sm-rail-button" type="button" data-sm-view="Sentiment Trends" '
             'aria-label="Sentiment Trends" title="Sentiment Trends">'
             f'<span class="sm-rail-icon">{trend}</span>'
@@ -104,7 +109,7 @@ def dashboard_views(email: str, facebook_session: FacebookSession | None = None)
 
     st.html(THEME_DIR / "sidebar.css")
     with st.container(key="sm_views"):
-        views = st.tabs(["Scrap data", "Clean & manage data", "Sentiment Analysis", "Sentiment Trends", "Content recommendations", "GenCite", "Tutorial"])
+        views = st.tabs(["Scrap data", "Clean & manage data", "Sentiment Analysis", "Velocity Tracking", "Sentiment Trends", "Content recommendations", "GenCite", "Tutorial"])
 
     script = (THEME_DIR / "sidebar.js").read_text(encoding="utf-8")
     version = hashlib.sha256(script.encode()).hexdigest()[:12]

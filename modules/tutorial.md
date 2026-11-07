@@ -21,13 +21,14 @@ Run your first end-to-end analysis with a public website article (no social logi
 | **Scrape Data** | Collect posts, articles, and pages from Facebook, Oyoshi on Facebook, X, Online news, Custom website, or Reddit. |
 | **Clean & manage data** | Browse saved datasets, filter records, and delete individual records, bulk selections, or entire datasets. |
 | **Sentiment Analysis** | Select and curate datasets, run Gemini or ChatGPT analysis, inspect evidence, and export HTML/PDF/CSV reports. |
+| **Velocity Tracking** | Create empty tracking cards, then add up to 10 Facebook posts to each card's table. |
 | **Sentiment Trends** | Track sentiment scores and Thailand–Cambodia border tension risk over time. |
 | **Content plan** | Turn analyzed customer concerns into target keywords, content outlines, and drafts. |
 | **GenCite** | Measure brand share of voice in sampled AI answers and close visibility gaps. |
 | **Tutorial** | Browse or search this guide by chapter. |
 
 - **Sidebar & theme:** Click the **CrisisRadar** header (or press `Escape`) to collapse/expand the sidebar. Use the top-right menu (**Settings**) to switch between light and dark themes, and **Sign out** in the sidebar when finished.
-- **Browserbase usage:** The bar above the workspaces shows shared project browser minutes, remaining configured allowance, proxy traffic and the concurrency limit. It refreshes every minute; click **↻** to refresh sooner. Amber means at least 80% used; red means the allowance has been reached. A failed refresh marks the last reading as stale. The initial allowance is the Free plan's 1 hour; the administrator should update it when changing plans.
+- **Browserbase usage:** The bar above the workspaces shows shared project browser minutes, remaining configured allowance, proxy traffic and the concurrency limit. It refreshes every minute; click **↻** to refresh sooner. Amber means at least 80% used; red means the allowance has been reached. A failed refresh marks the last reading as stale. The default allowance is the Developer plan's 100 hours (6,000 minutes); the administrator should update it when changing plans.
 
 ## Scrape Data: overview & Facebook
 
@@ -155,9 +156,24 @@ Each analyzed record receives an English translation, topics, a sentiment label 
 | **Opposing a boycott** | Argues against a boycott. |
 | **Needs review / unclear** | Ambiguous intent or insufficient evidence. |
 
-- **Report tabs:** Inspect **Comment Sentiment Analysis**, **Velocity Tracker**, **Negative Post Reports**, and **Evidence by record**.
+- **Report tabs:** Inspect **Comment Sentiment Analysis**, **Negative Post Reports**, and **Evidence by record**.
 - **Filter & export:** In **Evidence by record**, filter by **Show findings** and click **Export findings CSV**. Above the report, use **Download report (HTML)** or **Create PDF** → **Download PDF**.
 - **Reopen saved analyses:** Under **View processed records**, saved analyses for the included records in your selected datasets appear automatically without re-running the AI model.
+
+## Velocity Tracking
+
+Open **Velocity Tracking** in the left toolbar:
+
+1. Click **Create velocity tracking card** to create an empty paper notepad. No link or name is required. Click anywhere on a card to open its table in a matching notepad modal.
+2. Save up to **10 cards**. Inside the open notepad, enter a Facebook URL under **Provoker's post** and click **Add post** whenever ready. Each table can hold up to **10 posts**, one per row.
+3. Each table has **Provoker's post**, **Check 1** through **Check 8**, and **Status**. Status is **alive** (still gaining), **dying** (gains shrinking), or **dead** (no growth across checks).
+4. Click **Run** above a card’s table to visit each saved Facebook post using your Facebook connection from **Scrape Data**. Each run checks **views only** and automatically saves a new check in Firestore. You can switch pages while it runs.
+5. **Refresh cards & checks** reloads your saved cards and results. The table shows the latest eight runs; older runs remain saved in Firestore.
+6. Use **Manage posts → Remove post** to remove a row, or **Remove card** to remove the table. Collected posts and check history are kept.
+
+Empty cards can be left without links. Added posts show blank checks until you run the card. **Unavailable** means no view count could be read; **Failed** means the post could not be checked. Neither is counted as zero. Rounded Facebook view counts remain approximate. Status needs two consecutive view counts and compares the view gains between runs.
+
+Links and runs are private to your account. If saving fails, use **Retry saving check** to save the same results without scraping or adding a duplicate check. Comments and likes are not collected by velocity runs yet.
 
 ## Sentiment Trends & risk timeline
 
@@ -165,7 +181,6 @@ Open **Sentiment Trends** to compare runs over time:
 
 - **Sentiment over time:** Plots each saved AI analysis run and Online News scan from **−100** (all negative) to **+100** (all positive), with a dashed equal-weight average and red rings marking boycott or border-tension signals. Saved history from all record sources appears automatically, independently of your selections in Sentiment Analysis. Use **Refresh timeline** to reload recent runs.
 - **Border tension risk over time:** Tracks headline risk scores (`Low < 20 ≤ Elevated < 45 ≤ High`) and boycott article counts from Google News scans. Use **Refresh risk timeline** to update.
-- **Velocity Tracker:** To measure engagement growth (`Live`, `Slowing`, `Dead`) in Sentiment Analysis reports, recollect and save the same eligible Facebook/Reddit/X posts at a later time so at least two snapshots exist.
 
 ## Content plan
 

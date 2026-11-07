@@ -24,7 +24,7 @@ from modules.signals import SIGNAL_LABELS, is_flagged
 CSS_PATH = Path(__file__).parent / "theme" / "client_report.css"
 BUCKETS = ("Negative", "Neutral", "Positive")
 BUCKET_OF = {"Anger": "Negative", "Anxiety": "Negative", "Neutral": "Neutral", "Joy": "Positive"}
-SHOWN_CHECKS = 7
+SHOWN_CHECKS = 8
 EYEBROW = "CrisisRadar — report"
 NOT_COLLECTED = "Not collected"
 METRIC_LABELS = {"comments": "platform total", "collected_comments": "collected sample"}
@@ -272,9 +272,10 @@ def sentiment_view(records: list[dict[str, Any]]) -> dict[str, Any]:
 
 # ---------- Velocity Tracker ----------
 
-def velocity_view(records: list[dict[str, Any]]) -> dict[str, Any]:
+def velocity_view(records: list[dict[str, Any]], *, negative_only: bool = True) -> dict[str, Any]:
     rows = []
-    for record in sorted((r for r in records if is_negative(r) and is_tracked(r)), key=_priority, reverse=True):
+    for record in sorted((r for r in records if is_tracked(r) and (not negative_only or is_negative(r))),
+                         key=_priority, reverse=True):
         result = velocity(record["checks"])
         values = [value for _, value in result["points"]]
         rows.append({"record": record, "velocity": result, "values": values[-SHOWN_CHECKS:],
@@ -299,14 +300,19 @@ def velocity_view(records: list[dict[str, Any]]) -> dict[str, Any]:
     if rows:
         parts = [f"{statuses[s]} {s.lower()}" for s in ("Live", "Slowing", "Dead") if statuses[s]]
         if statuses["New"]:
-            parts.append(f"{statuses['New']} awaiting a second check")
-        assessment = f"{len(rows)} negative post{'s' if len(rows) != 1 else ''} tracked: " + ", ".join(parts) + "."
+            first = sum(not row["values"] for row in rows)
+            if first:
+                parts.append(f"{first} awaiting a first check")
+            if statuses["New"] > first:
+                parts.append(f"{statuses['New'] - first} awaiting a second check")
+        qualifier = "negative " if negative_only else ""
+        assessment = f"{len(rows)} {qualifier}post{'s' if len(rows) != 1 else ''} tracked: " + ", ".join(parts) + "."
         if total_change is not None:
             assessment += (f" Comments {_signed(total_change)}"
                            + (f" ({_signed(100 * total_change / total_prior, '%')})" if total_prior else "")
                            + " since each post's prior check.")
     else:
-        assessment = "No negative Facebook or Reddit posts in these records."
+        assessment = "No negative Facebook or Reddit posts in these records." if negative_only else "No posts tracked yet."
     return {
         "rows": rows, "totals": totals, "change_abs": change_abs, "change_pct": change_pct,
         "total_change_pct": 100 * total_change / total_prior if total_change is not None and total_prior else None,
@@ -456,11 +462,14 @@ def sentiment_sheet(records: list[dict[str, Any]], report_date: str) -> str:
     )
 
 
-def velocity_sheet(records: list[dict[str, Any]], report_date: str) -> str:
-    view = velocity_view(records)
-    head = ("<tr><th scope=col>Post / creator</th><th scope=col>Platform</th><th scope=col>Type</th>"
+def velocity_sheet(records: list[dict[str, Any]], report_date: str, *, negative_only: bool = True,
+                   compact: bool = False) -> str:
+    """One post per row, eight saved checks, and its current tracking status."""
+    view = velocity_view(records, negative_only=negative_only)
+    head = ("<tr><th scope=col>Provoker's post</th>"
             + "".join(f"<th scope=col>Check {i}</th>" for i in range(1, SHOWN_CHECKS + 1))
-            + "<th scope=col>% chg vs prior</th><th scope=col>Velocity</th><th scope=col>Status</th></tr>")
+            + "<th scope=col>Status</th></tr>")
+    labels = {"Live": "alive", "Slowing": "dying", "Dead": "dead"}
     body = []
     for row in view["rows"]:
         record, result = row["record"], row["velocity"]
@@ -468,49 +477,28 @@ def velocity_sheet(records: list[dict[str, Any]], report_date: str) -> str:
                  for at, value in zip(row["times"], row["values"])]
         cells += ["<td></td>"] * (SHOWN_CHECKS - len(cells))
         status = result["status"]
-        badge = (f'<span class="crt-status crt-status--{status.lower()}">{status}</span>' if status
-                 else '<span class="crt-muted crt-small">Needs 2nd check</span>')
+        badge = (f'<span class="crt-status crt-status--{status.lower()}">{labels[status]}</span>' if status
+                 else '<span class="crt-muted" title="Status needs at least two saved checks">—</span>')
         body.append(
-            f"<tr><td>{_link(record, _headline(record, 70))}"
-            f'<div class="crt-muted crt-small">{report_number(record)}</div></td>'
-            f"<td>{_text(platform_label(record))}</td><td>{_text(content_type(record))}"
+            f"<tr><td>{_link(record, _headline(record, 90))}"
             f'<div class="crt-muted crt-small">{_text(METRIC_LABELS[result["metric"]])}</div></td>'
-            + "".join(cells)
-            + f"<td>{_signed(result['pct'], '%')}</td><td>{_arrows(result['direction'])}</td><td>{badge}</td></tr>"
+            + "".join(cells) + f"<td>{badge}</td></tr>"
         )
     if not body:
-        body.append(f'<tr class="crt-empty"><td colspan="{SHOWN_CHECKS + 6}">No negative Facebook or Reddit posts '
-                    "in these records.</td></tr>")
-
-    def summary(label: str, values: list[Any], formatter: Any, extra: str, sub: bool) -> str:
-        cells = [f"<td>{formatter(v) if v is not None else ''}</td>" for v in values]
-        cells += ["<td></td>"] * (SHOWN_CHECKS - len(cells))
-        return (f'<tr class="crt-total{" crt-total--sub" if sub else ""}"><td>{label}</td><td></td><td></td>'
-                + "".join(cells) + extra + "</tr>")
-
-    body.append(summary("TOTAL", view["totals"], _number,
-                        f"<td>{_signed(view['total_change_pct'], '%')}</td><td>{_arrows(view['total_direction'])}</td>"
-                        "<td></td>", False))
-    body.append(summary("Change vs prior (abs)", view["change_abs"], _signed, "<td></td>" * 3, True))
-    body.append(summary("Change vs prior (%)", view["change_pct"], lambda v: _signed(v, "%"), "<td></td>" * 3, True))
+        body.append(f'<tr class="crt-empty"><td colspan="{SHOWN_CHECKS + 2}">'
+                    "No posts added yet. Add a Facebook post when you're ready.</td></tr>")
     as_of = format_time(view["as_of"]) or format_date(report_date)
-    note = (" Showing the latest 7 checks per post." if view["truncated"] else "")
+    heading = "" if compact else _head("Velocity Tracker", as_of, " · as of")
+    note = f" Showing the latest {SHOWN_CHECKS} checks per post." if view["truncated"] else ""
     return (
-        '<section class="crt-sheet" aria-label="Velocity Tracker">'
-        + _head("Velocity Tracker — negative posts & videos", as_of, " · as of")
-        + '<div class="crt-table-wrap"><table class="crt-table"><thead>' + head + "</thead><tbody>"
+        f'<section class="crt-sheet{" crt-sheet--compact" if compact else ""}" aria-label="Velocity Tracker">'
+        + heading + '<div class="crt-table-wrap"><table class="crt-table"><thead>' + head + "</thead><tbody>"
         + "".join(body) + "</tbody></table></div>"
-        + '<div class="crt-tracker-foot"><div><div class="crt-label">Status key</div><div class="crt-key">'
-          "<span><b>Live</b> still gaining</span><span><b>Slowing</b> gains shrinking</span>"
-          "<span><b>Dead</b> no growth across checks</span></div>"
-        + '<p class="crt-note">Each check is a collection saved to the cloud; collect and save the same sources '
-          "every 6h (high impact) or 24h (low impact) to add checks. Counts are comments: the platform total where "
-          "the page or API shows it, otherwise the comments CrisisRadar collected (a capped sample)."
-        + note + "</p></div>"
-        + '<div class="crt-box crt-box--gold"><div class="crt-label">Overall assessment</div>'
-        + f'<p class="crt-assessment">{_text(view["assessment"])}</p>'
-        + '<div class="crt-decision"><b>Decision:</b>' + _pills(("Hold & monitor", "Let die off", "Act"))
-        + "</div></div></div></section>"
+        + '<div class="crt-key"><span><b>alive</b> still gaining</span><span><b>dying</b> gains shrinking</span>'
+          "<span><b>dead</b> no growth across checks</span></div>"
+        + '<p class="crt-note">Each check is a saved collection. Counts are platform comment totals when available, '
+          "otherwise collected comments (a sample), as labeled under the post. Status needs at least two checks."
+        + note + "</p></section>"
     )
 
 
@@ -574,13 +562,11 @@ def npr_sheet(record: dict[str, Any], records: list[dict[str, Any]], report_date
         f'<p class="crt-tone" style="margin-top:12px">Dominant themes: {_fill(", ".join(view["themes"]) or None)}</p>'
         "</div>"
     )
-    velocity_choice = {"up": "▲ Up", "down": "▼ Down"}.get(view["direction"] or "")
     classification = (
         '<div class="crt-box crt-box--dark crt-npr__class"><div class="crt-label crt-label--dark">Classification</div>'
         '<div class="crt-class-group"><p>Crisis type</p>' + _pills(("Type 1", "Type 2")) + "</div>"
         '<div class="crt-class-group"><p>Impact</p>' + _pills(("High", "Low"), view["impact"]) + "</div>"
         '<div class="crt-class-group"><p>Check cadence</p>' + _pills(("6h", "24h"), view["cadence"]) + "</div>"
-        '<div class="crt-class-group"><p>Velocity vs last 2</p>' + _pills(("▲ Up", "▼ Down"), velocity_choice) + "</div>"
         '<div class="crt-class-group"><p>Issue source</p>' + _pills(("Internal", "External")) + "</div>"
         '<div class="crt-label crt-label--dark" style="margin-top:22px">Action taken</div>'
         '<ol class="crt-actions"><li></li><li></li><li></li></ol>'
@@ -605,7 +591,7 @@ def stylesheet() -> str:
 
 
 def report_document(records: list[dict[str, Any]], report_date: str) -> str:
-    """A standalone page with all three templates, ready to share or print."""
+    """Sentiment analysis and negative post reports, ready to share or print."""
     reports = "".join(npr_sheet(r, records, report_date) for r in negative_records(records))
     title = f"CrisisRadar report · {format_date(report_date) or 'undated'}"
     return (
@@ -619,6 +605,6 @@ def report_document(records: list[dict[str, Any]], report_date: str) -> str:
         "body{margin:0;padding:24px;background:#e8eae5}"
         "@page{size:A4 landscape;margin:8mm 8mm 12mm}"
         "@media print{body{padding:0;background:#fff}}</style></head><body>"
-        + sentiment_sheet(records, report_date) + velocity_sheet(records, report_date) + reports
+        + sentiment_sheet(records, report_date) + reports
         + "</body></html>"
     )

@@ -552,7 +552,7 @@ Each approved Google account has its own persistent Browserbase
 profile; Firestore stores only the profile ID and connection metadata in
 `sensemaker_facebook_profiles/{owner_hash}`. Browser recordings and session logs
 are disabled. Login windows close after about three minutes or on cancellation.
-Facebook tasks using the same profile run one at a time. Provider free-plan
+Facebook tasks using the same profile run one at a time. Provider plan
 usage limits apply. Local Facebook login continues to open Chrome on your computer.
 
 A Browserbase usage bar appears above the workspaces after sign-in. It reads project browser
@@ -561,7 +561,7 @@ a shared 60-second cache, automatic refresh and a manual refresh button. Failed 
 label the last successful reading as stale instead of showing zero usage.
 Set `BROWSERBASE_PROJECT_ID` if your key can access more than one project.
 The public API does not return the plan's browser-hour allowance: set `BROWSERBASE_PLAN`
-to `free` (the initial default, 1 hour), `developer` (100 hours), or `startup` (500 hours).
+to `developer` (the default, 100 hours), `free` (1 hour), or `startup` (500 hours).
 For a custom allowance, set `BROWSERBASE_BROWSER_HOURS_LIMIT`. Confirm these settings against
 your [Browserbase plan](https://docs.browserbase.com/account/billing/plans) after upgrading.
 The bar compares project usage with this configured allowance; paid plans can incur overages,
@@ -809,13 +809,12 @@ Analysis results use the layout of the client's appendix templates, auto-filled 
 | Tab | Filled from |
 |---|---|
 | **Comment Sentiment Analysis** | Negative (Anger + Anxiety), Neutral and Positive (Joy) shares; tone from the dominant emotion and topics; key insight, engagement quality, and threat level (High: review priority 8+ or an explicit boycott call; Medium: any Thailand signal or priority 5+) with the main risk |
-| **Velocity Tracker** | Negative Facebook and Reddit posts with comment counts at up to 7 checks, % change, ▲/▼ velocity and Live / Slowing / Dead status, plus totals |
 | **Negative Post Reports** | One NPR per negative or flagged record (`NPR-` + the first 6 characters of its record ID): text capture, comments and views vs the prior check, sentiment across the post and its analysed comments, word cloud, and classification |
 
-**Download report (HTML)** saves all three templates, with every Negative Post Report, as one page to share or print.
+**Download report (HTML)** saves sentiment analysis and every Negative Post Report as one page to share or print.
 **Create PDF** prints the same report on A4 landscape with the server's Chromium (the browser Playwright already
 uses for collection), then shows **Download PDF**. Comment Sentiment Analysis and each Negative Post Report fit
-one page each; a long Velocity Tracker continues onto more pages with its header row repeated. Pages are numbered.
+one page each. Pages are numbered. Velocity tables live in their own workspace and are not included in sentiment exports.
 The PDF is kept for the session until the report changes. While printing, the page may load only Google Fonts
 (Inter, plus Noto Sans Khmer and Noto Sans Thai for original-language quotes); every other request is blocked.
 Without Chromium (`python -m playwright install chromium`), or an installed Google Chrome, the app explains
@@ -824,15 +823,39 @@ this and the HTML report can be printed to PDF from a browser instead.
 **Checks.** Every time a collection is saved to the cloud, each Facebook or Reddit post gets a check: the
 platform's comment total (Reddit's thread total, or the count shown on the captured Facebook post), views,
 reactions and shares when the page shows them, and the number of comments collected. Saving a post that is
-already stored adds a check without changing its text or analysis. To follow velocity, collect and save the
-same sources every 6h (high impact) or 24h (low impact). Records saved before checks existed start with their
-original collection as Check 1. When no platform total is shown, the tracker falls back to collected comments,
-a capped sample (12 per Facebook post), and labels it.
+already stored adds a check without changing its text or analysis. Records saved before checks existed start
+with their original collection as Check 1. These collection checks support the negative-post report.
+The dedicated Velocity Tracking workspace has its own views-only card runs, described below.
 
 Left blank for the analyst, as on the paper template: reach (not public on these platforms), the poster's
 account (not collected), time reported to the Core Team, crisis type, issue source, actions taken and the
-tracker decision. Impact (High at priority 8+ or an explicit boycott call), check cadence and velocity are
+tracker decision. Impact (High at priority 8+ or an explicit boycott call) and check cadence are
 pre-filled and marked as AI-derived.
+
+### Velocity Tracking
+
+Open **Velocity Tracking** from the left toolbar and click **Create velocity tracking card**.
+This immediately saves an empty card; no name or link is required. The cards are landscape paper notepads,
+420 × 300 px on desktop (the Scrape Data card dimensions rotated 90 degrees). Click a card to open its
+table and controls in a matching modal. Up to **10 cards per account** are saved,
+and each card can hold **10 Facebook posts**, one per row. Add links inside a card whenever ready.
+The table columns are **Provoker's post**, **Check 1** through **Check 8**, then **Status**.
+Click **Run** above a card's table to check the displayed views on each saved post using your Facebook
+connection from **Scrape Data**. Each run automatically saves a check to Firestore. Status is **alive**,
+**dying**, or **dead**, calculated from view gains once two consecutive view counts exist.
+A post does not need a sentiment analysis or negative classification to be tracked.
+
+Cards without links show an empty table. Added posts have blank cells until their first run.
+**Unavailable** means no view count could be read; **Failed** means the post could not be checked. Neither
+is treated as zero or replaced by comments. Rounded Facebook counts remain approximate. Each column
+represents the same run across all rows. The latest eight runs appear in the table; earlier runs stay in
+the account's Firestore run archive. Comments and likes are not collected by velocity runs yet.
+
+Runs continue when switching pages. Use **Refresh cards & checks** to reload saved results. A failed
+Firestore save offers **Retry saving check**, which saves the same results without scraping again or
+creating a duplicate check. **Manage posts → Remove post** removes a row;
+**Remove card** removes the preset. Collected posts and check history are kept. Existing single-post cards
+remain available and can accept more rows. Cards are independent of the datasets selected in Sentiment Analysis.
 
 ### Tab 3 — Sentiment Trends
 

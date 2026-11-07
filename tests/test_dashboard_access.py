@@ -41,9 +41,29 @@ class DashboardAccessTests(unittest.TestCase):
 
     def test_approved_identity_can_open_all_tabs(self):
         self.component.return_value = lambda **kwargs: {"id_token": "signed-token", "event_id": "login"}
-        with patch("modules.auth.verify_access", return_value="editor@example.com") as verify:
+        cards = [{"id": ident * 64, "name": name, "url": f"https://www.facebook.com/example/posts/{ident}"}
+                 for ident, name in (("a", "Saved velocity post"), ("b", "Awaiting collection"))]
+        post = {"url": cards[0]["url"], "raw_text": "Positive post", "analysis": {"sentiment": "Joy"},
+                "checks": [{"at": "2026-11-01", "comments": 10}, {"at": "2026-11-02", "comments": 20}]}
+        from modules.velocity_tracking import card_posts
+        post_id = card_posts(cards[0])[0]["id"]
+        cards[0]["runs"] = [{"at": f"2026-11-0{index + 1}", "results": [
+            {"post_id": post_id, "views": views, "outcome": "ok"}]} for index, views in enumerate((100, 200))]
+        with patch("modules.auth.verify_access", return_value="editor@example.com") as verify, \
+                patch("modules.velocity_tracking.load_cards", return_value=cards), \
+                patch("modules.velocity_tracking.load_card_records", return_value={post_id: post}):
             app = self.run_dashboard()
-            self.assertEqual([tab.label for tab in app.tabs], ["Scrap data", "Collect data", "Saved Facebook links", "Clean & manage data", "Sentiment Analysis", "Analysis", "Settings", "Sentiment Trends", "Sentiment over time", "Border tension risk over time", "Content recommendations", "GenCite", "Analyze", "Recommendations", "Saved analyses", "Tutorial"])
+            self.assertEqual([tab.label for tab in app.tabs], ["Scrap data", "Collect data", "Saved Facebook links", "Clean & manage data", "Sentiment Analysis", "Analysis", "Settings", "Velocity Tracking", "Sentiment Trends", "Sentiment over time", "Border tension risk over time", "Content recommendations", "GenCite", "Analyze", "Recommendations", "Saved analyses", "Tutorial"])
+            self.assertTrue(any('data-sm-view="Velocity Tracking"' in element.value for element in app.sidebar.markdown))
+            velocity = next(tab for tab in app.tabs if tab.label == "Velocity Tracking")
+            covers = [element.proto.body for element in velocity.get("html") if 'class="sm-note-cover"' in element.proto.body]
+            self.assertEqual(len(covers), 2)
+            self.assertIn("Saved velocity post", covers[0])
+            self.assertIn("Awaiting collection", covers[1])
+            tables = [element.proto.body for element in velocity.get("html") if 'aria-label="Velocity Tracker"' in element.proto.body]
+            self.assertEqual(len(tables), 0)
+            self.assertEqual(len([button for button in velocity.button if button.label.startswith("Open ")]), 2)
+            self.assertNotIn("Velocity Tracker", {tab.label for tab in app.tabs})
             self.assertEqual([button.label for button in app.button if button.key and button.key.startswith("scrape_open_")],
                              ["Open Facebook →", "Open Oyoshi on Facebook →", "Open X →", "Open Online news →", "Open Custom website →", "Open Reddit"])
             verify.assert_called_once_with("signed-token", {"editor@example.com"})
@@ -92,7 +112,7 @@ class DashboardAccessTests(unittest.TestCase):
         with patch("modules.auth.verify_access", return_value="editor@example.com") as verify:
             self.run_dashboard()
             refreshed = self.run_dashboard()
-        self.assertEqual(len(refreshed.tabs), 16)
+        self.assertEqual(len(refreshed.tabs), 17)
         self.assertEqual(verify.call_count, 2)
 
     def test_server_sign_out_clears_browser_storage_before_another_login(self):
@@ -159,7 +179,7 @@ class DashboardAccessTests(unittest.TestCase):
             self.database.assert_not_called()
             app.run(timeout=30)
             self.assertFalse(list(app.exception))
-            self.assertEqual(len(app.tabs), 16)
+            self.assertEqual(len(app.tabs), 17)
             self.assertEqual(app.session_state["scrape_results"], ["unsaved work"])
         self.assertNotEqual(calls[0]["key"], calls[1]["key"])
         self.assertTrue(all(not call["clear_session"] for call in calls))
@@ -173,7 +193,7 @@ class DashboardAccessTests(unittest.TestCase):
             self.assertEqual(app.session_state["auth_token"], "token")
             app.button[0].click().run()
             self.assertFalse(list(app.exception))
-            self.assertEqual(len(app.tabs), 16)
+            self.assertEqual(len(app.tabs), 17)
 
     def test_revoked_or_disabled_sessions_clear_saved_login_and_private_data(self):
         for error in (auth.RevokedIdTokenError("Revoked"),
@@ -202,7 +222,7 @@ class DashboardAccessTests(unittest.TestCase):
             event = {"id_token": "second", "event_id": "other-tab-login"}
             app.run(timeout=30)
             self.assertFalse(list(app.exception))
-            self.assertEqual(len(app.tabs), 16)
+            self.assertEqual(len(app.tabs), 17)
             self.assertNotIn("firestore_rows", app.session_state)
             self.assertEqual(app.session_state["auth_email"], "another@example.com")
             self.assertEqual(app.session_state["auth_token"], "second")
