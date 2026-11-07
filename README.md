@@ -141,7 +141,7 @@ this repository. See [Reddit's access policy](https://support.reddithelp.com/hc/
 
 ## Google News monitoring: OYOSHI, border tension and boycotts
 
-Open **Scrape Data → Online news** and click **Search Google News**. SenseMaker runs the same
+Open **Scrape Data → Online News** and click **Search Google News**. SenseMaker runs the same
 searches as Google Search's **News** tab for three categories, each with editable search terms:
 
 | Category | Default search |
@@ -371,7 +371,7 @@ The dashboard has **three pages**, accessible from the left toolbar:
 
 ### Tab 1 — Scrap data
 
-- Source tabs: **Facebook**, **Reddit**, and **Online news** (Google News monitoring).
+- Source tabs: **Facebook**, **Reddit**, and **Online News** (Google News monitoring).
 - Facebook and Reddit each keep their own source selections, collection settings and results.
 - Facebook auth session capture (opens Chrome for manual login)
 - Save a personal library of links, available on future visits and other devices

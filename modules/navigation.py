@@ -32,6 +32,8 @@ def dashboard_views(email: str, facebook_session: FacebookSession | None = None)
     chart = _icon('<path d="M4 4v16h16M8 14l4-5 4 3 4-7"/>')
     trend = _icon('<path d="m3 17 6-6 4 4 8-12M15 3h6v6"/>')
     collect = _icon('<ellipse cx="12" cy="5" rx="8" ry="3"/><path d="M4 5v7c0 1.7 3.6 3 8 3M4 12v6c0 1.7 3.6 3 8 3M20 5v5M16 16l3 3 3-3M19 12v7"/>')
+    guide = _icon('<path d="M4 5.5A2.5 2.5 0 0 1 6.5 3H20v15H6.5A2.5 2.5 0 0 0 4 20.5zM4 20.5A2.5 2.5 0 0 0 6.5 23H20v-5"/>'
+                  '<path d="M9 8h7M9 12h5"/>')
     logout = _icon('<path d="M9 4H5a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h4M10 12h11M17 8l4 4-4 4"/>')
     chevron = _icon('<path d="m14 8-4 4 4 4"/>')
     safe_email = html.escape(email, quote=True)
@@ -68,7 +70,11 @@ def dashboard_views(email: str, facebook_session: FacebookSession | None = None)
             '<button class="sm-rail-button" type="button" data-sm-view="Sentiment Trends" '
             'aria-label="Sentiment Trends" title="Sentiment Trends">'
             f'<span class="sm-rail-icon">{trend}</span>'
-            '<span class="sm-rail-label">Sentiment Trends</span></button></nav>'
+            '<span class="sm-rail-label">Sentiment Trends</span></button>'
+            '<button class="sm-rail-button" type="button" data-sm-view="Tutorial" '
+            'aria-label="Tutorial" title="Tutorial">'
+            f'<span class="sm-rail-icon">{guide}</span>'
+            '<span class="sm-rail-label">Tutorial</span></button></nav>'
             '<div class="sm-sidebar-footer">'
             f'{facebook_account}'
             f'<div class="sm-rail-account" title="Signed in as {safe_email}">'
@@ -84,7 +90,7 @@ def dashboard_views(email: str, facebook_session: FacebookSession | None = None)
 
     st.html(THEME_DIR / "sidebar.css")
     with st.container(key="sm_views"):
-        views = st.tabs(["Scrap data", "Sentiment Analysis", "Sentiment Trends"])
+        views = st.tabs(["Scrap data", "Sentiment Analysis", "Sentiment Trends", "Tutorial"])
 
     script = (THEME_DIR / "sidebar.js").read_text(encoding="utf-8")
     version = hashlib.sha256(script.encode()).hexdigest()[:12]
