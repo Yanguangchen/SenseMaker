@@ -1,4 +1,4 @@
-"""Durable card runs, views-only tables, and background failure recovery."""
+"""Durable card runs, likes + comments tables, and background failure recovery."""
 
 from types import SimpleNamespace
 import unittest
@@ -7,7 +7,8 @@ from unittest.mock import AsyncMock, patch
 from modules import velocity_jobs as jobs, velocity_tracking as store
 from modules.facebook_session import FacebookLoginError
 from modules.saved_links import library_owner_id
-from modules.velocity_table import velocity_card_sheet, view_status, views_change_percent
+from modules.velocity_metrics import METRIC, engagement_count
+from modules.velocity_table import velocity_card_sheet, engagement_status, engagement_change_percent
 from tests import test_velocity_tracking as fixtures
 
 VelocityTestCase = fixtures.VelocityTestCase
@@ -17,13 +18,37 @@ post_url = fixtures.post_url
 EMAIL = "owner@example.com"
 
 
-def run_for(card, index=1, views=100):
-    return {"id": f"{index:064x}", "at": f"2026-11-07T01:{index:02}:00+00:00", "results": [
-        {"post_id": post["id"], "url": post["url"], "views": views, "outcome": "ok"}
+def run_for(card, index=1, total=100):
+    return {"id": f"{index:064x}", "at": f"2026-11-07T01:{index:02}:00+00:00", "metric": METRIC, "results": [
+        {"post_id": post["id"], "url": post["url"], "reactions": total, "comments": 0 if total is not None else None, "engagement": total, "outcome": "ok"}
         for post in store.card_posts(card)]}
 
 
 class RunStoreTests(VelocityTestCase):
+    def test_old_views_are_preserved_but_never_compared_with_engagement(self):
+        card = store.add_card(self.db, EMAIL, url=post_url())[0]
+        old = run_for(card)
+        old.pop("metric")
+        old["results"] = [{"post_id": store.card_posts(card)[0]["id"], "views": 10000, "outcome": "ok"}]
+        for run in [old, run_for(card, 2, 100)]:
+            store.save_run(self.db, EMAIL, card["id"], run)
+        saved = store.load_cards(self.db, EMAIL)[0]
+        sheet = velocity_card_sheet(saved)
+        self.assertIn("10,000 views", sheet)
+        self.assertIn("Earlier views check", sheet)
+        self.assertNotIn('class="crt-status ', sheet)
+        self.assertNotIn("-99.0%", sheet)
+        store.save_run(self.db, EMAIL, card["id"], run_for(card, 3, 125))
+        self.assertIn(">+25.0%</td>", velocity_card_sheet(store.load_cards(self.db, EMAIL)[0]))
+        self.assertEqual(saved["runs"][0]["results"][0]["views"], 10000)
+
+    def test_total_requires_both_valid_counts_and_is_their_sum(self):
+        self.assertEqual(engagement_count({"reactions": 120, "comments": 30, "outcome": "ok"}), 150)
+        self.assertEqual(engagement_count({"reactions": 0, "comments": 0, "outcome": "ok"}), 0)
+        for row in ({"reactions": 12}, {"comments": 12}, {"views": 120},
+                    {"reactions": True, "comments": 0}, {"reactions": -1, "comments": 2}):
+            self.assertIsNone(engagement_count({**row, "outcome": "ok"}))
+
     def test_rename_preserves_posts_and_runs_including_later_run_saves(self):
         first = store.add_card(self.db, EMAIL, "First", post_url())[0]
         other = store.add_card(self.db, EMAIL, "Other")[1]
@@ -65,15 +90,15 @@ class RunStoreTests(VelocityTestCase):
         self.assertEqual(store.load_cards(self.db, EMAIL), [])
         self.assertEqual(len([key for key in self.db.rows if "/runs/" in key]), 1)
 
-    def test_missing_views_keep_run_columns_and_never_fall_back_to_comments(self):
+    def test_missing_reactions_keep_run_columns_and_never_use_comments_alone(self):
         card = store.add_card(self.db, EMAIL, url=post_url())[0]
         card = store.add_post(self.db, EMAIL, card["id"], post_url(2))[0]
         runs = [run_for(card, index, value) for index, value in enumerate((100, None, 300), 1)]
-        runs[1]["results"][0].update(comments=999, outcome="unavailable", reason="No public views")
+        runs[1]["results"][0].update(comments=999, outcome="unavailable", reason="Missing reaction total")
         runs[1]["results"].pop()  # Second row was not in that run.
         card["runs"] = runs
         sheet = velocity_card_sheet(card)
-        self.assertIn('>100</td><td title="No public views', sheet)
+        self.assertIn('>100</td><td title="Missing reaction total', sheet)
         self.assertIn('>Unavailable</td><td', sheet)
         self.assertIn('>300</td>', sheet)
         self.assertNotIn("999", sheet)
@@ -85,7 +110,7 @@ class RunStoreTests(VelocityTestCase):
                                ([100, 100, 100], "dead"), ([0, 0], "dead"), ([0, 10], "alive"),
                                ([100, None], None), ([100, None, 200], None), ([None, 200, 300], "alive")):
             with self.subTest(values=values):
-                self.assertEqual(view_status(values), status)
+                self.assertEqual(engagement_status(values), status)
 
     def test_percentage_uses_latest_pair_and_never_skips_missing_counts(self):
         for values, expected in (([], None), ([100], None), ([100, 150], 50), ([200, 150], -25),
@@ -93,7 +118,7 @@ class RunStoreTests(VelocityTestCase):
                                  ([100, None], None), ([100, None, 200], None),
                                  ([100, 200, 250], 25), ([None, 200, 300], 50)):
             with self.subTest(values=values):
-                self.assertEqual(views_change_percent(values), expected)
+                self.assertEqual(engagement_change_percent(values), expected)
 
     def test_headers_show_run_times_and_change_column_follows_status(self):
         card = store.add_card(self.db, EMAIL, url=post_url())[0]
@@ -104,9 +129,9 @@ class RunStoreTests(VelocityTestCase):
         self.assertIn('class="crt-run-date">07 Nov 2026</span>', sheet)
         self.assertIn('class="crt-run-time">01:01 UTC</span>', sheet)
         self.assertIn('class="crt-run-time">01:02 UTC</span>', sheet)
-        self.assertIn('>Status</th><th scope=col title="Latest run versus the previous run">Views change (%)</th>', sheet)
+        self.assertIn('>Status</th><th scope=col title="Latest run versus the previous run">Change (%)</th>', sheet)
         self.assertIn('>+25.0%</td>', sheet)
-        self.assertIn('title="Needs view counts from both the latest and previous runs.">—</td>', sheet)
+        self.assertIn('title="Needs likes + comments totals from both the latest and previous runs.">—</td>', sheet)
         self.assertNotIn('>Check 1</th>', sheet)
         empty = velocity_card_sheet({"posts": []})
         self.assertIn('colspan="12"', empty)
@@ -120,7 +145,7 @@ class RunStoreTests(VelocityTestCase):
         sheet = velocity_card_sheet(card)
         self.assertIn('class="crt-run-date">07 Nov 2026</span>', sheet)
         self.assertIn('class="crt-run-time">16:02 UTC</span>', sheet)
-        self.assertIn('title="Percentage change is undefined because the previous view count is zero.">—</td>', sheet)
+        self.assertIn('title="Percentage change is undefined because the previous total is zero.">—</td>', sheet)
 
 
 def inline_thread(*, target, args=(), **kwargs):
@@ -145,7 +170,7 @@ class RunWorkerTests(VelocityTestCase):
     def test_success_persists_once_and_save_retry_does_not_scrape_again(self):
         self.db.fail_writes = True
         results = run_for(self.card)["results"]
-        with patch("modules.velocity_jobs.collect_views", new=AsyncMock(return_value=results)) as scrape:
+        with patch("modules.velocity_jobs.collect_engagement", new=AsyncMock(return_value=results)) as scrape:
             job = jobs.start_run(EMAIL, self.card["id"], hosted=True)
             self.assertEqual(job.status, "save_failed")
             self.assertEqual(store.load_cards(self.db, EMAIL)[0].get("runs", []), [])
@@ -161,7 +186,7 @@ class RunWorkerTests(VelocityTestCase):
             self.assertEqual(scrape.await_count, 1)
 
     def test_auth_failure_does_not_fabricate_check(self):
-        with patch("modules.velocity_jobs.collect_views", new=AsyncMock(side_effect=FacebookLoginError("Reconnect Facebook"))):
+        with patch("modules.velocity_jobs.collect_engagement", new=AsyncMock(side_effect=FacebookLoginError("Reconnect Facebook"))):
             job = jobs.start_run(EMAIL, self.card["id"], hosted=True)
         self.assertEqual(job.status, "error")
         self.assertIn("Reconnect Facebook", job.error)
@@ -174,11 +199,11 @@ class RunWorkerTests(VelocityTestCase):
             partial(run_for(self.card)["results"])
             raise FacebookLoginError("Reconnect Facebook")
 
-        with patch("modules.velocity_jobs.collect_views", side_effect=stopped):
+        with patch("modules.velocity_jobs.collect_engagement", side_effect=stopped):
             job = jobs.start_run(EMAIL, self.card["id"], hosted=True)
         self.assertEqual(job.status, "complete")
         rows = store.load_cards(self.db, EMAIL)[0]["runs"][0]["results"]
-        self.assertEqual([row["views"] for row in rows], [100, None])
+        self.assertEqual([row["engagement"] for row in rows], [100, None])
         self.assertEqual(rows[1]["outcome"], "error")
         self.assertIn("Completed counts were saved", job.run["warning"])
 
@@ -210,7 +235,7 @@ class RunUITests(VelocityTestCase):
 
     def test_saved_unavailable_reason_is_visible_without_hovering(self):
         card = store.add_card(self.db, EMAIL, url=post_url())[0]
-        run = run_for(card, views=None)
+        run = run_for(card, total=None)
         run["results"][0].update(outcome="unavailable", reason="The requested post could not be identified on the page.")
         store.save_run(self.db, EMAIL, card["id"], run)
         app = self.app()
@@ -218,7 +243,7 @@ class RunUITests(VelocityTestCase):
         self.assertFalse(list(app.exception))
         self.assertIn("Why counts are unavailable", [expander.label for expander in app.expander])
         self.assertTrue(any("The requested post could not be identified" in element.value for element in app.markdown))
-        self.assertTrue(any("two consecutive view counts" in element.value for element in app.caption))
+        self.assertTrue(any("two consecutive likes + comments totals" in element.value for element in app.caption))
 
     def test_active_run_disables_duplicate_runs_and_edits_while_polling(self):
         card = store.add_card(self.db, EMAIL, url=post_url())[0]

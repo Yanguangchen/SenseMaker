@@ -285,8 +285,8 @@ class VelocityUITests(VelocityTestCase):
         post = store.card_posts(team)[0]
         store.save_remark(self.db, "other@example.com", team["id"], post["id"], "Monitor this discussion")
         store.save_run(self.db, "other@example.com", team["id"], {
-            "id": "a" * 64, "at": "2026-11-07T01:00:00+00:00",
-            "results": [{"post_id": post["id"], "views": 250, "outcome": "ok"}],
+            "id": "a" * 64, "at": "2026-11-07T01:00:00+00:00", "metric": "reactions_comments",
+            "results": [{"post_id": post["id"], "reactions": 200, "comments": 50, "engagement": 250, "outcome": "ok"}],
         })
         with patch("modules.auth.allowed_emails", return_value={"owner@example.com", "other@example.com"}):
             shared = store.load_workspace_cards(self.db, "owner@example.com")[0]
@@ -409,8 +409,8 @@ class VelocityUITests(VelocityTestCase):
         first_post = store.card_posts(saved[0])[0]
         for index, views in enumerate((100, 200)):
             store.save_run(self.db, "owner@example.com", card["id"], {
-                "id": str(index) * 64, "at": f"2026-11-0{index + 1}",
-                "results": [{"post_id": first_post["id"], "views": views, "outcome": "ok"}],
+                "id": str(index) * 64, "at": f"2026-11-0{index + 1}", "metric": "reactions_comments",
+                "results": [{"post_id": first_post["id"], "reactions": views - 10, "comments": 10, "engagement": views, "outcome": "ok"}],
             })
         fresh.button(key=f"{self.key}_refresh").click().run()
         self.assertTrue(any("alive</span>" in element.proto.body for element in fresh.get("html")))

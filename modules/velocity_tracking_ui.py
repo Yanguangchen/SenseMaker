@@ -12,6 +12,7 @@ from modules.client_report import CSS_PATH, format_time
 from modules.saved_links import library_owner_id
 from modules.ui import show_running_glow
 from modules.velocity_table import velocity_card_sheet
+from modules.velocity_metrics import METRIC, engagement_count
 
 log = logging.getLogger(__name__)
 PAPER_CSS = Path(__file__).parent / "theme" / "velocity-notepad.css"
@@ -50,7 +51,7 @@ def _render_cover(email: str, card: dict, index: int, key: str) -> None:
     eyebrow = "SHARED VELOCITY" if card.get("shared") else "VELOCITY"
     job = jobs.latest_job(email)
     running = job and job.card_id == card["id"] and job.status in {"running", "saving"}
-    detail = "Checking views…" if running else (f"Last run · {format_time(runs[-1]['at'])}" if runs else "Ready for your first check")
+    detail = "Checking likes + comments…" if running else (f"Last run · {format_time(runs[-1]['at'])}" if runs else "Ready for your first check")
     checks = "".join(f'<span class="sm-note-check{" is-filled" if i < len(runs) else ""}">{i + 1}</span>'
                      for i in range(store.SHOWN_RUNS))
     with st.container(key=f"sm_velocity_cover_{card['id']}"):
@@ -116,16 +117,19 @@ def _render_card_history(card: dict) -> None:
     st.html(velocity_card_sheet(card))
     if not card.get("runs"):
         return
+    if card["runs"][-1].get("metric") != METRIC:
+        st.caption("Earlier checks tracked views. Run this card to start tracking likes + comments.")
+        return
     latest = {row["post_id"]: row for row in card["runs"][-1].get("results", [])}
     missing = [(index, post, latest[post["id"]]) for index, post in enumerate(store.card_posts(card), 1)
-               if post["id"] in latest and latest[post["id"]].get("views") is None]
+               if post["id"] in latest and engagement_count(latest[post["id"]]) is None]
     if missing:
         with st.expander("Why counts are unavailable", expanded=True):
             for index, post, result in missing:
-                st.write(f"Post {index}: {result.get('reason') or 'No view count was found on this post.'}")
+                st.write(f"Post {index}: {result.get('reason') or 'Both likes/reactions and comment totals are needed.'}")
                 st.link_button(f"Open post {index} on Facebook", post["url"])
-            st.caption("A view-based status and percentage change need two consecutive view counts. "
-                       "If Facebook does not display views for a photo or text post, this card cannot measure its views.")
+            st.caption("Status and percentage change need two consecutive likes + comments totals. "
+                       "Likes includes all Facebook reactions. Missing counts are not treated as zero.")
 
 
 def _render_remarks(email: str, card: dict, state: dict, key: str, card_key: str) -> None:
@@ -174,7 +178,7 @@ def _render_card(email: str, card: dict, index: int, state: dict, key: str, *, h
             return
         title, actions = st.columns([4, 1], vertical_alignment="center")
         title.subheader(_card_name(card, index))
-        title.caption(f"{len(posts)} / {store.MAX_POSTS_PER_CARD} posts · Facebook views")
+        title.caption(f"{len(posts)} / {store.MAX_POSTS_PER_CARD} posts · Likes + comments (all reactions included)")
         if actions.button("Remove card", key=f"{key}_remove_{card['id']}", disabled=state["error"] or card_busy,
                           help="The collected posts and their saved checks are kept."):
             try:
@@ -205,7 +209,7 @@ def _render_card(email: str, card: dict, index: int, state: dict, key: str, *, h
                     st.rerun()
 
         if st.button("Run", key=f"{card_key}_run", type="primary", disabled=state["error"] or not posts or busy,
-                     help="Check the displayed views for every saved post in this card and save a new check."):
+                     help="Read likes/reactions and comments for every saved post, then save their combined total."):
             try:
                 jobs.start_run(email, card["id"], hosted=hosted)
             except ValueError as exc:
@@ -293,8 +297,8 @@ def render_velocity_workspace(email: str, *, hosted: bool | None = None) -> None
             state["error"] = False
             if finished:
                 st.session_state[f"{key}_seen_run"] = job.id
-                found = sum(row.get("views") is not None for row in job.run["results"])
-                st.session_state[f"{key}_notice"] = f"Check saved. View counts available for {found} of {len(job.posts)} posts."
+                found = sum(engagement_count(row) is not None for row in job.run["results"])
+                st.session_state[f"{key}_notice"] = f"Check saved. Likes + comments totals available for {found} of {len(job.posts)} posts."
         except Exception:
             log.exception("Velocity cards could not be loaded")
             state["error"] = True

@@ -14,7 +14,8 @@ from modules import database, velocity_tracking as store
 from modules.collection_jobs import active_collection
 from modules.facebook_session import FacebookLoginError
 from modules.saved_links import library_owner_id
-from modules.velocity_scraper import collect_views
+from modules.velocity_scraper import collect_engagement
+from modules.velocity_metrics import METRIC
 
 log = logging.getLogger(__name__)
 _lock = threading.Lock()
@@ -66,7 +67,7 @@ def start_run(email: str, card_id: str, *, hosted: bool) -> VelocityJob:
         if not posts:
             raise ValueError("Add a Facebook post to this card before running it.")
         job = VelocityJob(token_hex(32), card_id, posts)
-        job.run = {"id": job.id, "started_at": datetime.now(timezone.utc).isoformat()}
+        job.run = {"id": job.id, "started_at": datetime.now(timezone.utc).isoformat(), "metric": METRIC}
         _jobs[owner] = job
 
     def progress(completed: int, message: str) -> None:
@@ -81,7 +82,7 @@ def start_run(email: str, card_id: str, *, hosted: bool) -> VelocityJob:
         try:
             async def collect():
                 async with asyncio.timeout(720):
-                    return await collect_views(email, job.posts, hosted=hosted, progress=progress, partial=partial)
+                    return await collect_engagement(email, job.posts, hosted=hosted, progress=progress, partial=partial)
             values = asyncio.run(collect())
         except Exception as exc:
             log.warning("Velocity run failed (%s)", type(exc).__name__)
@@ -92,7 +93,8 @@ def start_run(email: str, card_id: str, *, hosted: bool) -> VelocityJob:
                 return
             job.run["warning"] = message + " Completed counts were saved; run again to retry failed posts."
             checked = {row["post_id"] for row in values}
-            values.extend({"post_id": post["id"], "url": post["url"], "views": None, "outcome": "error",
+            values.extend({"post_id": post["id"], "url": post["url"], "reactions": None, "comments": None,
+                           "engagement": None, "outcome": "error",
                            "reason": "The browser stopped before this post could be checked."}
                           for post in job.posts if post["id"] not in checked)
         job.run.update(at=datetime.now(timezone.utc).isoformat(), results=values)
