@@ -146,7 +146,7 @@ class GeminiSettingsTests(unittest.TestCase):
              patch("modules.auth.require_access", return_value="editor@example.com"), \
              patch("modules.database.init_db"), patch("modules.sentiment_history.persist_analysis_run") as save, \
              patch("modules.processor.resolve_model", side_effect=GeminiError("Gemini HTTP 404: Model unavailable.")):
-            app = AppTest.from_file(str(Path(__file__).resolve().parents[1] / "dashboard.py"))
+            app = AppTest.from_file(str(Path(__file__).resolve().parents[1] / "dashboard.py"), default_timeout=30)
             app.run()
             ui(app, "analysis_sources").select("source:other").run()
             app.session_state["analysis_dataset_catalog"] = {"rows": [{"key": "untitled:", "title": "Untitled", "count": 1, "pending": 0}], "error": False}

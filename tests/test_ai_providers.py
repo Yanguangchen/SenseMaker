@@ -164,7 +164,7 @@ class ProviderUITests(unittest.TestCase):
                 app.radio(key="ai_provider").set_value(provider).run()
                 self.assertFalse(list(app.exception))
                 self.assertEqual(len(app.text_input), 0)
-                visible = str(app) + repr(app.session_state.filtered_state)
+                visible = str(app) + repr(app.session_state)
                 self.assertNotIn("private-gemini", visible)
                 self.assertNotIn("private-openai", visible)
 

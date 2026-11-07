@@ -36,19 +36,23 @@ class ScrapeNavigationTests(unittest.TestCase):
                          ["Open Facebook →", "Open Oyoshi on Facebook →", "Open X →", "Open Online news →", "Open Custom website →"])
         other_sources = next(expander for expander in self.app.expander if expander.label == "Other sources")
         self.assertEqual([button.label for button in other_sources.button], ["Open Reddit"])
-        self.assertIn(FACEBOOK_USAGE_WARNING, [warning.value for warning in self.app.warning])
+        self.assertNotIn(FACEBOOK_USAGE_WARNING, [warning.value for warning in self.app.warning])
+        self.assertEqual(self.app.button(key="scrape_open_facebook").proto.help, FACEBOOK_USAGE_WARNING)
         for collector in self.collectors:
             collector.assert_not_called()
 
-    def test_usage_warning_appears_in_original_facebook_flow_but_not_oyoshi(self):
+    def test_usage_warning_is_a_tooltip_in_original_facebook_flow_but_not_oyoshi(self):
         self.app.button(key="scrape_open_facebook").click().run()
         self.assertFalse(self.app.exception)
-        self.assertIn(FACEBOOK_USAGE_WARNING, [warning.value for warning in self.app.warning])
+        self.assertNotIn(FACEBOOK_USAGE_WARNING, [warning.value for warning in self.app.warning])
+        self.assertEqual(next(header for header in self.app.subheader if header.value == "Facebook").proto.help,
+                         FACEBOOK_USAGE_WARNING)
         self.app.button(key="scrape_all_sources").click().run()
         self.app.run()
         self.app.button(key="scrape_open_facebook_search").click().run()
         self.assertFalse(self.app.exception)
         self.assertNotIn(FACEBOOK_USAGE_WARNING, [warning.value for warning in self.app.warning])
+        self.assertNotIn(FACEBOOK_USAGE_WARNING, [header.proto.help for header in self.app.subheader])
 
     def test_switching_sources_preserves_news_and_reddit_settings_and_collected_results(self):
         self.app.button(key="scrape_open_news").click().run()

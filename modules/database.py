@@ -305,12 +305,16 @@ def delete_records(db: firestore.Client, expected_versions: Dict[str, str], *,
     return remove(db.transaction(max_attempts=3))
 
 
-def delete_dataset_records(db: firestore.Client, dataset: str, expected_versions: Dict[str, str],
-                           on_progress: Any = None) -> Dict[str, List[str]]:
-    """Delete a reviewed dataset in bounded transactions, reporting partial progress."""
+def _validate_dataset_key(dataset: str) -> None:
     if not isinstance(dataset, str) or not (dataset == "untitled:" or
                                           (dataset.startswith("title:") and dataset[6:].strip())):
         raise ValueError("Choose a single saved dataset.")
+
+
+def delete_dataset_records(db: firestore.Client, dataset: str, expected_versions: Dict[str, str],
+                           on_progress: Any = None) -> Dict[str, List[str]]:
+    """Delete a reviewed dataset in bounded transactions, reporting partial progress."""
+    _validate_dataset_key(dataset)
     # Validate the entire review before the first write, including later chunks.
     _validate_record_versions(expected_versions)
     result: Dict[str, List[str]] = {"deleted": [], "skipped": [], "missing": [], "unconfirmed": []}
@@ -327,4 +331,33 @@ def delete_dataset_records(db: firestore.Client, dataset: str, expected_versions
             result[key].extend(part[key])
         if on_progress:
             on_progress(min(start + 200, len(ids)), len(ids))
+    return result
+
+
+def delete_datasets_records(db: firestore.Client, datasets: Dict[str, Dict[str, str]],
+                            on_progress: Any = None) -> Dict[str, List[str]]:
+    """Delete reviewed datasets, keeping each record scoped to its original dataset."""
+    reviewed_ids: set[str] = set()
+    for dataset, versions in datasets.items():
+        _validate_dataset_key(dataset)
+        _validate_record_versions(versions)
+        if reviewed_ids.intersection(versions):
+            raise ValueError("A reviewed record cannot belong to multiple datasets.")
+        reviewed_ids.update(versions)
+    result: Dict[str, List[str]] = {"deleted": [], "skipped": [], "missing": [], "unconfirmed": []}
+    items = list(datasets.items())
+    checked = 0
+    for index, (dataset, versions) in enumerate(items):
+        progress = (lambda done, total, offset=checked: on_progress(offset + done, len(reviewed_ids))) if on_progress else None
+        try:
+            part = delete_dataset_records(db, dataset, versions, on_progress=progress)
+        except Exception:
+            part = {"deleted": [], "skipped": [], "missing": [], "unconfirmed": list(versions)}
+        for key in result:
+            result[key].extend(part[key])
+        if part["unconfirmed"]:
+            # Stop after an uncertain write; preserve earlier confirmed results.
+            result["unconfirmed"].extend(ident for _, remaining in items[index + 1:] for ident in remaining)
+            break
+        checked += len(versions)
     return result

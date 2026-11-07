@@ -622,8 +622,10 @@ def _render_remote_facebook_progress(email: str, job_id: str) -> None:
             st.session_state["facebook_login_error"] = "The login session ended. Open the Facebook login window again."
         forget_login(email, job_id)
         st.rerun(scope="app")
+    # A running status keeps its spinner visible between background-job polls.
+    # A spinner context would disappear as soon as this fragment finishes.
     if job.status == "saving":
-        st.info("Saving your Facebook login…")
+        st.status("Saving your Facebook login…", state="running")
     elif job.live_url:
         import streamlit.components.v1 as components
         st.info("Finish Facebook sign-in and any verification below, then click Save Facebook login. "
@@ -636,11 +638,11 @@ def _render_remote_facebook_progress(email: str, job_id: str) -> None:
                      disabled=job.status != "waiting" or job.finish.is_set()):
             job.finish.set()
         if job.status == "checking" or job.finish.is_set():
-            st.info("Checking your Facebook sign-in…")
+            st.status("Checking your Facebook sign-in…", state="running")
     elif job.status == "checking":
-        st.info("Checking your saved Facebook connection…")
+        st.status("Checking your saved Facebook connection…", state="running")
     else:
-        st.info("Opening your Facebook login window…")
+        st.status("Opening your Facebook login window…", state="running")
     if st.button("Cancel Facebook login", key="cancel_remote_facebook_login"):
         job.cancel.set()
 
@@ -1651,14 +1653,12 @@ def _render_facebook_workspace(user_email: str, session: FacebookSession) -> Non
         _facebook_steps_modal(user_email, session, labels, index, search=search)
         return
     with st.container(border=True, key="facebook_overview"):
-        st.subheader("Oyoshi on Facebook" if search else "Facebook")
+        st.subheader("Oyoshi on Facebook" if search else "Facebook", help=None if search else FACEBOOK_USAGE_WARNING)
         st.caption("Open Oyoshi search results directly and collect posts with 2–5 scrolls." if search else
                    "Collect posts and comments from the Facebook groups and pages you choose.")
         save_confirmation = st.session_state.pop("facebook_save_confirmation", None)
         if save_confirmation:
             st.success(save_confirmation)
-        if not search:
-            st.warning(FACEBOOK_USAGE_WARNING, icon="⚠️")
         if _facebook_ready(session):
             st.caption(f"Connection ready{' · ' + session.name if session.name else ''}.")
         else:
@@ -1684,10 +1684,7 @@ def _facebook_steps_modal(user_email: str, session: FacebookSession,
             _close_focus_modal()
             st.rerun()
     current = labels[index]
-    if search:
-        st.subheader("Oyoshi on Facebook")
-    else:
-        st.warning(FACEBOOK_USAGE_WARNING, icon="⚠️")
+    st.subheader("Oyoshi on Facebook" if search else "Facebook", help=None if search else FACEBOOK_USAGE_WARNING)
     _render_step_header(labels, index)
 
     if current == "Connect Facebook":

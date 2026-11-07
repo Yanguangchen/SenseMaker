@@ -8,7 +8,7 @@ from zoneinfo import ZoneInfo
 
 from streamlit.testing.v1 import AppTest
 
-from modules.database import delete_dataset_records, delete_records, get_post_id, load_record_catalog
+from modules.database import delete_dataset_records, delete_datasets_records, delete_records, get_post_id, load_record_catalog
 from modules.analysis_library import dataset_options
 from modules.record_management_ui import featured_datasets, filter_records
 from modules.record_state import purge_record_caches
@@ -21,6 +21,58 @@ def record(ident, **extra):
 
 
 class RecordDatabaseTests(unittest.TestCase):
+    def test_multiple_datasets_keep_batches_scoped_and_report_combined_progress(self):
+        datasets = {"title:A": {f"a{i}": "version" for i in range(201)}, "untitled:": {"b": "version"}}
+        progress = MagicMock()
+        with patch("modules.database.delete_records", side_effect=lambda db, versions, **kwargs:
+                   {"deleted": list(versions), "skipped": [], "missing": []}) as delete:
+            result = delete_datasets_records("db", datasets, progress)
+        self.assertEqual(len(result["deleted"]), 202)
+        self.assertFalse(result["unconfirmed"])
+        self.assertEqual([len(call.args[1]) for call in delete.call_args_list], [200, 1, 1])
+        self.assertEqual([call.kwargs["dataset"] for call in delete.call_args_list], ["title:A", "title:A", "untitled:"])
+        self.assertEqual([call.args for call in progress.call_args_list], [(200, 202), (201, 202), (202, 202)])
+
+    def test_multiple_datasets_validate_every_selection_before_deleting_anything(self):
+        with patch("modules.database.delete_dataset_records") as delete:
+            for invalid in ({"title:A": {"a": "v"}, "title:": {"b": "v"}},
+                            {"title:A": {"a": "v"}, "title:B": {"nested/id": "v"}},
+                            {"title:A": {"a": "v"}, "title:B": {"a": "v"}}):
+                with self.subTest(invalid=invalid), self.assertRaises(ValueError):
+                    delete_datasets_records("db", invalid)
+            self.assertEqual(delete_datasets_records("db", {}),
+                             {"deleted": [], "skipped": [], "missing": [], "unconfirmed": []})
+            delete.assert_not_called()
+
+    def test_multiple_datasets_stop_on_partial_failure_and_keep_confirmed_progress(self):
+        datasets = {"title:A": {"a": "v"}, "title:B": {f"b{i}": "v" for i in range(201)},
+                    "title:C": {"c": "v"}}
+        def remove(db, versions, **kwargs):
+            if "b200" in versions:
+                raise RuntimeError("offline")
+            return {"deleted": list(versions), "skipped": [], "missing": []}
+        with patch("modules.database.delete_records", side_effect=remove) as delete:
+            result = delete_datasets_records("db", datasets)
+        self.assertEqual(len(result["deleted"]), 201)
+        self.assertEqual(result["unconfirmed"], ["b200", "c"])
+        self.assertEqual(delete.call_count, 3)
+
+    def test_multiple_datasets_keep_changed_and_moved_records(self):
+        stamp = datetime(2026, 11, 3, tzinfo=timezone.utc)
+        db = MagicMock()
+        db.collection.return_value.document.side_effect = lambda ident: SimpleNamespace(id=ident)
+        def snapshots(refs, **kwargs):
+            return [SimpleNamespace(id=ref.id, exists=True,
+                    update_time=stamp.replace(day=4) if ref.id == "changed" else stamp,
+                    to_dict=lambda: {"custom_title": "B"}) for ref in refs]
+        db.get_all.side_effect = snapshots
+        with patch("modules.database.firestore.transactional", side_effect=lambda function: function):
+            result = delete_datasets_records(db, {"title:A": {"moved": stamp.isoformat(), "changed": stamp.isoformat()},
+                                                 "title:B": {"b": stamp.isoformat()}})
+        self.assertEqual(result["deleted"], ["b"])
+        self.assertEqual(result["skipped"], ["moved", "changed"])
+        self.assertEqual(db.transaction.return_value.delete.call_count, 1)
+
     def test_dataset_deletion_spans_batches_and_reports_partial_progress(self):
         versions = {str(i): "version" for i in range(450)}
         def remove(db, selected, **kwargs):
@@ -184,6 +236,7 @@ class RecordManagementUITests(unittest.TestCase):
         self.delete = patch("modules.record_management_ui.delete_records", return_value={
             "deleted": ["a"], "skipped": [], "missing": []}).start()
         self.delete_dataset = patch("modules.record_management_ui.delete_dataset_records").start()
+        self.delete_datasets = patch("modules.record_management_ui.delete_datasets_records").start()
         self.addCleanup(patch.stopall)
         self.app = AppTest.from_string(self.script).run()
 
@@ -227,6 +280,111 @@ class RecordManagementUITests(unittest.TestCase):
         self.assertEqual(self.app.multiselect(key="record_manager_selection").value, [])
         self.delete.assert_not_called()
 
+    def test_multiple_dataset_review_covers_all_records_and_only_deletes_after_confirmation(self):
+        self.rows += [record(f"extra-{i}") for i in range(250)] + [record("keep", custom_title="Campaign C")]
+        self.app.button(key="record_manager_refresh").click().run()
+        self.app.toggle(key="record_manager_dataset_delete_mode").set_value(True).run()
+        self.assertTrue(self.app.button(key="record_manager_delete_datasets_review").disabled)
+        self.app.text_input(key="record_manager_dataset_search").set_value("example.com/a").run()
+        self.app.button(key="record_manager_card_search_title:Campaign A").click().run()
+        self.app.button(key="record_manager_card_featured_title:Campaign B").click().run()
+        expected = {key: {row["_id"]: row["_version"] for row in self.rows if "title:" + row["custom_title"] == key}
+                    for key in ("title:Campaign A", "title:Campaign B")}
+        self.app.button(key="record_manager_delete_datasets_review").click().run()
+        self.assertFalse(self.app.exception)
+        self.assertEqual(self.app.session_state["datasets_delete_pending"]["datasets"], expected)
+        self.assertEqual(set(self.app.dataframe[0].value["Dataset"]), {"Campaign A", "Campaign B"})
+        self.assertEqual(len(self.app.dataframe[1].value), 253)
+        self.assertTrue(any("cannot be undone" in warning.value for warning in self.app.warning))
+        self.delete_datasets.assert_not_called()
+        self.app.session_state["firestore_rows"] = self.rows.copy()
+        def remove(db, datasets, **kwargs):
+            ids = [ident for versions in datasets.values() for ident in versions]
+            self.rows = [row for row in self.rows if row["_id"] not in ids]
+            return {"deleted": ids, "skipped": [], "missing": [], "unconfirmed": []}
+        self.delete_datasets.side_effect = remove
+        self.app.button(key="record_manager_delete_datasets_confirm").click().run()
+        self.assertFalse(self.app.exception)
+        self.assertEqual(self.delete_datasets.call_args.args, ("db", expected))
+        self.assertEqual([row["_id"] for row in self.app.session_state["record_manager_rows"]], ["keep"])
+        self.assertEqual([row["_id"] for row in self.app.session_state["firestore_rows"]], ["keep"])
+        self.assertEqual(self.app.session_state["record_manager_datasets_to_delete"], [])
+        self.assertNotIn("datasets_delete_pending", self.app.session_state)
+        self.assertTrue(any("Deleted 2 dataset(s) and 253 record(s)" in notice.value for notice in self.app.success))
+
+    def test_dataset_selection_is_shared_across_tabs_and_search_pages(self):
+        self.rows = [record(str(i), custom_title=f"Campaign {i:02}") for i in range(25)]
+        self.app.button(key="record_manager_refresh").click().run()
+        self.app.toggle(key="record_manager_dataset_delete_mode").set_value(True).run()
+        self.app.button(key="record_manager_card_featured_title:Campaign 24").click().run()
+        self.assertIn("Selected", self.app.button(key="record_manager_card_search_title:Campaign 24").label)
+        self.app.button(key="record_manager_card_search_title:Campaign 24").click().run()
+        self.assertEqual(self.app.session_state["record_manager_datasets_to_delete"], [])
+        self.app.button(key="record_manager_card_search_title:Campaign 24").click().run()
+        self.app.button(key="record_manager_dataset_page_3").click().run()
+        self.app.button(key="record_manager_card_search_title:Campaign 00").click().run()
+        self.app.text_input(key="record_manager_dataset_search").set_value("no matches").run()
+        self.app.button(key="record_manager_delete_datasets_review").click().run()
+        self.assertFalse(self.app.exception)
+        self.assertEqual(set(self.app.session_state["datasets_delete_pending"]["datasets"]),
+                         {"title:Campaign 24", "title:Campaign 00"})
+        self.delete_datasets.assert_not_called()
+
+    def test_dataset_selection_changes_cancel_refresh_and_mode_exit_invalidate_review(self):
+        self.app.toggle(key="record_manager_dataset_delete_mode").set_value(True).run()
+        self.app.button(key="record_manager_card_featured_title:Campaign A").click().run()
+        self.app.button(key="record_manager_delete_datasets_review").click().run()
+        self.app.button(key="record_manager_card_featured_title:Campaign B").click().run()
+        self.assertNotIn("datasets_delete_pending", self.app.session_state)
+        for action in ("record_manager_datasets_cancel", "record_manager_refresh"):
+            self.app.button(key="record_manager_delete_datasets_review").click().run()
+            self.app.button(key=action).click().run()
+            self.assertNotIn("datasets_delete_pending", self.app.session_state)
+        self.app.button(key="record_manager_delete_datasets_review").click().run()
+        self.app.session_state["record_manager_rows"] = [record("a", _version="new-version"), *self.rows[1:]]
+        self.app.run()
+        self.assertNotIn("datasets_delete_pending", self.app.session_state)
+        self.app.button(key="record_manager_delete_datasets_review").click().run()
+        self.app.button(key="record_manager_datasets_clear").click().run()
+        self.assertEqual(self.app.session_state["record_manager_datasets_to_delete"], [])
+        self.assertNotIn("datasets_delete_pending", self.app.session_state)
+        self.app.button(key="record_manager_card_featured_title:Campaign A").click().run()
+        self.app.button(key="record_manager_delete_datasets_review").click().run()
+        self.app.toggle(key="record_manager_dataset_delete_mode").set_value(False).run()
+        self.assertEqual(self.app.session_state["record_manager_datasets_to_delete"], [])
+        self.assertNotIn("datasets_delete_pending", self.app.session_state)
+        self.assertEqual(self.app.button(key="record_manager_card_featured_title:Campaign A").label, "Open dataset")
+        self.delete_datasets.assert_not_called()
+
+    def test_partial_multiple_dataset_deletion_requires_refresh_and_purges_stale_views(self):
+        self.app.toggle(key="record_manager_dataset_delete_mode").set_value(True).run()
+        for title in ("Campaign A", "Campaign B"):
+            self.app.button(key=f"record_manager_card_featured_title:{title}").click().run()
+        self.app.button(key="record_manager_delete_datasets_review").click().run()
+        self.app.session_state["firestore_rows"] = self.rows.copy()
+        self.delete_datasets.return_value = {"deleted": ["a"], "skipped": [], "missing": [], "unconfirmed": ["b", "c"]}
+        self.app.button(key="record_manager_delete_datasets_confirm").click().run()
+        self.assertFalse(self.app.exception)
+        self.assertNotIn("record_manager_rows", self.app.session_state)
+        self.assertNotIn("datasets_delete_pending", self.app.session_state)
+        self.assertEqual(self.app.session_state["firestore_rows"], [])
+        self.assertTrue(any("Deleted 1 record(s)" in warning.value for warning in self.app.warning))
+        self.assertTrue(any("Could not confirm deletion of 2" in error.value for error in self.app.error))
+
+    def test_new_records_in_selected_datasets_are_kept_and_removal_is_not_claimed(self):
+        self.app.toggle(key="record_manager_dataset_delete_mode").set_value(True).run()
+        for title in ("Campaign A", "Campaign B"):
+            self.app.button(key=f"record_manager_card_featured_title:{title}").click().run()
+        self.app.button(key="record_manager_delete_datasets_review").click().run()
+        self.rows = [record("new")]
+        self.delete_datasets.return_value = {"deleted": ["a", "b", "c"], "skipped": [], "missing": [], "unconfirmed": []}
+        self.app.button(key="record_manager_delete_datasets_confirm").click().run()
+        self.assertFalse(self.app.exception)
+        self.assertNotIn("new", self.delete_datasets.call_args.args[1]["title:Campaign A"])
+        self.assertEqual([row["_id"] for row in self.app.session_state["record_manager_rows"]], ["new"])
+        self.assertFalse(self.app.success)
+        self.assertTrue(any("1 of 2 datasets confirmed removed" in warning.value for warning in self.app.warning))
+
     def test_dataset_search_finds_older_data_and_opens_the_complete_dataset(self):
         self.rows += [record(f"new-{i}", custom_title=f"New {i}", saved_at="2026-11-04T01:00:00Z") for i in range(8)]
         self.app.button(key="record_manager_refresh").click().run()
@@ -248,18 +406,32 @@ class RecordManagementUITests(unittest.TestCase):
         self.rows = [record(str(i), custom_title=f"Campaign {i:02}") for i in range(25)]
         self.app.button(key="record_manager_refresh").click().run()
         self.assertEqual(len([button for button in self.app.button if "card_search" in button.key]), 12)
-        self.app.selectbox(key="record_manager_dataset_page").select(3).run()
+        self.assertNotIn("record_manager_dataset_page", [field.key for field in self.app.selectbox])
+        self.assertEqual([button.label for button in self.app.button if button.key.startswith("record_manager_dataset_page_")],
+                         ["1", "2", "3"])
+        self.assertTrue(self.app.button(key="record_manager_dataset_previous").disabled)
+        self.assertEqual(self.app.button(key="record_manager_dataset_page_1").proto.type, "primary")
+        keys = [button.key for button in self.app.tabs[1].button]
+        self.assertLess(max(index for index, key in enumerate(keys) if "card_search" in key),
+                        keys.index("record_manager_dataset_page_1"))
+        self.app.button(key="record_manager_dataset_next").click().run()
+        self.assertEqual(self.app.session_state["record_manager_dataset_page"], 2)
+        self.app.button(key="record_manager_dataset_previous").click().run()
+        self.assertEqual(self.app.session_state["record_manager_dataset_page"], 1)
+        self.app.button(key="record_manager_dataset_page_3").click().run()
         self.assertEqual(len([button for button in self.app.button if "card_search" in button.key]), 1)
+        self.assertTrue(self.app.button(key="record_manager_dataset_next").disabled)
         self.app.text_input(key="record_manager_dataset_search").set_value("campaign").run()
-        self.assertEqual(self.app.selectbox(key="record_manager_dataset_page").value, 1)
+        self.assertEqual(self.app.session_state["record_manager_dataset_page"], 1)
         self.assertEqual(len([button for button in self.app.button if "card_search" in button.key]), 12)
-        self.app.selectbox(key="record_manager_dataset_page").select(3).run()
+        self.app.button(key="record_manager_dataset_page_3").click().run()
         self.assertEqual(len([button for button in self.app.button if "card_search" in button.key]), 1)
         self.app.text_input(key="record_manager_dataset_search").set_value("campaign 00").run()
         self.assertEqual([button.key for button in self.app.button if "card_search" in button.key],
                          ["record_manager_card_search_title:Campaign 00"])
+        self.assertNotIn("record_manager_dataset_next", [button.key for button in self.app.button])
         self.app.text_input(key="record_manager_dataset_search").set_value("").run()
-        self.assertEqual(self.app.selectbox(key="record_manager_dataset_page").value, 1)
+        self.assertEqual(self.app.session_state["record_manager_dataset_page"], 1)
         self.assertEqual(len([button for button in self.app.button if "card_search" in button.key]), 12)
         self.assertFalse(self.app.exception)
 

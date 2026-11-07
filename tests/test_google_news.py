@@ -215,6 +215,10 @@ class PersistenceTests(unittest.TestCase):
         db.collection.assert_called_with("raw_posts_news_scans")
 
 
+def chart_count(tree):
+    return len(tree.get("vega_lite_chart")) + len(tree.get("arrow_vega_lite_chart"))
+
+
 class NewsUITests(unittest.TestCase):
     workspace = "from dashboard import _render_news_workspace\n_render_news_workspace()\n"
     history = "from dashboard import _render_news_risk_history\n_render_news_risk_history()\n"
@@ -243,7 +247,7 @@ class NewsUITests(unittest.TestCase):
         self.assertIn("rising", app.error[0].value)
         self.assertTrue(any("boycott" in w.value for w in app.warning))
         self.assertTrue(any("could not be reached" in w.value for w in app.warning))
-        self.assertEqual(len(app.get("arrow_vega_lite_chart")), 1)
+        self.assertEqual(chart_count(app), 1)
         self.assertEqual(len(app.dataframe[0].value), 7)
         app.selectbox(key="news_show_filter").select("Boycott").run()
         self.assertEqual(len(app.dataframe[0].value), 1)
@@ -276,7 +280,7 @@ class NewsUITests(unittest.TestCase):
         self.assertEqual(metrics["Latest border tension risk"].value, "100 · High")
         self.assertEqual(metrics["News scans"].value, "2")
         self.assertIn("rising", app.error[0].value)
-        self.assertEqual(len(app.get("arrow_vega_lite_chart")), 1)
+        self.assertEqual(chart_count(app), 1)
         self.assertEqual(len(app.dataframe[0].value), 2)
 
 

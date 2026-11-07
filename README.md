@@ -253,6 +253,7 @@ automatically and shows every dataset saved today in your browser's timezone (UT
 unavailable), newest first. If none were saved today, it shows the six latest datasets.
 Cards show the dataset name, record and pending counts, sources and latest save time.
 Open **Find a dataset** to browse all datasets as cards, with 12 datasets per page.
+Use the numbered page buttons below the cards, or **Previous** and **Next**, to browse more datasets.
 Expand **Show / hide filters** to search by dataset name, page title, URL or record ID.
 Collapse the panel to keep browsing filtered cards, or clear the search to show all datasets again.
 Click **Open dataset** to review its records, or **Browse all records** for the shared
@@ -265,6 +266,14 @@ Each record has a **Delete** button. Click it to review that record, then choose
 **Permanently delete record** or **Cancel deletion** in the confirmation beside it.
 The record disappears and dataset counts update after successful deletion.
 Expand **View record table** for the full metadata table.
+
+To delete several datasets together, turn on **Select datasets to delete** above the cards.
+Select cards in either dataset tab; your selection carries across searches and pages.
+Check the selected dataset names and full record counts, click **Review deletion of … dataset(s)**,
+then **Permanently delete … dataset(s)** or **Cancel dataset deletion**. All reviewed records in
+the selected datasets are included, even when a search shows only some of them. Changed, moved
+and newly added records are kept. The library refreshes after deletion; incomplete operations
+report confirmed progress and require a refresh before retrying.
 
 For bulk deletion, select individual **Records to delete**, or **Select all records on this page**, then click
 **Review deletion of … record(s)**. Check the preview before **Permanently delete … record(s)**,

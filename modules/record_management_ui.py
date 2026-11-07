@@ -9,9 +9,12 @@ import streamlit as st
 from modules.analysis_library import dataset_date_label, dataset_key, dataset_options, select_records
 from modules.client_report import platform_label
 from modules.config import get_setting
-from modules.database import delete_dataset_records, delete_records, init_db, load_record_catalog
+from modules.database import delete_dataset_records, delete_datasets_records, delete_records, init_db, load_record_catalog
 from modules.dataset_cards import apply_dataset_card_theme, featured_datasets, render_dataset_cards, viewer_timezone
 from modules.record_state import purge_record_caches
+
+DATASET_SELECTION = "record_manager_datasets_to_delete"
+DATASET_REVIEW = "datasets_delete_pending"
 
 
 def source_label(row: dict) -> str:
@@ -48,7 +51,7 @@ def _table(rows: list[dict]) -> pd.DataFrame:
 
 
 def _clear_deletion_reviews() -> None:
-    for key in ("record_manager_pending", "record_manager_row_pending", "dataset_delete_pending"):
+    for key in ("record_manager_pending", "record_manager_row_pending", "dataset_delete_pending", DATASET_REVIEW):
         st.session_state.pop(key, None)
 
 
@@ -130,12 +133,101 @@ def _back_to_datasets() -> None:
 
 
 def _render_dataset_cards(groups: list[dict], section: str, local_tz) -> None:
-    render_dataset_cards(groups, section, local_tz, key_prefix="record_manager", on_select=_open_dataset)
+    deleting = st.session_state.get("record_manager_dataset_delete_mode", False)
+    render_dataset_cards(groups, section, local_tz, key_prefix="record_manager",
+                         on_select=_toggle_dataset_selection if deleting else _open_dataset,
+                         selected=st.session_state.get(DATASET_SELECTION, []) if deleting else None)
+
+
+def _clear_dataset_selection() -> None:
+    st.session_state[DATASET_SELECTION] = []
+    _clear_deletion_reviews()
+
+
+def _toggle_dataset_selection(dataset: str) -> None:
+    selected = list(st.session_state.get(DATASET_SELECTION, []))
+    if dataset in selected:
+        selected.remove(dataset)
+    else:
+        selected.append(dataset)
+    st.session_state[DATASET_SELECTION] = selected
+    _clear_deletion_reviews()
+
+
+def _delete_reviewed_datasets(datasets: dict[str, dict[str, str]]) -> None:
+    ids = [ident for versions in datasets.values() for ident in versions]
+    progress = st.progress(0, text="Deleting selected datasets…")
+    try:
+        db = init_db()
+        result = delete_datasets_records(db, datasets, on_progress=lambda done, total:
+            progress.progress(done / total, text=f"Checked {done} of {total} reviewed records"))
+    except Exception:
+        result = {"deleted": [], "skipped": [], "missing": [], "unconfirmed": ids}
+    purge_record_caches(st.session_state, {**result, "skipped": result["skipped"] + result["unconfirmed"]})
+    st.session_state.pop("record_manager_rows", None)
+    st.session_state["record_manager_needs_refresh"] = True
+    removed = []
+    if not result["unconfirmed"]:
+        try:
+            fresh = load_record_catalog(db)
+            st.session_state["record_manager_rows"] = fresh
+            st.session_state.pop("record_manager_needs_refresh", None)
+            remaining = {dataset_key(row) for row in fresh}
+            removed = [key for key in datasets if key not in remaining]
+        except Exception:
+            pass  # Confirmed deletion counts remain useful if refreshing fails.
+    st.session_state["datasets_delete_notice"] = {
+        "result": result, "selected_count": len(datasets), "removed_count": len(removed),
+    }
+    _clear_dataset_selection()
+    st.rerun()
+
+
+def _render_datasets_deletion(rows: list[dict], groups: list[dict]) -> None:
+    by_key = {group["key"]: group for group in groups}
+    selected = [key for key in st.session_state.get(DATASET_SELECTION, []) if key in by_key]
+    st.session_state[DATASET_SELECTION] = selected
+    datasets = {key: {} for key in selected}
+    for row in rows:
+        key = dataset_key(row)
+        if key in datasets:
+            datasets[key][row["_id"]] = row["_version"]
+    review = {"collection": st.session_state.get("record_manager_collection"), "datasets": datasets}
+    if st.session_state.get(DATASET_REVIEW) != review:
+        st.session_state.pop(DATASET_REVIEW, None)
+    count = sum(len(versions) for versions in datasets.values())
+    st.caption("Select dataset cards below. Selections carry across both tabs and search pages; "
+               "deletion includes every record in each selected dataset.")
+    if selected:
+        st.dataframe(pd.DataFrame([{"Dataset": by_key[key]["title"], "Records": len(datasets[key])}
+                                   for key in selected]), hide_index=True, width="stretch")
+    st.caption(f"{len(selected)} datasets selected · {count:,} records")
+    review_col, clear = st.columns(2)
+    if review_col.button(f"Review deletion of {len(selected)} dataset(s)", key="record_manager_delete_datasets_review",
+                         disabled=not count):
+        _clear_selection()
+        st.session_state[DATASET_REVIEW] = review
+    clear.button("Clear dataset selection", key="record_manager_datasets_clear",
+                 on_click=_clear_dataset_selection, disabled=not selected)
+    if st.session_state.get(DATASET_REVIEW) == review and count:
+        st.warning(f"Permanently delete these {len(selected)} datasets and all {count:,} reviewed records "
+                   "and their saved analyses? This affects all users and cannot be undone. "
+                   "Changed, moved and newly added records are kept.")
+        with st.expander("Review all selected records"):
+            st.dataframe(_table([row for row in rows if dataset_key(row) in datasets]),
+                         hide_index=True, width="stretch")
+        confirm, cancel = st.columns(2)
+        if confirm.button(f"Permanently delete {len(selected)} dataset(s)",
+                          key="record_manager_delete_datasets_confirm", type="primary"):
+            _delete_reviewed_datasets(datasets)
+        cancel.button("Cancel dataset deletion", key="record_manager_datasets_cancel", on_click=_clear_deletion_reviews)
 
 
 def _render_dataset_browser(rows: list[dict], groups: list[dict]) -> None:
     local_tz = viewer_timezone()
     apply_dataset_card_theme()
+    if st.toggle("Select datasets to delete", key="record_manager_dataset_delete_mode", on_change=_clear_dataset_selection):
+        _render_datasets_deletion(rows, groups)
     is_today, featured = featured_datasets(groups, datetime.now(local_tz))
     latest_tab, find_tab = st.tabs(["Today's datasets" if is_today else "Latest datasets", "Find a dataset"])
     with latest_tab:
@@ -146,6 +238,32 @@ def _render_dataset_browser(rows: list[dict], groups: list[dict]) -> None:
         _render_dataset_cards(featured, "featured", local_tz)
     with find_tab:
         _render_dataset_search(rows, groups, local_tz)
+
+
+def _set_dataset_page(page: int) -> None:
+    st.session_state["record_manager_dataset_page"] = page
+
+
+def _render_dataset_pagination(page: int, total: int) -> None:
+    if total <= 1:
+        return
+    start = max(1, min(page - 2, total - 4))
+    numbers = list(range(1, total + 1)) if total <= 7 else sorted({1, total, *range(start, start + 5)})
+    with st.container(horizontal=True, horizontal_alignment="center", vertical_alignment="center",
+                      key="record_manager_dataset_pagination"):
+        st.button("Previous", key="record_manager_dataset_previous", disabled=page == 1,
+                  on_click=_set_dataset_page, args=(page - 1,))
+        previous = 0
+        for number in numbers:
+            if number > previous + 1:
+                st.markdown("…", width="content")
+            st.button(str(number), key=f"record_manager_dataset_page_{number}",
+                      type="primary" if number == page else "secondary",
+                      help=f"Current page: {number}" if number == page else f"Go to page {number}",
+                      on_click=_set_dataset_page, args=(number,))
+            previous = number
+        st.button("Next", key="record_manager_dataset_next", disabled=page == total,
+                  on_click=_set_dataset_page, args=(page + 1,))
 
 
 def _render_dataset_search(rows: list[dict], groups: list[dict], local_tz) -> None:
@@ -169,9 +287,9 @@ def _render_dataset_search(rows: list[dict], groups: list[dict], local_tz) -> No
         pages = list(range(1, ceil(len(matches) / 12) + 1))
         if st.session_state.get("record_manager_dataset_page") not in pages:
             st.session_state["record_manager_dataset_page"] = 1
-        page = st.selectbox("Datasets page", pages, key="record_manager_dataset_page",
-                            format_func=lambda value: f"{value} of {len(pages)}") if len(pages) > 1 else 1
+        page = st.session_state["record_manager_dataset_page"]
         _render_dataset_cards(matches[(page - 1) * 12:page * 12], "search", local_tz)
+        _render_dataset_pagination(page, len(pages))
     st.button("Browse all records", key="record_manager_browse_all", on_click=_open_dataset, args=(None,))
 
 
@@ -238,6 +356,7 @@ def render_record_management() -> None:
         st.session_state.pop("record_manager_error", None)
         st.session_state.pop("record_manager_needs_refresh", None)
         _clear_selection()
+        _clear_dataset_selection()
         st.session_state["record_manager_collection"] = collection
     refresh = refresh_col.button("", icon=":material/refresh:", key="record_manager_refresh", help="Refresh datasets")
     if refresh or ("record_manager_rows" not in st.session_state
@@ -261,6 +380,22 @@ def render_record_management() -> None:
             st.info(f"{len(notice['missing'])} record(s) had already been deleted.")
     if st.session_state.get("record_manager_error"):
         st.error(st.session_state["record_manager_error"])
+    bulk_notice = st.session_state.pop("datasets_delete_notice", None)
+    if bulk_notice:
+        result = bulk_notice["result"]
+        if bulk_notice["removed_count"] == bulk_notice["selected_count"]:
+            st.success(f"Deleted {bulk_notice['removed_count']} dataset(s) and {len(result['deleted'])} record(s).")
+        else:
+            st.warning(f"Deleted {len(result['deleted'])} record(s). "
+                       f"{bulk_notice['removed_count']} of {bulk_notice['selected_count']} datasets confirmed removed. "
+                       "Dataset removal is incomplete or could not be verified. Refresh datasets before retrying.")
+        if result["skipped"]:
+            st.info(f"Kept {len(result['skipped'])} record(s) changed since loading or moved to another dataset.")
+        if result["missing"]:
+            st.info(f"{len(result['missing'])} record(s) had already been deleted.")
+        if result["unconfirmed"]:
+            st.error(f"Could not confirm deletion of {len(result['unconfirmed'])} remaining record(s). "
+                     "Earlier confirmed deletions are included in the count above.")
     dataset_notice = st.session_state.pop("dataset_delete_notice", None)
     if dataset_notice:
         result = dataset_notice["result"]

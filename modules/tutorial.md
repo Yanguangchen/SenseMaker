@@ -110,7 +110,7 @@ Open **Clean & manage data** in the sidebar to inspect datasets and permanently 
 ### Browse and filter
 
 - **Dataset cards:** Shows all datasets saved today in your local timezone (or the 6 latest datasets if none were saved today). Click **Refresh datasets** to reload from the cloud.
-- **Find older datasets:** Open **Find a dataset** to browse all datasets as cards, 12 per page. Expand **Show / hide filters** to search by dataset title, page title, URL, or record ID. Collapse the panel to keep browsing filtered cards, or clear the search to show every dataset again. Click **Open dataset** to review one, or **Browse all records**.
+- **Find older datasets:** Open **Find a dataset** to browse all datasets as cards, 12 per page. Use the numbered page buttons below the cards, or **Previous** and **Next**, to change pages. Expand **Show / hide filters** to search by dataset title, page title, URL, or record ID. Collapse the panel to keep browsing filtered cards, or clear the search to show every dataset again. Click **Open dataset** to review one, or **Browse all records**.
 - **Filter inside a dataset:** Narrow records by **Dataset**, **Source**, **Status** (`pending`, `processed`, `error`), or **Search records**. Click **Back to datasets** to return to the card view.
 
 ### Delete records or datasets
@@ -120,6 +120,7 @@ All deletions require confirmation, apply across all users of the shared library
 - **Delete a single record:** Click **Delete** beside any row in **Records**, then click **Permanently delete record** (or **Cancel deletion**). Expand **View record table** to inspect full metadata.
 - **Delete multiple records:** Under **Delete multiple records**, pick items in **Records to delete** or click **Select all records on this page** (up to 200 per batch). Click **Review deletion of … record(s)**, verify the preview table, and click **Permanently delete … record(s)**.
 - **Delete an entire dataset:** Select a single title in **Dataset**, expand **Delete an entire dataset**, click **Review dataset deletion**, and confirm with **Permanently delete dataset**. This removes all reviewed records in that dataset across all pages, sources, and statuses.
+- **Delete multiple datasets:** Turn on **Select datasets to delete** above the dataset cards, then select cards across either tab, searches, or pages. Review the selected names and full record counts, click **Review deletion of … dataset(s)**, and confirm with **Permanently delete … dataset(s)**. Use **Cancel dataset deletion** to cancel the review or **Clear dataset selection** to start over. Changed, moved, and newly added records are kept.
 
 ## Sentiment Analysis & reports
 

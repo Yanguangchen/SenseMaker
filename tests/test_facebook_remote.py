@@ -66,13 +66,16 @@ class HostedLoginUITests(unittest.TestCase):
             self.assertFalse(list(app.exception))
             self.assertEqual(len(app.get("iframe")), 1)
             self.assertIn("verification", app.warning[0].value)
+            self.assertFalse(app.status)
             app.button(key="save_remote_facebook_login").click().run()
             self.assertTrue(job.finish.is_set())
             self.assertEqual(len(app.get("iframe")), 1)
-            self.assertTrue(any("Checking your Facebook" in item.value for item in app.info))
+            self.assertEqual(app.status[0].label, "Checking your Facebook sign-in…")
+            self.assertEqual(app.status[0].state, "running")
+            self.assertEqual(app.status[0].icon, "spinner")
 
     def test_completed_login_removes_viewer_and_confirms_saved(self):
-        job = remote.LoginJob(status="complete")
+        job = remote.LoginJob(status="checking")
         with patch("dashboard.IS_CLOUD", True), patch("dashboard.remote_facebook_configured", return_value=True), \
              patch("dashboard.login_job", return_value=job), patch("dashboard.forget_login") as forget, \
              patch("modules.auth.verify_access", return_value="editor@example.com"):
@@ -80,6 +83,14 @@ class HostedLoginUITests(unittest.TestCase):
             app.session_state["facebook_login_job"] = "private-job"
             app.run()
             self.assertFalse(list(app.exception))
+            self.assertEqual(app.status[0].label, "Checking your saved Facebook connection…")
+            self.assertEqual(app.status[0].state, "running")
+            self.assertEqual(app.status[0].icon, "spinner")
+            self.assertFalse(app.button(key="cancel_remote_facebook_login").disabled)
+            job.status = "complete"
+            app.run()
+            self.assertFalse(list(app.exception))
+            self.assertFalse(app.status)
             self.assertEqual(len(app.get("iframe")), 0)
             self.assertIn("login saved", app.success[0].value)
             forget.assert_called_once_with("editor@example.com", "private-job")

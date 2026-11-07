@@ -58,9 +58,8 @@ def render_scrape_navigation(on_select: Callable[[str | None], None]) -> str | N
                     f'<h3>{source["title"]}</h3><p class="sm-source-description">{source["description"]}</p></div>'
                 )
                 st.button(f"Open {source['title']} →", key=f"scrape_open_{source['key']}", width="stretch",
+                          help=FACEBOOK_USAGE_WARNING if source["key"] == "facebook" else None,
                           on_click=on_select, args=(source["key"],))
-                if source["key"] == "facebook":
-                    st.warning(FACEBOOK_USAGE_WARNING, icon="⚠️")
     with st.expander("Other sources"):
         details, action = st.columns([4, 1], vertical_alignment="center")
         logo = (THEME_DIR / "source-icons" / "reddit.svg").read_text(encoding="utf-8")
