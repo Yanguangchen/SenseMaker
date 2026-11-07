@@ -121,6 +121,19 @@ def _run_progress(email: str, job_id: str) -> None:
     st.progress(job.completed / len(job.posts), text=job.message)
 
 
+def _render_background_job(email: str, key: str, job) -> None:
+    """Keep a run reachable after its card is closed or removed."""
+    if job is None:
+        return
+    if job.status in {"running", "analyzing", "saving"}:
+        _run_progress(email, job.id)
+    elif job.status == "save_failed":
+        st.error(job.error)
+        if st.button("Retry saving check", key=f"{key}_background_retry_save"):
+            jobs.retry_save(email, job.id)
+            st.rerun()
+
+
 def _render_card_history(email: str, card: dict, state: dict) -> None:
     histories = state.setdefault("run_history", {})
     cached = histories.get(card["id"], {})
@@ -262,14 +275,15 @@ def _render_card(email: str, card: dict, index: int, state: dict, key: str, *, h
         title, actions = st.columns([4, 1], vertical_alignment="center")
         title.subheader(_card_name(card, index))
         title.caption(f"{len(posts)} / {store.MAX_POSTS_PER_CARD} posts · Likes + comments (all reactions included)")
-        if actions.button("Remove card", key=f"{key}_remove_{card['id']}", disabled=state["error"] or card_busy,
-                          help="The collected posts and their saved checks are kept."):
+        if actions.button("Remove card", key=f"{key}_remove_{card['id']}", disabled=state["error"],
+                          help="Remove the card. Any current check finishes in the background, and saved checks are kept."):
             try:
                 _update_owned_cards(state, store.remove_card(database.init_db(), email, card["id"]))
             except Exception:
                 log.exception("Velocity card could not be removed")
                 st.error("The card could not be removed. Refresh cards & checks before trying again.")
             else:
+                state.get("run_history", {}).pop(card["id"], None)
                 st.session_state[f"{key}_notice"] = "Card removed. Collected posts and checks are kept."
                 _close_card()
                 st.rerun()
@@ -420,6 +434,7 @@ def render_velocity_workspace(email: str, *, hosted: bool | None = None) -> None
     if not cards:
         if not state["error"]:
             st.info("No velocity cards yet. Create your first notepad, then open it to add posts.")
+        _render_background_job(email, key, job)
         return
 
     with st.container(key="sm_velocity_grid"):
@@ -430,6 +445,5 @@ def render_velocity_workspace(email: str, *, hosted: bool | None = None) -> None
             _remarks_modal(email, key)
         else:
             _card_modal(email, key, hosted=hosted)
-    elif job and job.status in {"running", "analyzing", "saving"}:
-        # Closing the notepad does not stop the worker or its completion refresh.
-        _run_progress(email, job.id)
+    else:
+        _render_background_job(email, key, job)

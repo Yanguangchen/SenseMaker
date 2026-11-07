@@ -240,6 +240,71 @@ class RunUITests(VelocityTestCase):
             auth.start()
             self.addCleanup(auth.stop)
 
+    def test_last_card_can_be_removed_while_each_run_phase_continues(self):
+        for number, phase in enumerate(("running", "analyzing", "saving", "save_failed"), 1):
+            with self.subTest(phase=phase):
+                jobs._jobs.clear()
+                card = store.add_card(self.db, EMAIL, url=post_url())[0]
+                run = run_for(card, number)
+                job = jobs.VelocityJob(run["id"], card["id"], store.card_posts(card), status=phase,
+                                       run=run, error="Results could not be saved. Retry saving.")
+                jobs._jobs[library_owner_id(EMAIL)] = job
+                app = self.app()
+                app.button(key=f"{self.key}_open_{card['id']}").click().run()
+                remove = app.button(key=f"{self.key}_remove_{card['id']}")
+                self.assertFalse(remove.disabled)
+                remove.click().run()
+                self.assertFalse(list(app.exception))
+                self.assertEqual(store.load_cards(self.db, EMAIL), [])
+                self.assertNotIn("velocity_open_notepad", app.session_state)
+                self.assertTrue(any("No velocity cards yet" in info.value for info in app.info))
+                self.assertNotIn(card["id"], app.session_state[self.key].get("run_history", {}))
+                if phase == "save_failed":
+                    with patch.object(jobs, "retry_save", side_effect=lambda email, job_id: jobs._save(email, job)) as retry:
+                        app.button(key=f"{self.key}_background_retry_save").click().run()
+                    retry.assert_called_once_with(EMAIL, job.id)
+                else:
+                    self.assertEqual(len(app.get("progress")), 1)
+                    # Complete the in-flight save after the card has disappeared.
+                    jobs._save(EMAIL, job)
+                    app.run()
+                self.assertEqual(job.status, "complete")
+                self.assertEqual(store.load_cards(self.db, EMAIL), [])
+                archived = [row for path, row in self.db.rows.items() if path.endswith('/runs/' + run["id"])]
+                self.assertEqual(len(archived), 1)
+                self.assertEqual(archived[0]["card_id"], card["id"])
+                self.assertFalse(list(app.exception))
+
+    def test_last_idle_card_deletion_survives_refresh_and_a_new_session(self):
+        card = store.add_card(self.db, EMAIL)[0]
+        app = self.app()
+        app.button(key=f"{self.key}_open_{card['id']}").click().run()
+        app.button(key=f"{self.key}_remove_{card['id']}").click().run()
+        self.assertFalse(list(app.exception))
+        self.assertEqual(store.load_cards(self.db, EMAIL), [])
+        # Rebuild after closing the dialog, as the browser removes stale nodes.
+        app._run()
+        app.button(key=f"{self.key}_refresh").click().run()
+        self.assertFalse(any('aria-label="Velocity Tracker"' in el.proto.body for el in app.get("html")))
+        fresh = self.app()
+        self.assertTrue(any("No velocity cards yet" in info.value for info in fresh.info))
+        self.assertFalse(any(button.label.startswith("Open Velocity") for button in fresh.button))
+        fresh.button(key=f"{self.key}_create").click().run()
+        self.assertEqual(len(store.load_cards(self.db, EMAIL)), 1)
+
+    def test_failed_last_card_delete_keeps_card_and_allows_retry(self):
+        card = store.add_card(self.db, EMAIL)[0]
+        app = self.app()
+        app.button(key=f"{self.key}_open_{card['id']}").click().run()
+        self.db.fail_writes = True
+        app.button(key=f"{self.key}_remove_{card['id']}").click().run()
+        self.assertEqual(store.load_cards(self.db, EMAIL), [card])
+        self.assertTrue(any("could not be removed" in error.value for error in app.error))
+        self.db.fail_writes = False
+        app.button(key=f"{self.key}_remove_{card['id']}").click().run()
+        self.assertEqual(store.load_cards(self.db, EMAIL), [])
+        self.assertFalse(list(app.exception))
+
     def test_saved_unavailable_reason_is_visible_without_hovering(self):
         card = store.add_card(self.db, EMAIL, url=post_url())[0]
         run = run_for(card, total=None)
@@ -261,7 +326,7 @@ class RunUITests(VelocityTestCase):
             app = self.app()
             app.button(key=f"{self.key}_open_{card['id']}").click().run()
         self.assertTrue(app.button(key=f"{self.key}_{card['id']}_run").disabled)
-        self.assertTrue(app.button(key=f"{self.key}_remove_{card['id']}").disabled)
+        self.assertFalse(app.button(key=f"{self.key}_remove_{card['id']}").disabled)
         self.assertEqual(len(app.get("progress")), 1)
         self.assertNotIn("runs", store.load_cards(self.db, EMAIL)[0])
         self.assertTrue(any('class="sm-running"' in element.proto.body for element in app.get("html")))

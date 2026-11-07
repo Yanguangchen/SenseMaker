@@ -886,7 +886,9 @@ engagement counts, it reports **Unavailable**. A Facebook sign-in prompt asks yo
 Runs continue when switching pages. Use **Refresh cards & checks** to reload saved results. A failed
 Firestore save offers **Retry saving check**, which saves the same results without scraping or analyzing again or
 creating a duplicate check. **Manage posts → Remove post** removes a row;
-**Remove card** removes the preset. Collected posts and check history are kept. Existing single-post cards
+**Remove card** removes the preset, including the last card or a card with an active check.
+An active check finishes in the background; a failed save remains available through **Retry saving check**
+on the workspace, even when no cards remain. Collected posts and check history are kept. Existing single-post cards
 remain available and can accept more rows. Cards are independent of the datasets selected in Sentiment Analysis.
 
 ### Tab 3 — Sentiment Trends

@@ -234,7 +234,7 @@ Select **Post for remark** and click **Edit remarks** to open a notes modal. **S
 
 - **Rename a card:** Open the notepad, expand **Rename card**, enter a **Card name**, and click **Save name**. The cover and notepad title update, keeping all posts and run history.
 - **Refresh & retry:** Click **Refresh cards & checks** to reload your cards from Firestore. The table displays **every saved check**, including older archived runs. New runs append dated columns on the right; existing dates, values, order, and column widths stay fixed. Scroll horizontally as history grows. If history cannot be loaded, use **Retry loading history**; previously loaded columns are retained. If saving a completed check fails, click **Retry saving check** to save the cached counts without scraping again or creating a duplicate column.
-- **Remove posts or cards:** Expand **Manage posts**, select a URL in **Post to remove**, and click **Remove post** to free a row. Click **Remove card** in the top-right of the notepad to delete the card cover. Removing a post or card never deletes collected records or archived check history.
+- **Remove posts or cards:** Expand **Manage posts**, select a URL in **Post to remove**, and click **Remove post** to free a row. Click **Remove card** in the top-right of your notepad to delete the card cover, including your last card or one with an active check. A current check finishes in the background, and **Retry saving check** remains on the workspace if saving fails, even when no cards remain. Removing a post or card never deletes collected records or archived check history.
 
 ### Reading check cells & status badges
 
