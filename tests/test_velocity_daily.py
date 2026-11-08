@@ -89,7 +89,9 @@ class DueCardTests(ScheduleTestCase):
             self.assertEqual(schedule.tick(moment=at(2)), {"ran": 0, "failed": 0, "deferred": 0})
 
 
-class RunDueTests(ScheduleTestCase):
+class RunDueFixture(ScheduleTestCase):
+    """One owned card, a connected hosted login, and a patched scraper."""
+
     def setUp(self):
         super().setUp()
         jobs._jobs.clear()
@@ -109,6 +111,8 @@ class RunDueTests(ScheduleTestCase):
         return patch("modules.velocity_jobs.collect_engagement",
                      new=AsyncMock(return_value=results_for(self.card, total)))
 
+
+class RunDueTests(RunDueFixture):
     def test_each_card_is_checked_once_a_day_without_any_dashboard_session(self):
         with self.scraper() as scrape:
             self.assertEqual(schedule.run_due(self.db, EMAIL, hosted=True, moment=at(2)),
@@ -252,7 +256,9 @@ class TickTests(ScheduleTestCase):
         self.assertEqual(sorted(seen), ["broken@example.com", EMAIL])
 
 
-class DailyStatusUITests(ScheduleTestCase):
+class DailyStatusFixture(ScheduleTestCase):
+    """The velocity workspace rendered against the in-memory database."""
+
     script = fixtures.VelocityUITests.script
     key = fixtures.VelocityUITests.key
     app = fixtures.VelocityUITests.app
@@ -273,6 +279,8 @@ class DailyStatusUITests(ScheduleTestCase):
         schedule._write_state(self.db, OWNER, {card["id"]: {
             "date": "2026-11-08", "attempts": 1, "attempted_at": at(2).timestamp(), **changes}})
 
+
+class DailyStatusUITests(DailyStatusFixture):
     def test_the_cadence_is_shown_and_a_failed_check_asks_for_attention(self):
         card = store.add_card(self.db, EMAIL, "Launch", post_url())[0]
         self.record(card, status="error", error="Facebook is not connected. Open Scrape Data to reconnect.")

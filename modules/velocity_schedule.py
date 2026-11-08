@@ -17,7 +17,8 @@ import os
 import threading
 from typing import Any
 
-from modules import database, velocity_jobs as jobs, velocity_tracking as store
+from modules import database, velocity_jobs as jobs, velocity_notifications as notifications, \
+    velocity_tracking as store
 from modules.config import get_setting
 from modules.saved_links import library_owner_id
 
@@ -159,6 +160,15 @@ def _facebook_blocked(email: str, *, hosted: bool) -> str:
     return ""
 
 
+def _notify(db: Any, email: str, card: dict[str, Any], *, run: dict[str, Any] | None = None,
+            error: str = "") -> None:
+    """Queue the card's notification; a check must never fail over announcing it."""
+    try:
+        notifications.record_run(db, email, card, run=run, error=error)
+    except Exception:
+        log.exception("The daily velocity notification could not be queued")
+
+
 def run_due(db: Any, email: str, *, hosted: bool, moment: datetime | None = None) -> dict[str, int]:
     """Run one account's outstanding checks, one card at a time."""
     moment = moment or now_local()
@@ -187,6 +197,7 @@ def run_due(db: Any, email: str, *, hosted: bool, moment: datetime | None = None
                     and previous.get("date") == today):
                 continue  # Already recorded for today; do not rewrite it every tick.
             records[card["id"]] = {**attempt, "status": "error", "error": blocked, "blocked": True}
+            _notify(db, email, card, error=blocked)
         else:
             try:
                 job = jobs.run_card(email, card["id"], hosted=hosted)
@@ -200,12 +211,19 @@ def run_due(db: Any, email: str, *, hosted: bool, moment: datetime | None = None
                 summary["failed"] += 1
                 records[card["id"]] = {**attempt, "status": "error",
                                        "error": "The daily check could not run. It will be retried."}
+                _notify(db, email, card, error="The daily check could not run. It will be retried.")
             else:
                 failed = job.status != "complete"
                 summary["failed" if failed else "ran"] += 1
                 records[card["id"]] = {**attempt, "run_id": job.id,
                                        "status": "error" if failed else "complete",
                                        "error": job.error if failed else job.run.get("warning", "")}
+                if failed:
+                    _notify(db, email, card, error=job.error)
+                else:
+                    # The card still holds the runs saved before this one, which
+                    # is what the notification's change and status compare with.
+                    _notify(db, email, card, run=job.run)
         _write_state(db, owner, records)
     return summary
 
