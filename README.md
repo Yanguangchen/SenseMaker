@@ -888,6 +888,7 @@ Velocity comment analysis does not add records to Sentiment Analysis or reset th
 
 When a count is missing, **Why counts are unavailable** shows the saved reason and a link to the post.
 Photo viewers are supported, including layouts with comment articles and links back to a parent post.
+Counts belong to the requested photo; the tracker does not substitute its parent post’s totals.
 If the post cannot be identified or opened, the run reports **Failed**; if it opens without both readable
 engagement counts, it reports **Unavailable**. A Facebook sign-in prompt asks you to reconnect in **Scrape Data**.
 

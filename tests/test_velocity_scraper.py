@@ -203,7 +203,7 @@ class EngagementDOMTests(unittest.IsolatedAsyncioTestCase):
         snapshot = await self.page.evaluate(POST_ENGAGEMENT_JS, URL)
         self.assertFalse(snapshot["matched"])
 
-    async def test_photo_follows_its_explicit_full_post_instead_of_counting_the_attachment(self):
+    async def test_photo_keeps_its_own_zero_counts_instead_of_following_parent_post(self):
         async def route(route):
             if "photo?" in route.request.url:
                 body = (f'<main role="main"><img width="600" height="400"></main>'
@@ -215,8 +215,39 @@ class EngagementDOMTests(unittest.IsolatedAsyncioTestCase):
             await route.fulfill(content_type="text/html", body=body)
         await self.page.route("**/*", route)
         result = await read_post_engagement(self.page, PHOTO)
-        self.assertEqual(result["engagement"], 135)
-        self.assertEqual(result["resolved_url"], URL)
+        self.assertEqual(result["engagement"], 0)
+        self.assertEqual(result["resolved_url"], PHOTO)
+
+    async def test_chat_counts_cannot_leak_through_an_unblocked_wrapper(self):
+        await self.load(f'<main role="main"><article role="article"><a href="{URL}">Post</a>'
+                        '<div><div data-pagelet="ChatTab"><span>900 likes</span>'
+                        '<span>30 comments</span></div></div></article></main>')
+        snapshot = await self.page.evaluate(POST_ENGAGEMENT_JS, URL)
+        self.assertTrue(snapshot["matched"])
+        counts = parse_engagement(snapshot["labels"])
+        self.assertIsNone(counts["reactions"])
+        self.assertIsNone(counts["comments"])
+        self.assertIsNone(counts["engagement"])
+
+    async def test_quoted_link_cannot_identify_another_posts_counts(self):
+        await self.load(f'<main role="main"><article role="article">'
+                        '<a href="/other/posts/999">Other post</a>'
+                        f'<div data-ad-preview="message"><a href="{URL}">Quoted post</a></div>'
+                        '<span>900 likes</span><span>30 comments</span></article></main>')
+        snapshot = await self.page.evaluate(POST_ENGAGEMENT_JS, URL)
+        self.assertFalse(snapshot["matched"])
+        self.assertEqual(snapshot["labels"], [])
+
+    async def test_photo_missing_counts_does_not_use_parent_counts(self):
+        await self.load(f'<main role="main"><img width="600" height="400"></main>'
+                        '<aside role="complementary"><div>This photo is from a post.</div>'
+                        f'<a href="{URL}">View Post</a>'
+                        '<div role="button" aria-label="React with Like to this post"></div></aside>', PHOTO)
+        with patch.object(self.page, "wait_for_timeout", new=AsyncMock()):
+            result = await read_post_engagement(self.page, PHOTO)
+        self.assertIsNone(result["engagement"])
+        self.assertEqual(result["outcome"], "unavailable")
+        self.assertEqual(result["resolved_url"], PHOTO)
 
     async def test_photo_does_not_follow_unrelated_or_external_links(self):
         await self.load('''<main role="main"><img width="600" height="400"></main>

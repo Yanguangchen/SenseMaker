@@ -81,10 +81,12 @@ POST_ENGAGEMENT_JS = "requested => {" + CONTENT_GUARD_JS + r"""
     const requestedId = identity(requested);
     // Share URLs must resolve to a specific post before we can attribute counts.
     if (!finalId || (requestedId && requestedId !== finalId)) return {matched: false, labels: []};
-    const anchors = [...document.querySelectorAll('a[href]')].filter(a => visible(a) && !fbBlocked(a, true));
+    const messageSelector = '[data-ad-preview="message"], [data-ad-comet-preview="message"], [data-testid="post_message"]';
+    const anchors = [...document.querySelectorAll('a[href]')].filter(a => visible(a) && !fbBlocked(a, true)
+        && !a.closest(messageSelector));
     const photoPage = /^\/photo(?:\.php)?\/?$/.test(location.pathname)
         || location.pathname.includes('/photos/');
-    const commentSelector = '[data-testid*="comment"], [aria-label^="Comment by"], [aria-label^="Reply by"]';
+    const commentSelector = '[data-testid*="comment"], [data-ad-comet-preview="comment"], [aria-label^="Comment by"], [aria-label^="Reply by"]';
     const comments = [...document.querySelectorAll('[role="article"]')].filter(article =>
         article.matches(commentSelector) || anchors.some(a => article.contains(a)
             && a.closest('[role="article"]') === article
@@ -126,15 +128,15 @@ POST_ENGAGEMENT_JS = "requested => {" + CONTENT_GUARD_JS + r"""
         .filter(panel => visible(panel) && !fbBlocked(panel, true) && panel.querySelector(
             '[role="button"][aria-label^="React with"], [role="button"][aria-label^="Comment on"]')) : [];
     const panel = photoPanels.length === 1 ? photoPanels[0] : null;
-    const parentLink = panel && panel.innerText.trim().startsWith('This photo is from a post.')
-        ? anchors.find(a => panel.contains(a) && a.innerText.trim() === 'View Post'
-            && identity(a.href) && identity(a.href) !== finalId) : null;
     const containers = panel && !root.contains(panel) ? [root, panel] : [root];
     containers.forEach(el => el.setAttribute('data-sm-velocity-scope', 'true'));
     const excluded = '[data-ad-preview="message"], [data-ad-comet-preview="message"], '
-        + '[data-testid="post_message"], [data-testid*="comment"], [role="article"]';
+        + '[data-testid="post_message"], [role="article"], ' + commentSelector;
+    const blockedDescendants = containers.flatMap(container => [...container.querySelectorAll('*')])
+        .filter(el => fbBlocked(el, true));
     for (const container of containers) for (const el of container.querySelectorAll('span, div, [role="button"], [aria-label], [title]')) {
-        if (!visible(el) || fbBlocked(el, true) || inComment(el) || comments.some(comment => el.contains(comment))) continue;
+        if (!visible(el) || fbBlocked(el, true) || inComment(el) || comments.some(comment => el.contains(comment))
+            || blockedDescendants.some(blocked => el.contains(blocked))) continue;
         const parent = el.closest(excluded);
         if ((parent && parent !== container) || el.querySelector(excluded)) continue;
         const action = el.getAttribute('aria-label') || '';
@@ -148,7 +150,7 @@ POST_ENGAGEMENT_JS = "requested => {" + CONTENT_GUARD_JS + r"""
             if (value && value.length < 80) labels.push(value.trim());
         }
     }
-    return {matched: true, labels: [...new Set(labels)], ...(parentLink ? {parent_url: parentLink.href} : {})};
+    return {matched: true, labels: [...new Set(labels)]};
 }"""
 
 
@@ -229,27 +231,19 @@ async def read_post_engagement(page, url: str) -> dict:
     await _navigate(page, active_url, 30_000)
     matched = False
     counts = parse_engagement([])
-    followed_parent, attempts_on_page = False, 0
-    for _ in range(16):
+    for _ in range(8):
         if re.search(r"facebook\.com/(?:login|checkpoint|two_step_verification)(?:[/?._]|$)", page.url):
             raise FacebookLoginError("Facebook is asking you to sign in. Reconnect Facebook in Scrape Data, then run again.")
         snapshot = await page.evaluate(POST_ENGAGEMENT_JS, active_url)
         if snapshot.get("login_required"):
             raise FacebookLoginError("Facebook is asking you to sign in. Reconnect Facebook in Scrape Data, then run again.")
-        if snapshot.get("parent_url") and not followed_parent:
-            active_url = normalize_post_url(snapshot["parent_url"])
-            await _navigate(page, active_url, 15_000)
-            followed_parent, attempts_on_page, matched = True, 0, False
-            counts = parse_engagement([])
-            continue
         matched = matched or snapshot["matched"]
         counts = parse_engagement(snapshot["labels"])
         if counts["engagement"] is not None:
             return {**counts, "resolved_url": active_url,
                     "label": f"{counts['reactions']:,} likes/reactions + {counts['comments']:,} comments",
                     "outcome": "ok"}
-        attempts_on_page += 1
-        if attempts_on_page >= 8:
+        if _ == 7:
             break
         await page.wait_for_timeout(1000)
     if not matched:
