@@ -82,6 +82,51 @@ class FacebookContentTests(unittest.IsolatedAsyncioTestCase):
                         '<a href="/example/posts/3">Two</a><div data-ad-preview="message">Ambiguous content must be skipped safely.</div></article></main>')
         self.assertEqual([row["url"] for row in await self.harvest()], [URL])
 
+    async def test_nested_feedunit_does_not_hide_post_header(self):
+        text = "A public post whose message is inside a nested Facebook wrapper."
+        await self.load('<main role="main"><article role="article">'
+                        f'<a href="{URL}">1h</a><div data-pagelet="FeedUnit_0">'
+                        f'<div data-ad-comet-preview="message">{text}</div></div>'
+                        '<article role="article" aria-label="Comment by Person">'
+                        '<div dir="auto">Public reply</div></article></article></main>')
+        rows = await self.harvest()
+        self.assertEqual([row["raw_text"] for row in rows], [text])
+        self.assertEqual(rows[0]["comments"], ["Public reply"])
+
+    async def test_unmarked_post_wrappers_and_all_message_selectors(self):
+        selectors = ['data-ad-preview', 'data-ad-comet-preview', 'data-testid']
+        html = '<main role="main"><div role="feed">'
+        for index, attribute in enumerate(selectors):
+            value = 'post_message' if attribute == 'data-testid' else 'message'
+            html += (f'<div><div><a href="/example/posts/{index}">1h</a></div>'
+                     f'<section><span {attribute}="{value}">Post {index}</span></section></div>')
+        await self.load(html + '</div></main>')
+        rows = await self.harvest()
+        self.assertEqual([row["raw_text"] for row in rows], ['Post 0', 'Post 1', 'Post 2'])
+        self.assertEqual(len({row["url"] for row in rows}), 3)
+
+    async def test_message_cannot_borrow_a_neighboring_posts_permalink(self):
+        await self.load('<main role="main"><div><div>'
+                        '<div data-ad-preview="message">Body without its own post identity.</div></div>'
+                        + post('A neighboring identifiable public post.') + '</div></main>')
+        rows = await self.harvest()
+        self.assertEqual([row["raw_text"] for row in rows], ['A neighboring identifiable public post.'])
+
+    async def test_unmarked_chat_messages_are_still_excluded(self):
+        message = (f'<div><a href="{URL}">Forwarded post</a>'
+                   '<span data-ad-comet-preview="message">Private forwarded message</span></div>')
+        await self.load('<main role="main"><div data-pagelet="Messenger">' + message
+                        + '</div><aside role="complementary">' + message + '</aside>'
+                        '<nav role="navigation">' + message + '</nav></main>')
+        self.assertEqual(await self.harvest(), [])
+
+    async def test_nested_message_markers_are_deduplicated(self):
+        await self.load('<main role="main"><div>'
+                        f'<a href="{URL}">1h</a><div data-ad-preview="message">'
+                        '<span data-ad-comet-preview="message">Short post!</span></div></div></main>')
+        rows = await self.harvest()
+        self.assertEqual([row["raw_text"] for row in rows], ['Short post!'])
+
     async def test_expansion_never_clicks_chat_or_navigation_controls(self):
         await self.load('<main role="main">' + post('A real public post with expandable content. '
                         '<button onclick="document.body.dataset.postExpanded=1">See more</button>')

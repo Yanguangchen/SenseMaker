@@ -130,22 +130,12 @@ async def _harvest_visible_posts(
     persist_cb: Optional[PersistCallback],
 ) -> List[PostData]:
     """Collect currently visible post containers from multiple Facebook layouts."""
-    batch: List[PostData] = []
-    locator_candidates = [
-        page.locator('[role="article"]'),
-        page.locator('div[data-ad-preview="message"]'),
-        page.locator('div[data-pagelet*="FeedUnit"]'),
-    ]
-    for locator in locator_candidates:
-        batch.extend(
-            await _collect_from_container_list(
-                container_list=locator,
-                target_url=target_url,
-                seen_urls=seen_urls,
-                persist_cb=persist_cb,
-            )
-        )
-    return batch
+    return await _collect_from_container_list(
+        container_list=page.locator(POST_MESSAGE_SELECTOR),
+        target_url=target_url,
+        seen_urls=seen_urls,
+        persist_cb=persist_cb,
+    )
 
 
 async def _get_feed_signal_count(page: Any) -> int:
@@ -154,7 +144,7 @@ async def _get_feed_signal_count(page: Any) -> int:
     """
     selectors = [
         'div[role="article"]',
-        'div[data-ad-preview="message"]',
+        POST_MESSAGE_SELECTOR,
         'div[data-pagelet*="FeedUnit"]',
         'a[href*="/posts/"]',
         'a[href*="/permalink/"]',

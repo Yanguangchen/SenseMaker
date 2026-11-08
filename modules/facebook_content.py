@@ -39,17 +39,20 @@ const fbText = (node, excludeComments = false, allowSidebar = false) => {
 FACEBOOK_POST_JS = "(node) => {" + CONTENT_GUARD_JS + r"""
     if (fbBlocked(node) || !fbVisible(node) || fbComment(node)
         || /^\/(?:messages|messenger|notifications|friends|marketplace)(?:\/|$)/.test(location.pathname)) return null;
-    const root = node.closest('[role="article"], [data-pagelet*="FeedUnit"]');
-    if (!root || fbBlocked(root) || fbComment(root)) return null;
-    // Require a feed/main region or a dedicated post dialog, not floating UI.
-    if (!root.closest('[role="main"], [role="feed"], [role="dialog"], [data-pagelet="MainFeed"]')) return null;
-    const own = el => el.closest('[role="article"], [data-pagelet*="FeedUnit"]') === root;
-    const messages = [...root.querySelectorAll('[data-ad-preview="message"], [data-ad-comet-preview="message"], [data-testid="post_message"]')]
-        .filter(el => own(el) && !fbBlocked(el) && !fbComment(el) && fbVisible(el));
-    const bodies = messages.filter(el => !messages.some(other => other !== el && other.contains(el)));
-    if (!bodies.length) return null;
-    const rawText = bodies.map(node => fbText(node, true)).filter(Boolean).join('\n\n').slice(0, 16000);
-    if (rawText.length < 20) return null;
+    const messageSelector = '[data-ad-preview="message"], [data-ad-comet-preview="message"], [data-testid="post_message"]';
+    const regionSelector = '[role="main"], [role="feed"], [role="dialog"], [data-pagelet="MainFeed"]';
+    const message = node.closest(messageSelector) || node.querySelector(messageSelector);
+    if (!message || fbBlocked(message) || fbComment(message) || !fbVisible(message)
+        || !message.closest(regionSelector)) return null;
+    // Start with an explicit message body, then find its header. Facebook can
+    // put the body in a nested FeedUnit or omit article/FeedUnit roles entirely.
+    // Never cross a feed boundary or another independent message body.
+    let body = message;
+    while (body.parentElement && body.parentElement.closest(messageSelector)) {
+        body = body.parentElement.closest(messageSelector);
+    }
+    const rawText = fbText(body, true).slice(0, 16000);
+    if (!rawText) return null;
     const postURL = href => {
         try {
             const url = new URL(href, location.href);
@@ -66,11 +69,27 @@ FACEBOOK_POST_JS = "(node) => {" + CONTENT_GUARD_JS + r"""
             return url.href;
         } catch (_) { return ''; }
     };
-    const links = [...root.querySelectorAll('a[href]')].filter(a => own(a) && !fbBlocked(a) && !fbComment(a)
-        && fbVisible(a) && !bodies.some(body => body.contains(a)));
-    // Never use a page/group home link or a forwarded link in the message body.
-    const permalinks = [...new Set(links.map(a => postURL(a.href)).filter(Boolean))];
-    if (permalinks.length !== 1) return null;
+    let root = null, permalinks = [];
+    for (let candidate = body.parentElement; candidate; candidate = candidate.parentElement) {
+        if (candidate.matches(regionSelector) || fbBlocked(candidate) || fbComment(candidate)) break;
+        const foreignBodies = [...candidate.querySelectorAll(messageSelector)].filter(el =>
+            el !== body && !body.contains(el) && !el.contains(body)
+            && !fbBlocked(el) && !fbComment(el) && fbVisible(el));
+        if (foreignBodies.length) break;
+        const links = [...candidate.querySelectorAll('a[href]')].filter(a =>
+            !fbBlocked(a) && !fbComment(a) && fbVisible(a) && !body.contains(a)
+            && !a.closest('[role="article"][aria-label^="Comment"], [role="article"][aria-label^="Reply"]'));
+        const urls = [...new Set(links.map(a => postURL(a.href)).filter(Boolean))];
+        if (urls.length > 1) return null;
+        if (urls.length === 1) {
+            root = candidate;
+            permalinks = urls;
+        }
+        // Stop at the post's article. Within it, include comments and detect
+        // conflicting identities even if a smaller wrapper already matched.
+        if (candidate.matches('[role="article"]')) break;
+    }
+    if (!root) return null;
     const comments = [], seen = new Set();
     const commentRoots = [...root.querySelectorAll('[aria-label^="Comment by"], [aria-label^="Reply by"], '
         + '[data-testid="comment"], [role="article"]')].filter(el => !fbBlocked(el) && fbVisible(el)

@@ -781,7 +781,8 @@ The dashboard has **four pages**, accessible from the left toolbar:
 - Collect large batches with progress tracking; three sources run at a time
 - Headless browser toggle + scroll iterations slider (1-50)
 - Results table + raw JSON output
-- Facebook extraction requires identifiable post containers and message bodies. Messenger/chat panels,
+- Facebook extraction matches explicit message bodies to their post links, including nested or unmarked
+  post wrappers and short posts. Messenger/chat panels,
   navigation, sidebars, author/action labels and link-only items are excluded; unreadable posts produce
   a collection notice instead of a whole-page text fallback. Velocity comment collection uses the same chat exclusions.
 - Online news, X and Custom website automatically save collected records. Facebook and Reddit use
