@@ -7,6 +7,7 @@ instead of waiting for a user's WebSocket session to declare the component.
 
 from __future__ import annotations
 
+import logging
 import os
 from pathlib import Path
 
@@ -29,9 +30,25 @@ class HostedServer(Server):
         ))
 
 
+def _start_daily_velocity_checks() -> None:
+    """Run cards on their schedule even while no one has the dashboard open.
+
+    Streamlit executes dashboard.py only once a session connects, so a replica
+    that nobody visits would never reach the worker. Startup must still succeed
+    if the scheduler cannot be imported or started.
+    """
+    try:
+        from modules.velocity_schedule import ensure_scheduler_started
+
+        ensure_scheduler_started()
+    except Exception:
+        logging.getLogger(__name__).exception("Automatic daily velocity checks could not start")
+
+
 def main() -> None:
     # Server/registry APIs are verified against requirements-hosted.txt's pin.
     bootstrap.Server = HostedServer
+    _start_daily_velocity_checks()
     options = {
         "global.developmentMode": False,
         "server.address": "0.0.0.0", "server.port": int(os.getenv("PORT", "8080")),

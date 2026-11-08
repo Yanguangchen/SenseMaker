@@ -489,8 +489,9 @@ Production: **https://sensemaker-production.up.railway.app/**
 
 Railway is the container host for CrisisRadar. The root `Dockerfile` installs the
 tested Python versions from `requirements-hosted.txt` and Chromium for headless
-collection. `hosted.py` runs Streamlit on `0.0.0.0:$PORT` (8080 locally) and registers
-Google sign-in assets before accepting requests. `.railway/railway.ts` selects the Dockerfile
+collection. `hosted.py` runs Streamlit on `0.0.0.0:$PORT` (8080 locally), registers
+Google sign-in assets before accepting requests, and starts the automatic daily velocity
+worker so cards are still checked on a replica nobody has visited. `.railway/railway.ts` selects the Dockerfile
 builder, checks `/_stcore/health`, restarts failed processes, and keeps one replica awake
 for Streamlit's WebSocket sessions. Local credentials, virtual environments and Facebook
 sessions are excluded by `.railwayignore`, `.dockerignore` and explicit Dockerfile copies.
@@ -728,6 +729,9 @@ GEMINI_MODEL=auto
 OPENAI_MODEL=gpt-5.4-mini
 GENCITE_GEMINI_MODEL=gemini-2.5-flash
 GENCITE_OPENAI_MODEL=gpt-4.1-mini
+VELOCITY_DAILY_CHECKS=1
+VELOCITY_DAILY_HOUR=2
+VELOCITY_DAILY_TIMEZONE=UTC
 ```
 
 Notes:
@@ -740,6 +744,8 @@ Notes:
   from OYOSHI; keep the service-account private key on the server.
 - Configure credentials for each provider you want to enable; they are read only on the server.
 - `GEMINI_MODEL` defaults to `auto`: Google’s model catalogue is checked using the server API key before each run.
+- Velocity cards are checked automatically once a day. `VELOCITY_DAILY_CHECKS=0` turns that off;
+  `VELOCITY_DAILY_HOUR` and `VELOCITY_DAILY_TIMEZONE` move the daily time from 02:00 UTC.
 
 ## Run the Dashboard (Local)
 
@@ -890,6 +896,43 @@ creating a duplicate check. **Manage posts → Remove post** removes a row;
 An active check finishes in the background; a failed save remains available through **Retry saving check**
 on the workspace, even when no cards remain. Collected posts and check history are kept. Existing single-post cards
 remain available and can accept more rows. Cards are independent of the datasets selected in Sentiment Analysis.
+
+#### Automatic daily checks
+
+Every card holding at least one post is checked once a day with nobody present. A worker thread
+starts with the container in `hosted.py`, and with the first local dashboard run, then wakes every
+five minutes and runs each account's outstanding cards through the same worker the **Run** button
+uses. An automatic run therefore shows its progress in the notepad and appends the same kind of
+column; its archived run records `trigger: daily` instead of `manual`.
+
+Checks run at **02:00 UTC** by default. Set `VELOCITY_DAILY_HOUR` (0-23) and
+`VELOCITY_DAILY_TIMEZONE` (an IANA name such as `Asia/Manila`) to move them, or
+`VELOCITY_DAILY_CHECKS=0` to turn them off and keep **Run** manual. An unusable hour or zone falls
+back to 02:00 and UTC, so a container without tzdata still runs its checks. The workspace header
+states the cadence and the next scheduled time. A container that starts later in the day runs the
+day's outstanding cards about half a minute after booting, so deploying after the scheduled hour
+triggers a catch-up pass instead of skipping the day.
+
+One card runs at a time per account, always in its creator's own Facebook session: a teammate's
+shared card is only ever run by its creator. A manual run or a Facebook collection in progress
+defers that card to a later tick rather than scraping the same posts twice, and a manual **Run**
+started during an automatic check is refused with the existing message. Each card's outcome for the
+scheduled day is saved in `sensemaker_velocity_schedule/{owner_hash}`, so a restart finishes the
+day's remaining cards without repeating the ones already saved. A failed check is retried up to
+three times a day, at least 30 minutes apart, and a failed Firestore save is retried in place
+instead of blocking later cards. Checks run in the service's single replica, as
+`.railway/railway.ts` pins: more replicas would each run the day's cards.
+
+An automatic check that saves no column is reported in the dashboard: the cover reads **Daily check
+failed · needs attention** and the notepad gives the reason. The usual cause is a Facebook login
+that needs a person — open **Scrape Data** and reconnect Facebook. A disconnected hosted login is
+detected before any browser starts, so it costs no browser minutes and does not use up the day's
+retries: the outstanding checks resume within five minutes of the login being restored.
+
+Automatic checks spend Browserbase browser minutes and AI tokens every day. One card's run is
+capped at 12 minutes, so ten full cards can use over an hour of browser time daily. Compare that
+with the allowance shown in the Browserbase usage bar before filling ten cards, and set
+`VELOCITY_DAILY_CHECKS=0` if the monthly allowance is tight.
 
 ### Tab 3 — Sentiment Trends
 

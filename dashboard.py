@@ -37,6 +37,7 @@ from modules.navigation import dashboard_views
 from modules.scrape_navigation import FACEBOOK_USAGE_WARNING, render_scrape_navigation
 from modules.content_recommendations_ui import render_content_workspace
 from modules.tutorial_ui import render_tutorial_workspace
+from modules import velocity_schedule
 from modules.velocity_tracking_ui import render_velocity_workspace
 from modules.ai_errors import AIError, redact
 from modules.config import AI_PROVIDERS, get_ai_key, get_ai_model, get_ai_provider, get_setting, load_environment
@@ -88,6 +89,14 @@ except Exception:
     SCRAPER_AVAILABLE = False
 
 IS_CLOUD = os.path.exists("/mount/src") or os.getenv("SENSEMAKER_HOSTED") == "1"
+
+# Daily velocity checks belong to the process, not to a visitor's session, so the
+# worker is started here as well as in hosted.py: a local run schedules them too.
+# The call returns immediately once this process already has its worker.
+try:
+    velocity_schedule.ensure_scheduler_started()
+except Exception:
+    logging.getLogger(__name__).exception("Automatic daily velocity checks could not start")
 
 AUTH_LOGIN_TIMEOUT_SECONDS = 240
 
