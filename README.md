@@ -746,6 +746,7 @@ Notes:
 - `GEMINI_MODEL` defaults to `auto`: Google’s model catalogue is checked using the server API key before each run.
 - Velocity cards are checked automatically once a day. `VELOCITY_DAILY_CHECKS=0` turns that off;
   `VELOCITY_DAILY_HOUR` and `VELOCITY_DAILY_TIMEZONE` move the daily time from 02:00 UTC.
+- Notifications for those checks use the browser's own Notification API and need no settings at all.
 
 ## Run the Dashboard (Local)
 
@@ -933,6 +934,34 @@ Automatic checks spend Browserbase browser minutes and AI tokens every day. One 
 capped at 12 minutes, so ten full cards can use over an hour of browser time daily. Compare that
 with the allowance shown in the Browserbase usage bar before filling ten cards, and set
 `VELOCITY_DAILY_CHECKS=0` if the monthly allowance is tight.
+
+#### Notifications when a daily check runs
+
+**Notify me when a daily check runs** sits under the cadence line in **Velocity Tracking**. It is
+per approved account, saved in `sensemaker_velocity_alerts/{owner_hash}`, and needs no keys, no
+push service and no third-party sender: delivery is the browser's own Notification API.
+
+Each automatic card run queues one notification. Its title is the card name and its body reads the
+way the table does — `1,150 likes + comments · +155.6% · 1 Viral · 1 dying · 1 dead` — with
+unreadable posts counted separately (`1 of 2 posts unavailable`) rather than treated as zero, and
+`saved with gaps` when a run completed only part of its posts. The percentage compares only posts
+counted in both the latest and the previous run, so a missing count never invents a change. A check
+that saved no column instead says `<card> · check failed` with the reason, which is usually a
+Facebook login that needs reconnecting. Earlier view-count runs are never compared with engagement.
+
+Because nothing is pushed while the app is closed, notifications wait in Firestore (the newest 30)
+and are announced the next time CrisisRadar is opened — in a browser tab or in its installed app
+window, which the existing `static/manifest.webmanifest` provides. Each one is shown once: the
+in-page script remembers what it has announced, so a reload or a second tab does not repeat it, and
+every notification is also raised as an in-app toast so it is never missed when the browser has no
+permission. Click **Enable browser notifications** once and Chrome asks for permission from that
+click; a check that arrived beforehand is still announced once permission is granted. Turning the
+switch off clears anything waiting.
+
+Desktop Chrome, Edge and Firefox show these notifications. Android and iOS only allow notifications
+from a service worker, which Streamlit cannot serve at the site root, so on a phone the in-app toast
+carries the message instead. The first open session takes the queue, so with two tabs open the
+notification appears in one of them.
 
 ### Tab 3 — Sentiment Trends
 

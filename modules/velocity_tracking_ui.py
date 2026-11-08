@@ -1,13 +1,17 @@
 """Landscape paper cards that open their velocity tables in a notepad dialog."""
 
+import hashlib
+import json
 import logging
 import os
 from html import escape
 from pathlib import Path
 
 import streamlit as st
+import streamlit.components.v1 as components
 
-from modules import database, velocity_jobs as jobs, velocity_schedule as schedule, velocity_tracking as store
+from modules import (database, velocity_jobs as jobs, velocity_notifications as alerts,
+                     velocity_schedule as schedule, velocity_tracking as store)
 from modules.client_report import CSS_PATH, format_time
 from modules.saved_links import library_owner_id
 from modules.ui import show_running_glow
@@ -18,9 +22,87 @@ from modules.config import get_ai_provider, get_ai_model
 
 log = logging.getLogger(__name__)
 PAPER_CSS = Path(__file__).parent / "theme" / "velocity-notepad.css"
+NOTIFY_JS = Path(__file__).parent / "theme" / "run-notifications.js"
 MODAL_KEY = "velocity_open_notepad"
 REMARK_MODAL_KEY = "velocity_open_remarks"
 ANALYSIS_TAB_KEY = "velocity_show_analysis"
+
+
+def _install_notification_script() -> None:
+    """Run the delivery script in the page itself, as the sidebar and sounds do."""
+    script = NOTIFY_JS.read_text(encoding="utf-8")
+    version = hashlib.sha256(script.encode()).hexdigest()[:12]
+    payload = json.dumps(script).replace("</", "<\\/")
+    components.html(
+        "<script>const doc = window.parent.document;"
+        "const previous = doc.getElementById('sm-velocity-notifications');"
+        f"if (previous?.dataset.version !== '{version}') {{"
+        "previous?.remove(); const script = doc.createElement('script');"
+        f"script.id = 'sm-velocity-notifications'; script.dataset.version = '{version}';"
+        f"script.textContent = {payload}; doc.head.appendChild(script); }}</script>", height=0,
+    )
+
+
+def _notify_state(email: str, key: str) -> dict:
+    state_key = f"{key}_notify"
+    if state_key not in st.session_state:
+        try:
+            subscribed = alerts.is_subscribed(database.init_db(), email)
+        except Exception:
+            log.exception("The notification subscription could not be read")
+            st.session_state[state_key] = {"subscribed": False, "error": True, "queue": []}
+        else:
+            st.session_state[state_key] = {"subscribed": subscribed, "error": False, "queue": []}
+    return st.session_state[state_key]
+
+
+def _render_run_notifications(email: str, key: str) -> None:
+    """Subscribe to native notifications, and show the ones a daily check left.
+
+    The browser shows these when this app is open, in a tab or its installed
+    window; nothing is pushed while it is closed. Notifications are therefore
+    kept in Firestore until a session takes them, and each is also reported in
+    the page so it is never missed when permission has not been granted.
+    """
+    notify = _notify_state(email, key)
+    row = st.container(horizontal=True, vertical_alignment="center", key="sm_velocity_notify")
+    subscribed = row.toggle(
+        "Notify me when a daily check runs", value=notify["subscribed"], key=f"{key}_notify_toggle",
+        disabled=notify["error"],
+        help="Your browser announces each automatic check the next time you open CrisisRadar, "
+             "including its installed app. Nothing is sent while the app is closed.")
+    if notify["error"]:
+        row.caption("Your notification setting could not be read. Refresh cards & checks to try again.")
+    elif subscribed != notify["subscribed"]:
+        try:
+            notify["subscribed"] = alerts.set_subscription(database.init_db(), email, subscribed)
+        except Exception:
+            log.exception("The notification subscription could not be saved")
+            st.error("The notification setting could not be saved. Try the switch again.")
+        else:
+            notify["queue"] = []
+    if notify["error"] or not notify["subscribed"]:
+        return
+    # The script wires this button's own click: a real gesture is what Chrome
+    # requires before it will show the permission prompt.
+    row.button("Enable browser notifications", key="velocity_notify_enable",
+               help="Chrome asks once. Already allowed, or blocked in site settings, needs nothing here.")
+    try:
+        arrived = alerts.take_pending(database.init_db(), email)
+    except Exception:
+        log.exception("Queued velocity notifications could not be read")
+        arrived = []
+    for item in arrived:
+        st.toast(f"**{item.get('title', 'CrisisRadar')}** · {item.get('body', '')}", icon=":material/notifications:")
+    if arrived:
+        # Keep them for this session: the markers are re-rendered on every run so
+        # granting permission later still shows a check the browser has not.
+        notify["queue"] = [*notify["queue"], *arrived][-alerts.MAX_PENDING:]
+    for item in notify["queue"]:
+        st.html(f'<span data-sm-notify-id="{escape(str(item.get("id", "")))}" '
+                f'data-sm-notify-title="{escape(str(item.get("title", "CrisisRadar")))}" '
+                f'data-sm-notify-body="{escape(str(item.get("body", "")))}" hidden></span>')
+    _install_notification_script()
 
 
 def _close_card() -> None:
@@ -391,6 +473,7 @@ def render_velocity_workspace(email: str, *, hosted: bool | None = None) -> None
     st.subheader("Velocity Tracking")
     st.caption("Cards and saved results are shared with approved users. Any approved user can remove any card. Run and edit your own cards.")
     st.caption(schedule.schedule_caption())
+    _render_run_notifications(email, key)
     toolbar = st.container(horizontal=True, vertical_alignment="center", key="sm_velocity_toolbar")
     create_slot = toolbar.empty()
     refresh = toolbar.button("Refresh cards & checks", key=f"{key}_refresh")
