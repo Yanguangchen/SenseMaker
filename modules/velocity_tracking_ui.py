@@ -7,7 +7,7 @@ from pathlib import Path
 
 import streamlit as st
 
-from modules import database, velocity_jobs as jobs, velocity_tracking as store
+from modules import database, velocity_jobs as jobs, velocity_schedule as schedule, velocity_tracking as store
 from modules.client_report import CSS_PATH, format_time
 from modules.saved_links import library_owner_id
 from modules.ui import show_running_glow
@@ -58,7 +58,13 @@ def _render_cover(email: str, card: dict, index: int, key: str) -> None:
     eyebrow = "SHARED VELOCITY" if card.get("shared") else "VELOCITY"
     job = jobs.latest_job(email)
     running = job and job.card_id == card["id"] and job.status in {"running", "analyzing", "saving"}
-    detail = job.message if running else (f"Last run · {format_time(runs[-1]['at'])}" if runs else "Ready for your first check")
+    if running:
+        detail = job.message
+    elif schedule.daily_notice(card):
+        # The cover has room for the headline only; the notepad carries the reason.
+        detail = "Daily check failed · needs attention"
+    else:
+        detail = f"Last run · {format_time(runs[-1]['at'])}" if runs else "Ready for your first check"
     checks = "".join(f'<span class="sm-note-check{" is-filled" if i < len(runs) else ""}">{i + 1}</span>'
                      for i in range(store.CACHED_RUNS))
     with st.container(key=f"sm_velocity_cover_{card['id']}"):
@@ -283,6 +289,10 @@ def _render_card(email: str, card: dict, index: int, state: dict, key: str, *, h
                 _close_card()
                 st.rerun()
 
+        notice = schedule.daily_notice(card)
+        if notice:
+            st.warning(f"The automatic daily check saved no column: {notice}")
+
         if card.get("shared"):
             st.caption(f"{len(posts)} / {store.MAX_POSTS_PER_CARD} posts · Shared by another approved user · Any approved user can remove this card")
             _render_card_tabs(email, card, state, card_key)
@@ -380,6 +390,7 @@ def render_velocity_workspace(email: str, *, hosted: bool | None = None) -> None
     st.html(PAPER_CSS)
     st.subheader("Velocity Tracking")
     st.caption("Cards and saved results are shared with approved users. Any approved user can remove any card. Run and edit your own cards.")
+    st.caption(schedule.schedule_caption())
     toolbar = st.container(horizontal=True, vertical_alignment="center", key="sm_velocity_toolbar")
     create_slot = toolbar.empty()
     refresh = toolbar.button("Refresh cards & checks", key=f"{key}_refresh")
@@ -393,7 +404,8 @@ def render_velocity_workspace(email: str, *, hosted: bool | None = None) -> None
             state["history_refresh"] = state.get("history_refresh", 0) + 1
         state["cards"] = [card for card in state["cards"] if not card.get("shared") or card.get("owner_id") in owners]
         try:
-            state["cards"] = store.load_workspace_cards(database.init_db(), email)
+            db = database.init_db()
+            state["cards"] = schedule.attach_status(db, email, store.load_workspace_cards(db, email))
             state["shared_owners"] = owners
             state["error"] = False
             if finished:

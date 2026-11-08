@@ -35,6 +35,7 @@ class VelocityJob:
     message: str = "Connecting to Facebook…"
     error: str = ""
     run: dict = field(default_factory=dict)
+    automatic: bool = False
 
 
 def latest_job(email: str) -> VelocityJob | None:
@@ -54,9 +55,9 @@ def _save(email: str, job: VelocityJob) -> None:
         job.status = "complete"
 
 
-def start_run(email: str, card_id: str, *, hosted: bool, provider: str | None = None,
-              model_name: str | None = None) -> VelocityJob:
-    """Reload the saved links and start at most one pending run per account."""
+def _begin(email: str, card_id: str, provider: str | None, model_name: str | None, *,
+           automatic: bool = False) -> VelocityJob:
+    """Reload the saved links and register at most one pending run per account."""
     provider = get_ai_provider(provider)
     model_name = model_name or get_ai_model(provider)
     with _lock:
@@ -71,48 +72,86 @@ def start_run(email: str, card_id: str, *, hosted: bool, provider: str | None = 
         posts = deepcopy(store.card_posts(card)) if card else []
         if not posts:
             raise ValueError("Add a Facebook post to this card before running it.")
-        job = VelocityJob(token_hex(32), card_id, posts)
+        job = VelocityJob(token_hex(32), card_id, posts, automatic=automatic)
         job.run = {"id": job.id, "started_at": datetime.now(timezone.utc).isoformat(), "metric": METRIC,
-                   "analysis_provider": provider, "analysis_model": model_name}
+                   "analysis_provider": provider, "analysis_model": model_name,
+                   "trigger": "daily" if automatic else "manual"}
         _jobs[owner] = job
+    return job
+
+
+def _work(email: str, job: VelocityJob, hosted: bool) -> None:
+    """Scrape, analyze and save one registered run on the calling thread."""
+    values = []
 
     def progress(completed: int, message: str) -> None:
         job.completed, job.message = completed, message
 
-    def worker() -> None:
-        values = []
+    def partial(rows: list[dict]) -> None:
+        values[:] = rows
 
-        def partial(rows: list[dict]) -> None:
-            values[:] = rows
+    try:
+        async def collect():
+            async with asyncio.timeout(720):
+                return await collect_engagement(email, job.posts, hosted=hosted, progress=progress, partial=partial)
+        values = asyncio.run(collect())
+    except Exception as exc:
+        log.warning("Velocity run failed (%s)", type(exc).__name__)
+        message = str(exc) if isinstance(exc, FacebookLoginError) else "The Facebook browser could not finish this run."
+        if not values:
+            job.error = message + " No check was added. Please try again."
+            job.status = "error"
+            return
+        job.run["warning"] = message + " Completed counts were saved; run again to retry failed posts."
+        checked = {row["post_id"] for row in values}
+        values.extend({"post_id": post["id"], "url": post["url"], "reactions": None, "comments": None,
+                       "engagement": None, "outcome": "error",
+                       "reason": "The browser stopped before this post could be checked."}
+                      for post in job.posts if post["id"] not in checked)
+    job.status = "analyzing"
+    job.message = "Analyzing comment sentiment…"
+    analyze_comments(values, provider=job.run.get("analysis_provider"), model_name=job.run.get("analysis_model"),
+                     on_status=lambda message: progress(len(job.posts), f"Comment sentiment · {message}"))
+    job.run.update(at=datetime.now(timezone.utc).isoformat(), results=values)
+    job.status = "saving"
+    job.message = "Saving check to Firestore…"
+    _save(email, job)
 
-        try:
-            async def collect():
-                async with asyncio.timeout(720):
-                    return await collect_engagement(email, job.posts, hosted=hosted, progress=progress, partial=partial)
-            values = asyncio.run(collect())
-        except Exception as exc:
-            log.warning("Velocity run failed (%s)", type(exc).__name__)
-            message = str(exc) if isinstance(exc, FacebookLoginError) else "The Facebook browser could not finish this run."
-            if not values:
-                job.error = message + " No check was added. Please try again."
-                job.status = "error"
-                return
-            job.run["warning"] = message + " Completed counts were saved; run again to retry failed posts."
-            checked = {row["post_id"] for row in values}
-            values.extend({"post_id": post["id"], "url": post["url"], "reactions": None, "comments": None,
-                           "engagement": None, "outcome": "error",
-                           "reason": "The browser stopped before this post could be checked."}
-                          for post in job.posts if post["id"] not in checked)
-        job.status = "analyzing"
-        job.message = "Analyzing comment sentiment…"
-        analyze_comments(values, provider=provider, model_name=model_name,
-                         on_status=lambda message: progress(len(job.posts), f"Comment sentiment · {message}"))
-        job.run.update(at=datetime.now(timezone.utc).isoformat(), results=values)
+
+def start_run(email: str, card_id: str, *, hosted: bool, provider: str | None = None,
+              model_name: str | None = None) -> VelocityJob:
+    """Start one background run; the dashboard polls the returned job for progress."""
+    job = _begin(email, card_id, provider, model_name)
+    threading.Thread(target=_work, args=(email, job, hosted), name="velocity-check", daemon=True).start()
+    return job
+
+
+def run_card(email: str, card_id: str, *, hosted: bool, provider: str | None = None,
+             model_name: str | None = None, automatic: bool = True, save_retries: int = 2) -> VelocityJob:
+    """Run one card to completion on the calling thread, for unattended daily checks.
+
+    The registry and its one-run-per-account guard are shared with the Run button,
+    so the notepad shows an automatic run in progress and a manual run started
+    meanwhile is refused rather than scraping the same posts twice. A failed save
+    is retried here: leaving a save pending would block every later run.
+    """
+    job = _begin(email, card_id, provider, model_name, automatic=automatic)
+    _work(email, job, hosted)
+    for _ in range(max(save_retries, 0)):
+        if job.status != "save_failed":
+            break
+        save_now(email, job.id)
+    return job
+
+
+def save_now(email: str, job_id: str) -> VelocityJob | None:
+    """Retry a failed save on the calling thread."""
+    with _lock:
+        job = _jobs.get(library_owner_id(email))
+        if job is None or job.id != job_id or job.status != "save_failed":
+            return job
         job.status = "saving"
-        job.message = "Saving check to Firestore…"
-        _save(email, job)
-
-    threading.Thread(target=worker, name="velocity-check", daemon=True).start()
+    _save(email, job)
     return job
 
 
