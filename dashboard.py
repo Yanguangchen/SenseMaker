@@ -2802,6 +2802,11 @@ def main() -> None:
     icon = Path(__file__).resolve().parent / "static" / "apple-touch-icon.png"
     st.set_page_config(page_title="CrisisRadar", page_icon=str(icon), layout="wide")
     _apply_ui_theme()
+    from modules.velocity_sharing import QUERY_KEY
+    if QUERY_KEY in st.query_params:
+        from modules.velocity_sharing_ui import render_shared_card_page
+        render_shared_card_page(st.query_params.get(QUERY_KEY, ""))
+        return
     user_email = require_access()
     if user_email is None:
         # Finish the script normally so Streamlit mounts the sign-in iframe.

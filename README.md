@@ -886,6 +886,33 @@ The tab displays the latest run. Full samples and per-comment results remain in 
 older analysis summaries are excluded from the card document to keep it within Firestore's size limit.
 Velocity comment analysis does not add records to Sentiment Analysis or reset the sentiment timeline.
 
+To share one card outside the workspace, open your card → **Share link → Create share link**.
+Copy the URL using the copy button or select **Open shared card**. Anyone holding the link can view
+that card’s saved velocity history, latest analysis, post links and remarks without signing in.
+The page is read-only and reloads current saved results with **Refresh results**; it cannot run checks,
+edit cards, browse other cards or read raw comment samples. Only the creator can enable or revoke
+sharing. **Revoke share link**, deleting the card, or removing its creator from the approved-user list
+makes the link unavailable. Creating a new link after revocation does not reactivate the old URL.
+Sharing uses server-side Firestore access; the existing deny-all client rules remain unchanged.
+
+Share-link browser regression test (requires the Python dependencies, pytest and Chromium):
+
+```sh
+python -m playwright install chromium
+VELOCITY_SHARING_E2E=1 python -m pytest tests/test_velocity_sharing_e2e.py -q
+```
+
+The test starts a temporary local Streamlit server and uses separate creator and anonymous
+Chromium sessions, including a mobile-sized viewer. It exercises the real share controls and
+public dashboard route: create/copy/open, complete history, latest analysis, fresh saved checks,
+read-only isolation, revocation, replacement links, deletion, invalid links and sign-in isolation.
+Google sign-in, Firestore and the Facebook/AI worker use synthetic fixtures; no production
+credentials, records or services are used. This checks browser-to-app integration, not live Google
+or Firestore connectivity. Browser tests are opt-in during local test runs. The
+`Velocity sharing regression` GitHub Actions workflow runs them on relevant pushes and pull requests.
+Failures save screenshots, Playwright traces and a server log under
+`.pytest_cache/velocity-sharing-e2e/` (or `E2E_ARTIFACT_DIR`); CI uploads those diagnostics.
+
 When a count is missing, **Why counts are unavailable** shows the saved reason and a link to the post.
 Photo viewers are supported, including layouts with comment articles and links back to a parent post.
 Counts belong to the requested photo; the tracker does not substitute its parent post’s totals.

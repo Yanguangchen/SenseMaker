@@ -17,6 +17,7 @@ from modules.saved_links import library_owner_id
 from modules.ui import show_running_glow
 from modules.velocity_table import velocity_card_sheet
 from modules.velocity_metrics import METRIC, engagement_count
+from modules.velocity_sharing_ui import render_share_controls
 from modules.velocity_analysis_table import analysis_table
 from modules.config import get_ai_provider, get_ai_model
 
@@ -370,6 +371,11 @@ def _render_card(email: str, card: dict, index: int, state: dict, key: str, *, h
                 st.session_state[f"{key}_notice"] = "Card removed. Collected posts and checks are kept."
                 _close_card()
                 st.rerun()
+
+        shared_cards = render_share_controls(email, card, disabled=state["error"])
+        if shared_cards is not None:
+            _update_owned_cards(state, shared_cards)
+            st.rerun()
 
         notice = schedule.daily_notice(card)
         if notice:
