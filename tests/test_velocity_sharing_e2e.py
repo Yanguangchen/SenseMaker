@@ -14,7 +14,7 @@ import unittest
 from urllib.request import urlopen
 
 
-@unittest.skipUnless(os.getenv('VELOCITY_SHARING_E2E') == '1', 'Opt-in Chromium E2E')
+@unittest.skipUnless(os.getenv('VELOCITY_SHARING_E2E', '1') != '0', 'Chromium E2E disabled')
 class VelocitySharingE2E(unittest.TestCase):
     @classmethod
     def setUpClass(cls):

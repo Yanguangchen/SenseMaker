@@ -1875,8 +1875,10 @@ def _render_collect_controls(
     if active_job:
         st.session_state["facebook_collection_job"] = active_job.id
     collection_id = st.session_state.get("facebook_collection_job") if hosted_facebook else None
+    progress_slot = st.empty()
     if collection_id:
-        _render_facebook_collection_progress(user_email, collection_id)
+        with progress_slot.container():
+            _render_facebook_collection_progress(user_email, collection_id)
     action = st.container()
     posts = [row for row in (st.session_state.get(f"{result_key}_results") or [])
              if row.get("source_type") not in NON_CONTENT_TYPES]

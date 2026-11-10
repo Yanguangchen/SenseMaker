@@ -12,7 +12,7 @@ import unittest
 from urllib.request import urlopen
 
 
-@unittest.skipUnless(os.getenv("WORD_CLOUD_BROWSER_TEST") == "1", "Opt-in Chromium integration check")
+@unittest.skipUnless(os.getenv("WORD_CLOUD_BROWSER_TEST", "1") != "0", "Chromium integration check disabled")
 class WordCloudBrowserTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
