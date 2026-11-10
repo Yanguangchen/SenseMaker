@@ -1,0 +1,7 @@
+[run]
+branch = True
+source = modules,dashboard,main,hosted
+
+[report]
+fail_under = 92
+show_missing = True

@@ -101,6 +101,9 @@ class DashboardBrowserE2ETests(unittest.TestCase):
             "**/*",
             lambda route: route.continue_() if route.request.url.startswith(self.url + "/") else route.abort(),
         )
+        # Theme bootstrap otherwise reloads on first visit, overlapping two
+        # Streamlit sessions that patch the same process-local service fixtures.
+        context.add_init_script("localStorage.setItem('sensemaker.themeDefault', 'light')")
         page = context.new_page()
         errors: list[str] = []
         page.on("pageerror", lambda err: errors.append(str(err)))
@@ -154,6 +157,7 @@ class DashboardBrowserE2ETests(unittest.TestCase):
         # Sign out using the custom sidebar rail sign-out control, then sign back in.
         page.locator(".sm-rail-sign-out").click()
         expect(page.get_by_role("heading", name="Sign in to CrisisRadar")).to_be_visible()
+        expect(page.get_by_role("button", name="Sign in as test editor")).to_be_visible()
         page.get_by_role("button", name="Sign in as test editor").click()
         expect(nav).to_be_visible()
         expect(page.get_by_test_id("stException")).to_have_count(0)

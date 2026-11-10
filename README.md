@@ -1278,3 +1278,37 @@ are sent in headers and redacted from Google error messages.
 
 Google lists Gemini 2.0 Flash as retired; consult its
 [model lifecycle](https://ai.google.dev/gemini-api/docs/deprecations) for current dates.
+
+### Regression tests and coverage
+
+Install `requirements-test.txt` and run `python -m playwright install chromium`, then:
+
+```sh
+python -m coverage run -m pytest -q
+python -m coverage report
+node --experimental-vm-modules --test tests/*.mjs
+cd msasensemaker
+npm ci
+npm run test:unit
+npm run test:types
+npm run lint
+```
+
+CI runs these suites on every pull request and push to main. `.coveragerc` enforces
+92% combined Python statement/branch coverage across `modules`, `dashboard`,
+`main`, and `hosted`. Browser subprocess execution is not included in that metric.
+Devvit deployment also runs its unit tests before upload.
+
+Firebase integration tests use real Admin SDK calls against isolated local Auth
+and Firestore emulators, with a demo project and no production credentials.
+Install Firebase CLI 15.22.1 and Java 21, then run from the repository root:
+
+```sh
+firebase emulators:exec --config firebase.test.json --project demo-sensemaker --only auth,firestore \
+  'SENSEMAKER_EMULATOR_TESTS=1 python -m pytest tests/integration -q'
+```
+
+These tests run in a separate CI job and skip in the ordinary Python suite. They
+check version-aware transactional deletion, token verification, allowlist denial,
+and disabled accounts. The emulator does not validate Google's live OAuth popup
+or production token signatures; dashboard browser tests use service doubles.

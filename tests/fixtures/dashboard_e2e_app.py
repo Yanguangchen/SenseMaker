@@ -76,11 +76,15 @@ with ExitStack() as stack:
         ("modules.gencite_store.list_analyses", lambda _db, _email: []),
         ("modules.config.get_ai_key", lambda _p=None: "test-key"),
         ("dashboard._bridge_secrets_to_env", lambda: None),
+        ("dashboard.load_environment", lambda: None),
+        ("dashboard.init_db", lambda: db),
+        ("dashboard.render_browserbase_usage_bar", lambda _email: None),
+        ("dashboard.remote_facebook_session", lambda _email: FacebookSession("connected", "10001", "Test Operator")),
         ("dashboard.require_access", _fixture_require_access),
         ("dashboard._get_facebook_session", lambda _path=None: FacebookSession("connected", "10001", "Test Operator")),
         ("dashboard._load_sentiment_history", lambda: []),
         ("dashboard._load_news_history", lambda: []),
-        ("dashboard._load_analysis_dataset_catalog", lambda _statuses=(): list(CATALOG_ROWS)),
+        ("dashboard._fetch_analysis_datasets", lambda sources: dashboard.dataset_options(CATALOG_ROWS, sources)),
     ]:
         stack.enter_context(patch(target, replacement))
 
