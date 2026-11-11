@@ -182,6 +182,54 @@ class EngagementDOMTests(unittest.IsolatedAsyncioTestCase):
             self.assertFalse((await self.page.evaluate(POST_ENGAGEMENT_JS, url))["matched"])
             await self.page.unroute("**/*")
 
+    async def test_video_opens_comments_and_confirms_explicit_zero(self):
+        url = "https://www.facebook.com/reel/1572038844747225/?rdid=tracking&share_url=ignored"
+        await self.load('''<main role="main"><div>
+            <video style="width:600px;height:320px"></video>
+            <div role="button" aria-label="Like, 21 reactions">21</div>
+            <div role="button" aria-label="Comment" aria-expanded="false"
+                 onclick="this.setAttribute('aria-expanded','true'); document.querySelector('aside').hidden=false"></div>
+            <div role="button" aria-label="Share, 15 shares">15</div></div>
+            <div style="position:absolute;top:1000px"><video></video>
+                <span>900 reactions</span><span>3 comments</span></div></main>
+            <aside role="complementary" hidden><div>Caption: 99 comments</div>
+                <h2>Comments</h2><span>No comments yet</span><div contenteditable="true">Write a comment…</div></aside>''', url)
+        with patch.object(self.page, "wait_for_timeout", new=AsyncMock()):
+            result = await read_post_engagement(self.page, url)
+        self.assertEqual((result["reactions"], result["comments"], result["engagement"]), (21, 0, 21))
+        self.assertEqual(result["outcome"], "ok")
+        self.assertEqual(await self.page.get_by_role('button', name='Comment', exact=True).get_attribute('aria-expanded'), 'true')
+
+    async def test_video_closed_comments_panel_does_not_confirm_zero(self):
+        url = "https://www.facebook.com/reel/123"
+        await self.load('''<main role="main"><video style="width:600px;height:320px"></video>
+            <div role="button" aria-label="Like, 21 reactions">21</div>
+            <div role="button" aria-label="Comment" aria-expanded="false"></div></main>
+            <aside role="complementary"><h2>Comments</h2><span>No comments yet</span></aside>''', url)
+        with patch.object(self.page, "wait_for_timeout", new=AsyncMock()):
+            result = await read_post_engagement(self.page, url)
+        self.assertIsNone(result["comments"])
+        self.assertEqual(result["outcome"], "unavailable")
+
+    async def test_video_missing_comment_count_is_not_assumed_zero(self):
+        url = "https://www.facebook.com/reel/123"
+        for panel in [
+            '<aside role="complementary"><h2>Comments</h2><span>Loading…</span></aside>',
+            '<aside role="complementary"><span>No comments yet</span><h2>Comments</h2></aside>',
+            '<aside role="complementary" aria-label="Messenger"><h2>Comments</h2><span>No comments yet</span></aside>',
+            '<aside role="complementary"><a href="/reel/999">Other</a><h2>Comments</h2><span>No comments yet</span></aside>',
+            '<aside role="complementary"><h2>Comments</h2><span>No comments yet</span><article role="article" aria-label="Comment by Reader">Hello</article></aside>',
+        ]:
+            with self.subTest(panel=panel):
+                await self.load('''<main role="main"><video style="width:600px;height:320px"></video>
+                    <div role="button" aria-label="Like, 21 reactions">21</div>
+                    <div role="button" aria-label="Comment" aria-expanded="true"></div></main>''' + panel, url)
+                with patch.object(self.page, "wait_for_timeout", new=AsyncMock()):
+                    result = await read_post_engagement(self.page, url)
+                self.assertIsNone(result["comments"])
+                self.assertIsNone(result["engagement"])
+                await self.page.unroute("**/*")
+
     async def test_share_page_can_resolve_canonical_post_and_split_labels(self):
         url = "https://www.facebook.com/share/p/token"
         await self.load(f'<link rel="canonical" href="{URL}"><article role="article">'

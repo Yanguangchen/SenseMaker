@@ -58,6 +58,7 @@ def parse_engagement(labels: list[str]) -> dict:
 # message text and other articles; never take counts from another post.
 POST_ENGAGEMENT_JS = "requested => {" + CONTENT_GUARD_JS + r"""
     document.querySelectorAll('[data-sm-velocity-scope]').forEach(el => el.removeAttribute('data-sm-velocity-scope'));
+    document.querySelectorAll('[data-sm-velocity-expand-comments]').forEach(el => el.removeAttribute('data-sm-velocity-expand-comments'));
     const identity = value => {
         try {
             const u = new URL(value, location.href);
@@ -174,6 +175,8 @@ POST_ENGAGEMENT_JS = "requested => {" + CONTENT_GUARD_JS + r"""
         if ((parent && parent !== container) || el.querySelector(excluded)) continue;
         const action = el.getAttribute('aria-label') || '';
         const number = (el.innerText || '').trim();
+        if (reelPage && el.getAttribute('role') === 'button' && action === 'Comment'
+            && el.getAttribute('aria-expanded') === 'false') el.setAttribute('data-sm-velocity-expand-comments', 'true');
         // Facebook's compact footer puts totals inside the reaction/comment buttons.
         if (el.getAttribute('role') === 'button' && /^React with .+ to .+post$/i.test(action)
             && /^\d[\d.,]*(?:\s?[KM])?$/i.test(number)) labels.push(number + ' reactions');
@@ -181,6 +184,26 @@ POST_ENGAGEMENT_JS = "requested => {" + CONTENT_GUARD_JS + r"""
         if (el.getAttribute('role') === 'button' && commentCount) labels.push(commentCount[1] + ' comments');
         for (const value of [el.innerText, el.getAttribute('aria-label'), el.getAttribute('title')]) {
             if (value && value.length < 80) labels.push(value.trim());
+        }
+    }
+    // Videos with no comments omit the total on the action button. Only accept
+    // zero after opening this video's comments and seeing the explicit empty state.
+    const commentsOpen = reelPage && [...root.querySelectorAll('[role="button"][aria-label="Comment"][aria-expanded="true"]')]
+        .some(el => visible(el) && !inComment(el) && !fbBlocked(el, true) && !el.closest(messageSelector));
+    if (commentsOpen) {
+        const panels = [...document.querySelectorAll('[role="complementary"]')].filter(el =>
+            visible(el) && !fbBlocked(el, true) && [...el.querySelectorAll('h2, [role="heading"]')]
+                .some(heading => visible(heading) && heading.innerText.trim() === 'Comments'));
+        if (panels.length === 1) {
+            const panel = panels[0];
+            const heading = [...panel.querySelectorAll('h2, [role="heading"]')]
+                .find(el => visible(el) && el.innerText.trim() === 'Comments');
+            const foreignPost = anchors.some(a => panel.contains(a) && !inComment(a)
+                && identity(a.href) && identity(a.href) !== finalId);
+            if (!foreignPost && !comments.some(comment => panel.contains(comment)) && [...panel.querySelectorAll('span, div')]
+                .some(el => visible(el) && !fbBlocked(el, true) && !inComment(el) && !el.closest(messageSelector)
+                    && (heading.compareDocumentPosition(el) & Node.DOCUMENT_POSITION_FOLLOWING)
+                    && el.innerText.trim() === 'No comments yet')) labels.push('No comments yet');
         }
     }
     return {matched: true, labels: [...new Set(labels)]};
@@ -263,6 +286,7 @@ async def read_post_engagement(page, url: str) -> dict:
     active_url = normalize_post_url(url)
     await _navigate(page, active_url, 30_000)
     matched = False
+    comments_attempted = False
     counts = parse_engagement([])
     for _ in range(8):
         if re.search(r"facebook\.com/(?:login|checkpoint|two_step_verification)(?:[/?._]|$)", page.url):
@@ -278,6 +302,16 @@ async def read_post_engagement(page, url: str) -> dict:
                     "outcome": "ok"}
         if _ == 7:
             break
+        if snapshot["matched"] and counts["reactions"] is not None and counts["comments"] is None and not comments_attempted:
+            toggle = page.locator('[data-sm-velocity-expand-comments]')
+            if await toggle.count() == 1:
+                comments_attempted = True
+                try:
+                    # Activate the identified control without scrolling the Reel
+                    # carousel, which can change its active video during a click.
+                    await asyncio.wait_for(toggle.evaluate("button => button.click()", timeout=1500), timeout=2)
+                except Exception:
+                    pass  # An unopened or unloaded panel must never imply zero.
         await page.wait_for_timeout(1000)
     if not matched:
         return {**counts, "resolved_url": active_url, "outcome": "error", "reason_code": "post_not_identified",
