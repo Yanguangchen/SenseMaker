@@ -54,10 +54,15 @@ view_status = engagement_status
 views_change_percent = engagement_change_percent
 
 
-def velocity_card_sheet(card: dict) -> str:
+def velocity_card_sheet(card: dict, *, columns: slice | None = None, heading: str = "", subheading: str = "",
+                        legend_open: bool = False, post_width: int = 210) -> str:
+    """Status and change always use every run; `columns` only limits which run columns are shown."""
     runs = card.get("runs", [])
+    shown = set(range(len(runs))[columns or slice(None)])
     head = "<tr><th scope=col>Provoker's post</th>"
     for index, run in enumerate(runs):
+        if index not in shown:
+            continue
         timestamp = format_time(run["at"])
         date, _, time = timestamp.partition(" · ")
         title = f"Run {run.get('number', index + 1)} · {timestamp}"
@@ -72,11 +77,13 @@ def velocity_card_sheet(card: dict) -> str:
     body = []
     for post in card_posts(card):
         cells, values = [], []
-        for run in runs:
+        for index, run in enumerate(runs):
             result = next((row for row in run["results"] if row["post_id"] == post["id"]), None)
             current_metric = run.get("metric") == METRIC
             count = engagement_count(result) if current_metric else None
             values.append(count)
+            if index not in shown:
+                continue
             if result is None:
                 label, title = "—", "Post was not included in this run."
             elif not current_metric:
@@ -112,17 +119,20 @@ def velocity_card_sheet(card: dict) -> str:
                     '<div class="crt-muted crt-small">Likes + comments</div></td>' + "".join(cells)
                     + f"<td>{badge}</td>{change_cell}{remark_cell}</tr>")
     if not body:
-        body.append(f'<tr class="crt-empty"><td colspan="{len(runs) + 4}">'
+        body.append(f'<tr class="crt-empty"><td colspan="{len(shown) + 4}">'
                     'No posts added yet. Add a Facebook post when you\'re ready.</td></tr>')
-    width = 630 + 110 * len(runs)
-    columns = ('<colgroup><col style="width:210px">' + '<col style="width:110px">' * len(runs)
-               + '<col style="width:100px"><col style="width:100px"><col style="width:220px"></colgroup>')
+    width = post_width + 420 + 110 * len(shown)
+    colgroup = (f'<colgroup><col style="width:{post_width}px">' + '<col style="width:110px">' * len(shown)
+                + '<col style="width:100px"><col style="width:100px"><col style="width:220px"></colgroup>')
+    top = f'<div class="crt-title" role="heading" aria-level="2">{escape(heading)}</div>' if heading else ""
+    if subheading:
+        top += f'<p class="crt-note">{escape(subheading)}</p>'
     return (
-        '<section class="crt-sheet crt-sheet--compact" aria-label="Velocity Tracker">'
+        '<section class="crt-sheet crt-sheet--compact" aria-label="Velocity Tracker">' + top +
         f'<div class="crt-table-wrap"><table class="crt-table" style="width:{width}px;min-width:{width}px">'
-        + columns + '<thead>' + head + '</thead><tbody>'
+        + colgroup + '<thead>' + head + '</thead><tbody>'
         + "".join(body) + '</tbody></table></div>'
-        '<details class="crt-legend"><summary>legend</summary>'
+        f'<details class="crt-legend"{" open" if legend_open else ""}><summary>legend</summary>'
         '<div class="crt-key"><span><b>Viral</b> engagement surging significantly</span><span><b>alive</b> engagement growing</span>'
         '<span><b>dying</b> gains shrinking</span><span><b>dead</b> no growth</span></div>'
         '<p class="crt-note">Each check = likes + comments. Likes includes all Facebook reactions. '
