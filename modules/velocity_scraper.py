@@ -33,6 +33,9 @@ def parse_engagement(labels: list[str]) -> dict:
     for label in labels:
         for part in [label, *re.split(r"[·•|\n\r]", label)]:
             text = " ".join(part.split())
+            # Reel action buttons announce their action before the displayed total.
+            text = re.sub(r"^(?:Like|Unlike|Remove Like),\s*(?=\d[\d.,]*\s?[KkMm]?\s+(?:reactions?|likes?)$)", "", text, flags=re.I)
+            text = re.sub(r"^Comment,\s*(?=\d[\d.,]*\s?[KkMm]?\s+comments?$)", "", text, flags=re.I)
             for key, pattern in (("reactions", _REACTIONS), ("likes", _LIKES), ("comments", _COMMENTS)):
                 match = pattern.fullmatch(text)
                 if match:
@@ -63,6 +66,9 @@ POST_ENGAGEMENT_JS = "requested => {" + CONTENT_GUARD_JS + r"""
             if (/^\/(watch|video\.php)\/?$/.test(u.pathname)) return u.searchParams.get('v') || '';
             if (/^\/(story|permalink)\.php$/.test(u.pathname)) return u.searchParams.get('story_fbid') || '';
             if (/^\/photo(?:\.php)?\/?$/.test(u.pathname)) return u.searchParams.get('fbid') || '';
+            // Video permalinks may include a title slug before the numeric ID.
+            const video = u.pathname.match(/\/videos\/(?:[^/]+\/)?(\d+)\/?$/);
+            if (video) return video[1];
             const match = u.pathname.match(/\/(?:posts|permalink|videos|reel)\/([^/]+)/);
             if (match) return match[1];
             if (u.pathname.includes('/photos/')) return u.pathname.replace(/\/$/, '').split('/').pop();
@@ -98,6 +104,33 @@ POST_ENGAGEMENT_JS = "requested => {" + CONTENT_GUARD_JS + r"""
         if (root && visible(root) && !candidates.includes(root)) candidates.push(root);
     }
     let roots = candidates.filter(root => !candidates.some(other => other !== root && root.contains(other)));
+    const reelPage = /^\/reel\//.test(location.pathname);
+    if (!roots.length && reelPage) {
+        // Reels preload the next card below the viewport. Bind the current URL
+        // to one substantially visible video, then stop before its next sibling.
+        const activeVideos = [...document.querySelectorAll('[role="main"] video, [role="dialog"] video')]
+            .filter(video => {
+                if (!visible(video) || fbBlocked(video, true) || inComment(video)
+                    || video.closest('[aria-hidden="true"], [inert]')) return false;
+                const r = video.getBoundingClientRect();
+                const width = Math.max(0, Math.min(r.right, innerWidth) - Math.max(r.left, 0));
+                const height = Math.max(0, Math.min(r.bottom, innerHeight) - Math.max(r.top, 0));
+                return r.width > 0 && r.height > 0 && width >= Math.min(r.width, innerWidth) / 2
+                    && height >= Math.min(r.height, innerHeight) / 2;
+            });
+        if (activeVideos.length === 1) {
+            for (let root = activeVideos[0].parentElement; root; root = root.parentElement) {
+                if (fbBlocked(root, true) || inComment(root) || root.querySelectorAll('video').length !== 1) break;
+                const ids = anchors.filter(a => root.contains(a) && !inComment(a)).map(a => identity(a.href)).filter(Boolean);
+                if (ids.some(id => id !== finalId)) break;
+                const action = [...root.querySelectorAll('[role="button"][aria-label], button[aria-label]')]
+                    .some(el => visible(el) && !inComment(el) && !fbBlocked(el, true) && !el.closest(messageSelector)
+                        && /^(?:(?:Like|Unlike|Remove Like), \d[\d.,]*(?:\s?[KM])? (?:reactions?|likes?)|Comment, \d[\d.,]*(?:\s?[KM])? comments?)$/i.test(el.getAttribute('aria-label')));
+                if (action) { roots = [root]; break; }
+                if (root.matches('[role="main"], [role="dialog"]')) break;
+            }
+        }
+    }
     if (!roots.length) {
         // Media viewers may have no post permalink and use articles for comments.
         // Prefer the active dialog; a recommendation feed is never a fallback.

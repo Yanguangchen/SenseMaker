@@ -22,6 +22,8 @@ class EngagementCountTests(unittest.TestCase):
     def test_totals_and_abbreviations_are_added_without_double_counting_reactions(self):
         for labels, expected in [
             (["1.2K likes", "30 comments"], (1200, 30, 1230)),
+            (["Like, 82 reactions", "Comment, 5 comments", "Share, 22 shares"], (82, 5, 87)),
+            (["Remove Like, 1.2K reactions", "Comment, 0 comments"], (1200, 0, 1200)),
             (["All reactions:\n1,234", "1,234 reactions", "Like: 1000", "Love: 234", "Comments: 12"], (1234, 12, 1246)),
             (["3M reactions · 1.5K comments · 500 shares · 9M views"], (3000000, 1500, 3001500)),
             (["No reactions yet", "No comments yet", "Be the first to comment."], (0, 0, 0)),
@@ -140,12 +142,61 @@ class EngagementDOMTests(unittest.IsolatedAsyncioTestCase):
         result = await read_post_engagement(self.page, url)
         self.assertEqual(result["engagement"], 42_005)
 
+    async def test_reel_carousel_reads_only_visible_card_and_action_labels(self):
+        url = "https://www.facebook.com/reel/123"
+        await self.load('''<main role="main">
+            <div><video style="width:320px;height:500px"></video>
+                <div role="button" aria-label="Like, 82 reactions">82</div>
+                <div role="button" aria-label="Comment, 5 comments">5</div>
+                <div role="button" aria-label="Share, 22 shares">22</div>
+                <div data-testid="comment"><span>600 likes</span></div></div>
+            <div style="position:absolute;top:1000px"><video style="width:320px;height:500px"></video>
+                <div role="button" aria-label="Like, 104 reactions">104</div>
+                <div role="button" aria-label="Comment, 18 comments">18</div></div>
+            </main>''', url)
+        result = await read_post_engagement(self.page, url)
+        self.assertEqual((result["reactions"], result["comments"], result["engagement"]), (82, 5, 87))
+        self.assertEqual(await self.page.locator('[data-sm-velocity-scope] video').count(), 1)
+
+    async def test_reel_carousel_does_not_borrow_missing_counts_from_next_card(self):
+        url = "https://www.facebook.com/reel/123"
+        await self.load('''<main role="main">
+            <div><video style="width:320px;height:500px"></video>
+                <div role="button" aria-label="Like, 82 reactions">82</div></div>
+            <div style="position:absolute;top:1000px"><video style="width:320px;height:500px"></video>
+                <div role="button" aria-label="Like, 104 reactions">104</div>
+                <div role="button" aria-label="Comment, 18 comments">18</div></div>
+            </main>''', url)
+        with patch.object(self.page, "wait_for_timeout", new=AsyncMock()):
+            result = await read_post_engagement(self.page, url)
+        self.assertIsNone(result["engagement"])
+        self.assertIsNone(result["comments"])
+
+    async def test_reel_carousel_rejects_two_visible_videos_and_wrong_permalink(self):
+        url = "https://www.facebook.com/reel/123"
+        for link, position in [("", ""), ('<a href="/reel/999">Other reel</a>', 'style="position:absolute;top:1000px"')]:
+            await self.load(f'''<main role="main"><div>{link}<video style="width:100px;height:100px"></video>
+                <div role="button" aria-label="Like, 82 reactions">82</div>
+                <div role="button" aria-label="Comment, 5 comments">5</div></div>
+                <div {position}><video style="width:100px;height:100px"></video></div></main>''', url)
+            self.assertFalse((await self.page.evaluate(POST_ENGAGEMENT_JS, url))["matched"])
+            await self.page.unroute("**/*")
+
     async def test_share_page_can_resolve_canonical_post_and_split_labels(self):
         url = "https://www.facebook.com/share/p/token"
         await self.load(f'<link rel="canonical" href="{URL}"><article role="article">'
                         f'<a href="{URL}">Post</a><div><span>All reactions:</span> <span>1.2K</span></div><span>4 comments</span></article>', url)
         result = await read_post_engagement(self.page, url)
         self.assertEqual(result["engagement"], 1204)
+
+    async def test_shared_reel_canonical_video_slug_uses_numeric_identity(self):
+        url = "https://www.facebook.com/share/r/token"
+        await self.load('''<link rel="canonical" href="https://www.facebook.com/creator/videos/reel-title/123/">
+            <article role="article"><a href="/reel/123">Reel</a>
+            <div role="button" aria-label="Like, 82 reactions">82</div>
+            <div role="button" aria-label="Comment, 5 comments">5</div></article>''', url)
+        result = await read_post_engagement(self.page, url)
+        self.assertEqual(result["engagement"], 87)
 
     async def test_missing_component_is_not_zero_but_explicit_zero_is_valid(self):
         await self.load(f'<article role="article"><a href="{URL}">Post</a><span>900 likes</span></article>')
