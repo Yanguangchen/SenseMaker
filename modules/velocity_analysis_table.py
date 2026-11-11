@@ -4,6 +4,9 @@ from html import escape
 
 from modules.velocity_tracking import card_posts
 
+ANALYSIS_NOTE = ("Sentiment of up to 20 readable comments per post. Percentages use successfully analyzed comments, "
+                 "not all comments on Facebook. Negative includes anger and anxiety; positive includes joy. "
+                 "Word size shows how many analyzed comments mention each topic.")
 
 def analysis_table(card: dict) -> str:
     runs = card.get("runs", [])

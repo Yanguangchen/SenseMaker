@@ -18,7 +18,9 @@ from modules.ui import show_running_glow
 from modules.velocity_table import velocity_card_sheet
 from modules.velocity_metrics import METRIC, engagement_count
 from modules.velocity_sharing_ui import render_share_controls
-from modules.velocity_analysis_table import analysis_table
+from modules.velocity_analysis_table import ANALYSIS_NOTE, analysis_table
+from modules.velocity_export import card_document, card_pdf_name
+from modules.report_pdf import PDFExportError, render_pdf
 from modules.config import get_ai_provider, get_ai_model
 
 log = logging.getLogger(__name__)
@@ -27,6 +29,8 @@ NOTIFY_JS = Path(__file__).parent / "theme" / "run-notifications.js"
 MODAL_KEY = "velocity_open_notepad"
 REMARK_MODAL_KEY = "velocity_open_remarks"
 ANALYSIS_TAB_KEY = "velocity_show_analysis"
+# One printed PDF at a time: (card id, document digest, bytes).
+PDF_KEY = "velocity_card_pdf"
 
 
 def _install_notification_script() -> None:
@@ -110,6 +114,7 @@ def _close_card() -> None:
     st.session_state.pop(MODAL_KEY, None)
     st.session_state.pop(REMARK_MODAL_KEY, None)
     st.session_state.pop(ANALYSIS_TAB_KEY, None)
+    st.session_state.pop(PDF_KEY, None)
 
 
 def _open_card(email: str, card_id: str) -> None:
@@ -223,7 +228,28 @@ def _render_background_job(email: str, key: str, job) -> None:
             st.rerun()
 
 
-def _render_card_history(email: str, card: dict, state: dict) -> None:
+def _render_pdf_export(card: dict, name: str) -> None:
+    """Printed on request from the complete history, and kept until the card's results change."""
+    document = card_document(card, name)
+    digest = hashlib.sha256(document.encode("utf-8")).hexdigest()
+    stored = st.session_state.get(PDF_KEY)
+    if stored and stored[:2] == (card["id"], digest):
+        st.download_button("Download PDF", stored[2], card_pdf_name(card, name), "application/pdf",
+                           key=f"velocity_pdf_download_{card['id']}", type="primary", icon=":material/download:")
+        return
+    if st.button("Export as PDF", key=f"velocity_pdf_create_{card['id']}", icon=":material/picture_as_pdf:",
+                 help="A4 landscape: every saved check, then the latest comment analysis."):
+        try:
+            with st.spinner("Creating PDF…"):
+                pdf = render_pdf(document, f"{name} · Velocity card")
+        except PDFExportError as exc:
+            st.error(str(exc))
+        else:
+            st.session_state[PDF_KEY] = (card["id"], digest, pdf)
+            st.rerun()
+
+
+def _render_card_history(email: str, card: dict, state: dict, name: str) -> None:
     histories = state.setdefault("run_history", {})
     cached = histories.get(card["id"], {})
     recent = card.get("runs", [])
@@ -252,6 +278,7 @@ def _render_card_history(email: str, card: dict, state: dict) -> None:
         runs = cached["runs"]
     card = {**card, "runs": runs}
     st.html(velocity_card_sheet(card))
+    _render_pdf_export(card, name)
     if not card.get("runs"):
         return
     if card["runs"][-1].get("metric") != METRIC:
@@ -328,18 +355,16 @@ def _render_remarks(card: dict, state: dict, card_key: str) -> None:
         st.rerun()
 
 
-def _render_card_tabs(email: str, card: dict, state: dict, card_key: str) -> None:
+def _render_card_tabs(email: str, card: dict, state: dict, card_key: str, name: str) -> None:
     velocity, analysis = st.tabs(["Velocity", "Analysis"],
                                  default="Analysis" if st.session_state.get(ANALYSIS_TAB_KEY) else "Velocity")
     with velocity:
-        _render_card_history(email, card, state)
+        _render_card_history(email, card, state, name)
     with analysis:
         if card.get("runs"):
             st.caption(f"Latest run · {format_time(card['runs'][-1]['at'])}")
         st.html(analysis_table(card))
-        st.caption("Sentiment of up to 20 readable comments per post. Percentages use successfully analyzed comments, "
-                   "not all comments on Facebook. Negative includes anger and anxiety; positive includes joy. "
-                   "Word size shows how many analyzed comments mention each topic.")
+        st.caption(ANALYSIS_NOTE)
         if not card.get("shared"):
             _render_remarks(card, state, card_key)
 
@@ -383,7 +408,7 @@ def _render_card(email: str, card: dict, index: int, state: dict, key: str, *, h
 
         if card.get("shared"):
             st.caption(f"{len(posts)} / {store.MAX_POSTS_PER_CARD} posts · Shared by another approved user · Any approved user can remove this card")
-            _render_card_tabs(email, card, state, card_key)
+            _render_card_tabs(email, card, state, card_key, _card_name(card, index))
             st.caption("The creator runs and edits this card. Use Refresh cards & checks to see their latest saved results.")
             return
 
@@ -427,7 +452,7 @@ def _render_card(email: str, card: dict, index: int, state: dict, key: str, *, h
                     st.rerun()
             elif job.status == "complete" and job.run.get("warning"):
                 st.warning(job.run["warning"])
-        _render_card_tabs(email, card, state, card_key)
+        _render_card_tabs(email, card, state, card_key, _card_name(card, index))
         if posts and not card.get("runs"):
             st.caption("Click Run to save engagement and analyze comments. Your Facebook connection from Scrape Data is used.")
 
