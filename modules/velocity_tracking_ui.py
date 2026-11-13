@@ -28,6 +28,8 @@ PAPER_CSS = Path(__file__).parent / "theme" / "velocity-notepad.css"
 NOTIFY_JS = Path(__file__).parent / "theme" / "run-notifications.js"
 MODAL_KEY = "velocity_open_notepad"
 REMARK_MODAL_KEY = "velocity_open_remarks"
+# A card action (rename, share, add post) shown in place of its notepad.
+ACTION_KEY = "velocity_card_action"
 # One printed PDF at a time: (card id, document digest, bytes).
 PDF_KEY = "velocity_card_pdf"
 
@@ -112,6 +114,7 @@ def _render_run_notifications(email: str, key: str) -> None:
 def _close_card() -> None:
     st.session_state.pop(MODAL_KEY, None)
     st.session_state.pop(REMARK_MODAL_KEY, None)
+    st.session_state.pop(ACTION_KEY, None)
     st.session_state.pop(PDF_KEY, None)
 
 
@@ -236,8 +239,8 @@ def _render_pdf_export(card: dict, name: str) -> None:
         st.download_button("Download PDF", stored[2], card_pdf_name(card, name), "application/pdf",
                            key=f"velocity_pdf_download_{card['id']}", type="primary", icon=":material/download:")
         return
-    if st.button("Export as PDF", key=f"velocity_pdf_create_{card['id']}", icon=":material/picture_as_pdf:",
-                 help="A4 landscape: every saved check, then the latest comment analysis."):
+    if st.button("", key=f"velocity_pdf_create_{card['id']}", icon=":material/file_export:",
+                 help="Export as PDF · A4 landscape: every saved check, then the latest comment analysis."):
         try:
             with st.spinner("Creating PDF…"):
                 pdf = render_pdf(document, f"{name} · Velocity card")
@@ -299,8 +302,23 @@ def _close_remarks() -> None:
     st.session_state.pop(REMARK_MODAL_KEY, None)
 
 
-@st.dialog("Remarks", width="large", on_dismiss=_close_remarks)
-def _remarks_modal(email: str, key: str) -> None:
+def _open_action(action: str) -> None:
+    st.session_state[ACTION_KEY] = action
+    st.rerun()
+
+
+def _close_action() -> None:
+    st.session_state.pop(ACTION_KEY, None)
+
+
+def _close_action_and_rerun() -> None:
+    _close_action()
+    st.rerun()
+
+
+def _owned_dialog_card(email: str, key: str, close) -> dict:
+    """The open card, if it is still this user's own card."""
+    # Dialog widgets rerun independently of the dashboard's authorization gate.
     from modules.auth import allowed_emails, verify_access
     try:
         if verify_access(st.session_state.get("auth_token", ""), allowed_emails()) != email:
@@ -309,10 +327,91 @@ def _remarks_modal(email: str, key: str) -> None:
         _close_card()
         st.rerun()
     selection = st.session_state.get(MODAL_KEY, {})
+    card = next((row for row in st.session_state[key]["cards"]
+                 if row["id"] == selection.get("card_id") and not row.get("shared")), None)
+    if card is None or selection.get("owner") != library_owner_id(email):
+        close()
+        st.rerun()
+    return card
+
+
+@st.dialog("Rename card", on_dismiss=_close_action)
+def _rename_modal(email: str, key: str) -> None:
+    card = _owned_dialog_card(email, key, _close_action)
     state = st.session_state[key]
-    card = next((row for row in state["cards"] if row["id"] == selection.get("card_id") and not row.get("shared")), None)
-    post = next((row for row in store.card_posts(card) if row["id"] == st.session_state.get(REMARK_MODAL_KEY)), None) if card else None
-    if post is None or selection.get("owner") != library_owner_id(email):
+    card_key = f"{key}_{card['id']}"
+    with st.container(key="sm_velocity_modal"):
+        with st.form(f"{card_key}_rename"):
+            name = st.text_input("Card name", value=_card_name(card, state["cards"].index(card) + 1),
+                                 key=f"{card_key}_name", max_chars=store.MAX_NAME_CHARS)
+            rename = st.form_submit_button("Save name", type="primary", disabled=state["error"])
+        if rename:
+            try:
+                _update_owned_cards(state, store.rename_card(database.init_db(), email, card["id"], name))
+            except ValueError as exc:
+                st.error(str(exc))
+            except Exception:
+                log.exception("Velocity card could not be renamed")
+                st.error("The card could not be renamed. Refresh cards & checks before trying again.")
+            else:
+                st.session_state[f"{key}_notice"] = "Card renamed."
+                _close_action_and_rerun()
+        if st.button("Cancel", key=f"{card_key}_cancel_rename"):
+            _close_action_and_rerun()
+
+
+@st.dialog("Share link", on_dismiss=_close_action)
+def _share_modal(email: str, key: str) -> None:
+    card = _owned_dialog_card(email, key, _close_action)
+    state = st.session_state[key]
+    with st.container(key="sm_velocity_modal"):
+        st.caption(card["name"])
+        shared_cards = render_share_controls(email, card, disabled=state["error"])
+        if shared_cards is not None:
+            _update_owned_cards(state, shared_cards)
+            st.rerun()
+        if st.button("Done", key=f"{key}_{card['id']}_close_share"):
+            _close_action_and_rerun()
+
+
+@st.dialog("Add provoker's post", on_dismiss=_close_action)
+def _add_post_modal(email: str, key: str) -> None:
+    card = _owned_dialog_card(email, key, _close_action)
+    state = st.session_state[key]
+    card_key = f"{key}_{card['id']}"
+    job = jobs.latest_job(email)
+    card_busy = bool(job and job.status in jobs.BUSY and job.card_id == card["id"])
+    with st.container(key="sm_velocity_modal"):
+        st.caption(card["name"])
+        with st.form(f"{card_key}_add_post"):
+            url = st.text_input("Facebook post link", placeholder="https://www.facebook.com/…", key=f"{card_key}_url")
+            submitted = st.form_submit_button("Add post", type="primary", disabled=state["error"] or card_busy)
+        if card_busy:
+            st.caption("Posts can be added once the current check finishes.")
+        if submitted:
+            try:
+                _update_owned_cards(state, store.add_post(database.init_db(), email, card["id"], url))
+            except ValueError as exc:
+                st.error(str(exc))
+            except Exception:
+                log.exception("Velocity post could not be saved")
+                st.error("The post could not be saved. Refresh cards & checks before trying again.")
+            else:
+                st.session_state[f"{key}_notice"] = "Facebook post added to the card."
+                _close_action_and_rerun()
+        if st.button("Cancel", key=f"{card_key}_cancel_add_post"):
+            _close_action_and_rerun()
+
+
+CARD_ACTIONS = {"rename": _rename_modal, "share": _share_modal, "add_post": _add_post_modal}
+
+
+@st.dialog("Remarks", width="large", on_dismiss=_close_remarks)
+def _remarks_modal(email: str, key: str) -> None:
+    card = _owned_dialog_card(email, key, _close_remarks)
+    state = st.session_state[key]
+    post = next((row for row in store.card_posts(card) if row["id"] == st.session_state.get(REMARK_MODAL_KEY)), None)
+    if post is None:
         _close_remarks()
         st.rerun()
     with st.container(key="sm_velocity_modal"):
@@ -379,11 +478,19 @@ def _render_card(email: str, card: dict, index: int, state: dict, key: str, *, h
     busy = bool(job and job.status in jobs.BUSY)
     card_busy = busy and job.card_id == card["id"]
     with st.container(key=f"velocity_card_{card['id']}"):
-        title, actions = st.columns([4, 1], vertical_alignment="center")
+        title, actions = st.columns([3, 2], vertical_alignment="center")
         title.subheader(_card_name(card, index))
         title.caption(f"{len(posts)} / {store.MAX_POSTS_PER_CARD} posts · Likes + comments (all reactions included)")
-        if actions.button("Remove card", key=f"{key}_remove_{card['id']}", disabled=state["error"],
-                          help="Remove this card for all users. Any current check finishes in the background, and saved checks are kept."):
+        tools = actions.container(horizontal=True, horizontal_alignment="right", vertical_alignment="center",
+                                  key=f"velocity_card_tools_{card['id']}")
+        if not card.get("shared"):
+            if tools.button("", key=f"{card_key}_share", icon=":material/share:", help="Share link"):
+                _open_action("share")
+            if tools.button("", key=f"{card_key}_rename", icon=":material/edit:", help="Rename card",
+                            disabled=state["error"]):
+                _open_action("rename")
+        if tools.button("Remove card", key=f"{key}_remove_{card['id']}", disabled=state["error"],
+                        help="Remove this card for all users. Any current check finishes in the background, and saved checks are kept."):
             try:
                 store.remove_workspace_card(database.init_db(), email, card)
                 state["cards"] = [row for row in state["cards"] if row["id"] != card["id"]]
@@ -396,11 +503,6 @@ def _render_card(email: str, card: dict, index: int, state: dict, key: str, *, h
                 _close_card()
                 st.rerun()
 
-        shared_cards = render_share_controls(email, card, disabled=state["error"])
-        if shared_cards is not None:
-            _update_owned_cards(state, shared_cards)
-            st.rerun()
-
         notice = schedule.daily_notice(card)
         if notice:
             st.warning(f"The automatic daily check saved no column: {notice}")
@@ -410,23 +512,6 @@ def _render_card(email: str, card: dict, index: int, state: dict, key: str, *, h
             _render_card_tabs(email, card, state, card_key, _card_name(card, index))
             st.caption("The creator runs and edits this card. Use Refresh cards & checks to see their latest saved results.")
             return
-
-        with st.expander("Rename card"):
-            with st.form(f"{card_key}_rename"):
-                name = st.text_input("Card name", value=_card_name(card, index), key=f"{card_key}_name",
-                                     max_chars=store.MAX_NAME_CHARS)
-                rename = st.form_submit_button("Save name", disabled=state["error"])
-            if rename:
-                try:
-                    _update_owned_cards(state, store.rename_card(database.init_db(), email, card["id"], name))
-                except ValueError as exc:
-                    st.error(str(exc))
-                except Exception:
-                    log.exception("Velocity card could not be renamed")
-                    st.error("The card could not be renamed. Refresh cards & checks before trying again.")
-                else:
-                    st.session_state[f"{key}_notice"] = "Card renamed."
-                    st.rerun()
 
         if st.button("Run", key=f"{card_key}_run", type="primary", disabled=state["error"] or not posts or busy,
                      help="Read engagement and up to 20 comments per post, analyze comment sentiment, and save the results."):
@@ -456,23 +541,9 @@ def _render_card(email: str, card: dict, index: int, state: dict, key: str, *, h
             st.caption("Click Run to save engagement and analyze comments. Your Facebook connection from Scrape Data is used.")
 
         if len(posts) < store.MAX_POSTS_PER_CARD:
-            generation = st.session_state.get(f"{card_key}_form_generation", 0)
-            with st.form(f"{card_key}_add_post_{generation}"):
-                url = st.text_input("Provoker's post", placeholder="Add a Facebook post URL when ready",
-                                    key=f"{card_key}_url_{generation}")
-                submitted = st.form_submit_button("Add post", disabled=state["error"] or card_busy)
-            if submitted:
-                try:
-                    _update_owned_cards(state, store.add_post(database.init_db(), email, card["id"], url))
-                except ValueError as exc:
-                    st.error(str(exc))
-                except Exception:
-                    log.exception("Velocity post could not be saved")
-                    st.error("The post could not be saved. Refresh cards & checks before trying again.")
-                else:
-                    st.session_state[f"{card_key}_form_generation"] = generation + 1
-                    st.session_state[f"{key}_notice"] = "Facebook post added to the card."
-                    st.rerun()
+            if st.button("", key=f"{card_key}_add_post", icon=":material/add:", help="Add provoker's post",
+                         disabled=state["error"] or card_busy):
+                _open_action("add_post")
         else:
             st.caption("All 10 post rows are in use. Remove a post to add another.")
 
@@ -567,6 +638,8 @@ def render_velocity_workspace(email: str, *, hosted: bool | None = None) -> None
     if MODAL_KEY in st.session_state:
         if REMARK_MODAL_KEY in st.session_state:
             _remarks_modal(email, key)
+        elif st.session_state.get(ACTION_KEY) in CARD_ACTIONS:
+            CARD_ACTIONS[st.session_state[ACTION_KEY]](email, key)
         else:
             _card_modal(email, key, hosted=hosted)
     else:

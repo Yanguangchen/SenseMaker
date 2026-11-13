@@ -386,6 +386,7 @@ class VelocityUITests(VelocityTestCase):
         card = store.add_card(self.db, "owner@example.com", url=post_url())[0]
         app = self.app()
         app.button(key=f"{self.key}_open_{card['id']}").click().run()
+        app.button(key=f"{self.key}_{card['id']}_rename").click().run()
         app.text_input(key=f"{self.key}_{card['id']}_name").set_value("Launch monitoring")
         next(button for button in app.button if button.label == "Save name").click().run()
         self.assertFalse(list(app.exception))
@@ -397,10 +398,33 @@ class VelocityUITests(VelocityTestCase):
         fresh = self.app()
         self.assertEqual(fresh.button(key=f"{self.key}_open_{card['id']}").label, "Open Launch monitoring")
 
+    def test_card_actions_open_in_their_own_modal_and_return_to_the_notepad(self):
+        card = store.add_card(self.db, "owner@example.com", "Original")[0]
+        card_key = f"{self.key}_{card['id']}"
+        app = self.app()
+        app.button(key=f"{self.key}_open_{card['id']}").click().run()
+        self.assertFalse({"Save name", "Create share link", "Add post"} & {button.label for button in app.button})
+        for icon, closer, label in (("share", "close_share", "Create share link"),
+                                    ("rename", "cancel_rename", "Save name"),
+                                    ("add_post", "cancel_add_post", "Add post")):
+            app.button(key=f"{card_key}_{icon}").click().run()
+            self.assertFalse(list(app.exception))
+            self.assertIn(label, [button.label for button in app.button])
+            self.assertNotIn("Run", [button.label for button in app.button])
+            app.button(key=f"{card_key}_{closer}").click().run()
+            self.assertFalse(list(app.exception))
+            self.assertIn("Run", [button.label for button in app.button])
+        app.button(key=f"{card_key}_share").click().run()
+        app.button(key=f"velocity_share_{card['id']}").click().run()
+        self.assertFalse(list(app.exception))
+        self.assertTrue(store.load_cards(self.db, "owner@example.com")[0].get("share_token"))
+        self.assertIn("Revoke share link", [button.label for button in app.button])
+
     def test_failed_rename_keeps_saved_name_and_allows_retry(self):
         card = store.add_card(self.db, "owner@example.com", "Original")[0]
         app = self.app()
         app.button(key=f"{self.key}_open_{card['id']}").click().run()
+        app.button(key=f"{self.key}_{card['id']}_rename").click().run()
         app.text_input(key=f"{self.key}_{card['id']}_name").set_value("New name")
         self.db.fail_writes = True
         next(button for button in app.button if button.label == "Save name").click().run()
@@ -429,10 +453,11 @@ class VelocityUITests(VelocityTestCase):
         fresh.button(key=f"{self.key}_open_{card['id']}").click().run()
         self.assertFalse(list(fresh.exception))
         for index in range(2):
-            fresh.text_input(key=f"{self.key}_{card['id']}_url_{index}").set_value(post_url(index))
-            next(button for button in fresh.button
-                 if button.key and f"{card['id']}_add_post_{index}" in button.key).click().run()
+            fresh.button(key=f"{self.key}_{card['id']}_add_post").click().run()
+            fresh.text_input(key=f"{self.key}_{card['id']}_url").set_value(post_url(index))
+            next(button for button in fresh.button if button.label == "Add post").click().run()
             self.assertFalse(list(fresh.exception))
+            self.assertTrue(any(message.value == "Facebook post added to the card." for message in fresh.success))
         saved = store.load_cards(self.db, "owner@example.com")
         self.assertEqual([len(store.card_posts(row)) for row in saved], [2, 0])
         self.db.rows[f"{_get_collection_name()}/post"] = {

@@ -121,7 +121,7 @@ class VelocityPdfUITests(VelocityTestCase):
             app.button(key=f"{self.key}_refresh").click().run()
             app.button(key=f"{self.key}_open_{self.card_id}").click().run()
             self.assertNotIn("Download PDF", self.downloads(app))
-            self.assertEqual(app.button(key=f"velocity_pdf_create_{self.card_id}").label, "Export as PDF")
+            self.assertEqual(app.button(key=f"velocity_pdf_create_{self.card_id}").icon, ":material/file_export:")
             self.assertEqual(render.call_count, 1)
 
     def test_export_failure_is_shown(self):

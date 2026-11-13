@@ -83,7 +83,8 @@ class VelocitySharingE2E(unittest.TestCase):
             owner.get_by_role('button', name='Sign in as test owner').click()
             owner.get_by_role('button', name='Open E2E shared card', exact=True).click()
             dialog = owner.get_by_role('dialog')
-            dialog.get_by_text('Share link', exact=True).click()
+            share_icon = dialog.locator('[class*="_share"] button').first
+            share_icon.click()
             dialog.get_by_role('button', name='Create share link', exact=True).click()
             link = dialog.get_by_role('link', name='Open shared card', exact=True)
             expect(link).to_be_visible()
@@ -111,14 +112,14 @@ class VelocitySharingE2E(unittest.TestCase):
             viewer.get_by_role('tab', name='Velocity', exact=True).click()
 
             # A new check through the owner UI becomes visible without a new link.
+            dialog.get_by_role('button', name='Done', exact=True).click()
             dialog.get_by_role('button', name='Run', exact=True).click()
             dialog.get_by_role('button', name='Close notepad', exact=True).click()
             owner.get_by_role('button', name='Refresh cards & checks', exact=True).click()
             expect(owner.get_by_text('1 / 10 posts · 11 saved checks', exact=True)).to_be_visible()
             owner.get_by_role('button', name='Open E2E shared card', exact=True).click()
             expect(dialog).to_be_visible()
-            if not dialog.get_by_role('button', name='Revoke share link', exact=True).is_visible():
-                dialog.get_by_text('Share link', exact=True).click()
+            share_icon.click()
             viewer.get_by_role('button', name='Refresh results', exact=True).click()
             expect(viewer.locator('th[data-run-id]')).to_have_count(11)
             expect(viewer.get_by_role('cell', name='1,103', exact=True)).to_be_visible()
@@ -138,6 +139,7 @@ class VelocitySharingE2E(unittest.TestCase):
             viewer.goto(replacement)
             expect(viewer.get_by_role('heading', name='E2E shared card', exact=True)).to_be_visible()
 
+            dialog.get_by_role('button', name='Done', exact=True).click()
             dialog.get_by_role('button', name='Remove card', exact=True).click()
             expect(owner.get_by_role('button', name='Open E2E shared card', exact=True)).to_have_count(0)
             viewer.reload()

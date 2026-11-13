@@ -16,27 +16,26 @@ log = logging.getLogger(__name__)
 def render_share_controls(email: str, card: dict, *, disabled: bool = False) -> list[dict] | None:
     if card.get("shared"):
         return None
-    with st.expander("Share link"):
-        st.caption("Anyone with this link can view this card’s saved results, post links, analysis and remarks. "
-                   "They cannot edit the card or run checks. New saved results appear when they refresh.")
-        token = card.get("share_token")
-        if token:
-            try:
-                url = sharing.share_url(st.context.url, token)
-                st.code(url, language=None)
-                st.caption("Use the copy button above to copy the share link.")
-                st.link_button("Open shared card", url)
-            except ValueError as exc:
-                st.info(str(exc))
-        label = "Revoke share link" if token else "Create share link"
-        if st.button(label, key=f"velocity_share_{card['id']}", disabled=disabled):
-            try:
-                return sharing.set_sharing(database.init_db(), email, card["id"], not bool(token))
-            except (ValueError, PermissionError) as exc:
-                st.error(str(exc))
-            except Exception:
-                log.exception("Velocity sharing could not be updated")
-                st.error("Sharing could not be updated. Try again.")
+    st.caption("Anyone with this link can view this card’s saved results, post links, analysis and remarks. "
+               "They cannot edit the card or run checks. New saved results appear when they refresh.")
+    token = card.get("share_token")
+    if token:
+        try:
+            url = sharing.share_url(st.context.url, token)
+            st.code(url, language=None)
+            st.caption("Use the copy button above to copy the share link.")
+            st.link_button("Open shared card", url)
+        except ValueError as exc:
+            st.info(str(exc))
+    label = "Revoke share link" if token else "Create share link"
+    if st.button(label, key=f"velocity_share_{card['id']}", disabled=disabled):
+        try:
+            return sharing.set_sharing(database.init_db(), email, card["id"], not bool(token))
+        except (ValueError, PermissionError) as exc:
+            st.error(str(exc))
+        except Exception:
+            log.exception("Velocity sharing could not be updated")
+            st.error("Sharing could not be updated. Try again.")
     return None
 
 
