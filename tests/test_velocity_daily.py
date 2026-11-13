@@ -281,11 +281,11 @@ class DailyStatusFixture(ScheduleTestCase):
 
 
 class DailyStatusUITests(DailyStatusFixture):
-    def test_the_cadence_is_shown_and_a_failed_check_asks_for_attention(self):
+    def test_a_failed_check_asks_for_attention(self):
         card = store.add_card(self.db, EMAIL, "Launch", post_url())[0]
         self.record(card, status="error", error="Facebook is not connected. Open Scrape Data to reconnect.")
         app = self.app()
-        self.assertTrue(any("checked automatically at 02:00 UTC" in element.value for element in app.caption))
+        self.assertFalse(any("checked automatically" in element.value for element in app.caption))
         self.assertTrue(any("Daily check failed" in element.proto.body for element in app.get("html")))
         app.button(key=f"{self.key}_open_{card['id']}").click().run()
         self.assertFalse(list(app.exception))

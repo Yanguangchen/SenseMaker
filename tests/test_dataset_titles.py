@@ -10,6 +10,7 @@ from streamlit.testing.v1 import AppTest
 
 from modules.database import rename_dataset, get_post_id
 from modules.record_state import rename_record_caches
+from tests.test_record_management import ModalAppTest
 
 STAMP = datetime(2026, 11, 7, tzinfo=timezone.utc)
 
@@ -112,7 +113,8 @@ _render_cloud_save([{row!r}], 'save_test', source={source!r})
         with patch("modules.database.firestore.transactional", side_effect=lambda f: f), \
                 patch("modules.record_management_ui.init_db", return_value=db), \
                 patch("modules.record_management_ui.load_record_catalog", side_effect=lambda db: deepcopy(list(rows.values()))):
-            app = AppTest.from_string("from modules.record_management_ui import render_record_management\nrender_record_management()").run()
+            app = ModalAppTest(AppTest.from_string(
+                "from modules.record_management_ui import render_record_management\nrender_record_management()")).run()
             self.assertFalse(any(field.label == "Dataset title" for field in app.text_input))
             app.button(key="record_manager_browse_all").click().run()
             app.selectbox(key="record_manager_dataset").set_value("title:Original").run()

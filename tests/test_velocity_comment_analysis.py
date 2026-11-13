@@ -275,7 +275,8 @@ class AnalysisUITests(fixtures.VelocityUITests):
             next(button for button in app.button if button.label.startswith("Open Velocity")).click().run()
             self.assertFalse(list(app.exception))
             self.assertEqual([tab.label for tab in app.tabs], ["Velocity", "Analysis"])
-            self.assertFalse(any(button.label in {"Run", "Edit remarks"} for button in app.button))
+            self.assertFalse(any(button.label in {"Run", "Write remark"} for button in app.button))
+            self.assertTrue(any("Only the card's creator can write remarks" in el.value for el in app.caption))
             self.assertTrue(any('50.0%' in el.proto.body for el in app.get("html")))
 
 

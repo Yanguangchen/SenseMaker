@@ -1692,6 +1692,7 @@ def _open_focus_modal(name: str) -> None:
     st.session_state[FOCUS_MODAL_KEY] = name
     st.session_state[f"{name}_wizard_visited"] = True
     st.session_state["x_focus_open"] = False  # Streamlit allows one open dialog per run.
+    st.session_state.pop("record_manager_modal", None)
 
 
 def _close_focus_modal() -> None:
@@ -2197,6 +2198,7 @@ def _set_x_collection_step(step: int) -> None:
 
 def _open_x_collection_dialog() -> None:
     _close_focus_modal()
+    st.session_state.pop("record_manager_modal", None)
     st.session_state["x_focus_open"] = True
 
 
@@ -2535,14 +2537,14 @@ def _render_analysis_tab(user_email: str) -> list[str] | None:
         if _focus_modal_open("analysis"):
             _analysis_steps_modal(user_email, picked, index, status_filter, load_limit, provider, provider_label)
         else:
-            _render_analysis_overview(picked, index, provider_label)
+            _render_analysis_overview(picked, index)
         _render_analysis_results()
         picked = _analysis_selection()
         _render_analysis_processed_section(picked, status_filter, load_limit)
     return picked["sources"]
 
 
-def _render_analysis_overview(picked: Dict[str, Any], index: int, provider_label: str) -> None:
+def _render_analysis_overview(picked: Dict[str, Any], index: int) -> None:
     with st.container(border=True, key="analysis_overview"):
         st.markdown("#### Guided analysis")
         if picked["use_recent"]:
@@ -2553,10 +2555,6 @@ def _render_analysis_overview(picked: Dict[str, Any], index: int, provider_label
             st.caption(f"Data: {len(picked['datasets'])} saved dataset"
                        f"{'s' if len(picked['datasets']) != 1 else ''} from "
                        f"{len(picked['sources'])} source{'s' if len(picked['sources']) != 1 else ''}.")
-        else:
-            st.caption("Data: not chosen yet. The first step picks the records to analyze.")
-        loaded = _loaded_analysis_rows(picked)
-        st.caption(f"{len(loaded)} record{'s' if len(loaded) != 1 else ''} available · AI provider: {provider_label}")
         _render_focus_trigger("analysis", ANALYSIS_STEPS, index, "Start sentiment analysis")
 
 
@@ -2827,7 +2825,7 @@ def main() -> None:
         _render_scrape_workspace(user_email, facebook_session)
 
     with records_tab:
-        render_record_management()
+        render_record_management(user_email)
 
     with analysis_tab:
         _render_analysis_tab(user_email)

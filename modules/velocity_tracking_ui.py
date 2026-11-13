@@ -28,7 +28,6 @@ PAPER_CSS = Path(__file__).parent / "theme" / "velocity-notepad.css"
 NOTIFY_JS = Path(__file__).parent / "theme" / "run-notifications.js"
 MODAL_KEY = "velocity_open_notepad"
 REMARK_MODAL_KEY = "velocity_open_remarks"
-ANALYSIS_TAB_KEY = "velocity_show_analysis"
 # One printed PDF at a time: (card id, document digest, bytes).
 PDF_KEY = "velocity_card_pdf"
 
@@ -113,7 +112,6 @@ def _render_run_notifications(email: str, key: str) -> None:
 def _close_card() -> None:
     st.session_state.pop(MODAL_KEY, None)
     st.session_state.pop(REMARK_MODAL_KEY, None)
-    st.session_state.pop(ANALYSIS_TAB_KEY, None)
     st.session_state.pop(PDF_KEY, None)
 
 
@@ -122,6 +120,7 @@ def _open_card(email: str, card_id: str) -> None:
     st.session_state[MODAL_KEY] = {"owner": library_owner_id(email), "card_id": card_id}
     # Streamlit supports one dialog at a time; source collectors stay mounted.
     st.session_state.pop("focus_workspace_modal", None)
+    st.session_state.pop("record_manager_modal", None)
     st.session_state["x_focus_open"] = False
 
 
@@ -298,7 +297,6 @@ def _render_card_history(email: str, card: dict, state: dict, name: str) -> None
 
 def _close_remarks() -> None:
     st.session_state.pop(REMARK_MODAL_KEY, None)
-    st.session_state[ANALYSIS_TAB_KEY] = True
 
 
 @st.dialog("Remarks", width="large", on_dismiss=_close_remarks)
@@ -346,18 +344,20 @@ def _render_remarks(card: dict, state: dict, card_key: str) -> None:
     posts = store.card_posts(card)
     if not posts:
         return
+    st.markdown("**Remarks**")
+    if card.get("shared"):
+        st.caption("Only the card's creator can write remarks. Their remarks appear in the Remark column.")
+        return
     by_id = {post["id"]: post for post in posts}
     post_id = st.selectbox("Post for remark", list(by_id), key=f"{card_key}_remark_post",
                            format_func=lambda ident: f"Post {list(by_id).index(ident) + 1} · {by_id[ident]['url']}")
-    if st.button("Edit remarks", key=f"{card_key}_edit_remark", disabled=state["error"]):
+    if st.button("Write remark", key=f"{card_key}_edit_remark", icon=":material/edit_note:", disabled=state["error"]):
         st.session_state[REMARK_MODAL_KEY] = post_id
-        st.session_state[ANALYSIS_TAB_KEY] = True
         st.rerun()
 
 
 def _render_card_tabs(email: str, card: dict, state: dict, card_key: str, name: str) -> None:
-    velocity, analysis = st.tabs(["Velocity", "Analysis"],
-                                 default="Analysis" if st.session_state.get(ANALYSIS_TAB_KEY) else "Velocity")
+    velocity, analysis = st.tabs(["Velocity", "Analysis"])
     with velocity:
         _render_card_history(email, card, state, name)
     with analysis:
@@ -365,8 +365,7 @@ def _render_card_tabs(email: str, card: dict, state: dict, card_key: str, name: 
             st.caption(f"Latest run · {format_time(card['runs'][-1]['at'])}")
         st.html(analysis_table(card))
         st.caption(ANALYSIS_NOTE)
-        if not card.get("shared"):
-            _render_remarks(card, state, card_key)
+    _render_remarks(card, state, card_key)
 
 
 def _render_card(email: str, card: dict, index: int, state: dict, key: str, *, hosted: bool) -> None:
@@ -502,8 +501,6 @@ def render_velocity_workspace(email: str, *, hosted: bool | None = None) -> None
     st.html(CSS_PATH)
     st.html(PAPER_CSS)
     st.subheader("Velocity Tracking")
-    st.caption("Cards and saved results are shared with approved users. Any approved user can remove any card. Run and edit your own cards.")
-    st.caption(schedule.schedule_caption())
     _render_run_notifications(email, key)
     toolbar = st.container(horizontal=True, vertical_alignment="center", key="sm_velocity_toolbar")
     create_slot = toolbar.empty()

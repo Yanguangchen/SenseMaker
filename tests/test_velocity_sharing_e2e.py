@@ -101,7 +101,7 @@ class VelocitySharingE2E(unittest.TestCase):
             expect(viewer.locator('th[data-run-id]')).to_have_count(10)
             expect(viewer.get_by_role('cell', name='1,003', exact=True)).to_be_visible()
             expect(viewer.get_by_role('button', name='Refresh results', exact=True)).to_be_visible()
-            for label in ['Run', 'Remove card', 'Create share link', 'Revoke share link', 'Save name', 'Edit remarks']:
+            for label in ['Run', 'Remove card', 'Create share link', 'Revoke share link', 'Save name', 'Write remark']:
                 expect(viewer.get_by_role('button', name=label, exact=True)).to_have_count(0)
             for private in ['PRIVATE OTHER CARD', 'PRIVATE RAW COMMENT', 'owner@example.com']:
                 expect(viewer.get_by_text(private, exact=False)).to_have_count(0)

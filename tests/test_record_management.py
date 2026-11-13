@@ -14,6 +14,58 @@ from modules.record_management_ui import featured_datasets, filter_records
 from modules.record_state import purge_record_caches
 
 
+MODAL_OPENERS = {
+    **dict.fromkeys(("record_manager_dataset", "record_manager_platform", "record_manager_status",
+                     "record_manager_search", "record_manager_page_size"), "record_manager_filters_open"),
+    **dict.fromkeys(("record_manager_selection", "record_manager_select_all", "record_manager_clear",
+                     "record_manager_review", "record_manager_confirm", "record_manager_cancel"),
+                    "record_manager_delete_open"),
+    "record_manager_dataset_search": "record_manager_dataset_filters_open",
+}
+
+
+class _Widgets:
+    def __init__(self, app, kind):
+        self.app, self.kind = app, kind
+
+    def widgets(self):
+        return getattr(self.app.app, self.kind)
+
+    def __call__(self, key):
+        try:
+            return self.widgets()(key=key)
+        except KeyError:
+            if key not in MODAL_OPENERS:
+                raise
+        self.app.app.button(key=MODAL_OPENERS[key]).click().run()
+        return self.widgets()(key=key)
+
+    def __iter__(self):
+        return iter(self.widgets())
+
+    def __len__(self):
+        return len(self.widgets())
+
+    def __getitem__(self, index):
+        return self.widgets()[index]
+
+
+class ModalAppTest:
+    """Open the filter or delete dialog before using a widget that lives in it."""
+
+    def __init__(self, app):
+        self.app = app
+
+    def __getattr__(self, name):
+        if name in {"button", "selectbox", "multiselect", "text_input"}:
+            return _Widgets(self, name)
+        return getattr(self.app, name)
+
+    def run(self, **kwargs):
+        self.app.run(**kwargs)
+        return self
+
+
 def record(ident, **extra):
     return {"_id": ident, "_version": "2026-11-03T00:00:00+00:00", "custom_title": "Campaign A",
             "title": "Page " + ident, "url": f"https://example.com/{ident}", "source_type": "website_page",
@@ -238,7 +290,7 @@ class RecordManagementUITests(unittest.TestCase):
         self.delete_dataset = patch("modules.record_management_ui.delete_dataset_records").start()
         self.delete_datasets = patch("modules.record_management_ui.delete_datasets_records").start()
         self.addCleanup(patch.stopall)
-        self.app = AppTest.from_string(self.script).run()
+        self.app = ModalAppTest(AppTest.from_string(self.script)).run()
 
     def loaded(self):
         self.app.button(key="record_manager_refresh").click().run()
@@ -256,9 +308,9 @@ class RecordManagementUITests(unittest.TestCase):
         self.assertEqual(len(self.app.dataframe), 0)
         self.assertEqual(len([button for button in self.app.button if "card_featured" in button.key]), 2)
         self.assertEqual(len([button for button in self.app.tabs[1].button if "card_search" in button.key]), 2)
-        self.assertEqual(self.app.tabs[1].expander[0].label, "Show / hide filters")
-        self.assertFalse(self.app.tabs[1].expander[0].proto.expanded)
-        self.assertFalse(self.app.multiselect)
+        self.assertEqual(self.app.tabs[1].button(key="record_manager_dataset_filters_open").help, "Filter datasets")
+        self.assertNotIn("record_manager_dataset_search", [field.key for field in self.app.text_input])
+        self.assertFalse(len(self.app.multiselect))
         self.app.run()
         self.load.assert_called_once_with("db")
         self.app.button(key="record_manager_browse_all").click().run()
@@ -536,9 +588,9 @@ class RecordManagementUITests(unittest.TestCase):
         self.assertEqual([row["_id"] for row in self.app.session_state["record_manager_rows"]], ["a", "c"])
         self.assertEqual([row["_id"] for row in self.app.session_state["firestore_rows"]], ["a", "c"])
         self.assertEqual(self.app.dataframe[0].value["ID"].tolist(), ["a"])
+        self.assertIn("Deleted 1", self.app.success[0].value)
         self.assertEqual(self.app.selectbox(key="record_manager_dataset").value, "title:Campaign A")
         self.assertNotIn("record_manager_row_pending", self.app.session_state)
-        self.assertIn("Deleted 1", self.app.success[0].value)
 
     def test_row_cancel_and_switching_rows_never_delete(self):
         self.loaded()

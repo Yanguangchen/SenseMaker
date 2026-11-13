@@ -19,6 +19,8 @@ from modules.signals import NON_CONTENT_TYPES
 
 DATASET_SELECTION = "record_manager_datasets_to_delete"
 DATASET_REVIEW = "datasets_delete_pending"
+MODAL_KEY = "record_manager_modal"
+FILTER_KEYS = ("record_manager_dataset_search", "record_manager_search", "record_manager_page_size")
 
 
 def source_label(row: dict) -> str:
@@ -66,6 +68,34 @@ def _clear_selection() -> None:
     _clear_deletion_reviews()
 
 
+def _open_modal(name: str) -> None:
+    st.session_state[MODAL_KEY] = name
+    # Streamlit supports one dialog at a time.
+    st.session_state.pop("focus_workspace_modal", None)
+    st.session_state["x_focus_open"] = False
+
+
+def _close_modal() -> None:
+    st.session_state.pop(MODAL_KEY, None)
+
+
+def _close_modal_and_rerun() -> None:
+    _close_modal()
+    st.rerun()
+
+
+def _verify_dialog_access(user_email: str) -> None:
+    # Dialog widgets rerun independently of the dashboard's sign-in gate.
+    if not user_email:
+        return
+    from modules.auth import allowed_emails, verify_access
+    try:
+        if verify_access(st.session_state.get("auth_token", ""), allowed_emails()) != user_email:
+            raise PermissionError()
+    except Exception:
+        _close_modal_and_rerun()
+
+
 def _select_page_records(ids: list[str]) -> None:
     _clear_selection()
     st.session_state["record_manager_selection"] = ids
@@ -92,7 +122,7 @@ def _delete_reviewed_records(versions: dict[str, str]) -> None:
             st.session_state["record_manager_needs_refresh"] = True
         st.session_state["record_manager_notice"] = result
     _clear_deletion_reviews()
-    st.rerun()
+    _close_modal_and_rerun()
 
 
 def _render_record_rows(rows: list[dict]) -> None:
@@ -126,6 +156,7 @@ def _render_record_rows(rows: list[dict]) -> None:
 
 def _open_dataset(dataset: str | None) -> None:
     _clear_selection()
+    _close_modal()
     st.session_state.update(record_manager_details=True, record_manager_dataset=dataset,
                             record_manager_platform=None, record_manager_status=None,
                             record_manager_search="", record_manager_page=1)
@@ -133,6 +164,7 @@ def _open_dataset(dataset: str | None) -> None:
 
 def _back_to_datasets() -> None:
     _clear_selection()
+    _close_modal()
     st.session_state["record_manager_details"] = False
 
 
@@ -227,7 +259,7 @@ def _render_datasets_deletion(rows: list[dict], groups: list[dict]) -> None:
         cancel.button("Cancel dataset deletion", key="record_manager_datasets_cancel", on_click=_clear_deletion_reviews)
 
 
-def _render_dataset_browser(rows: list[dict], groups: list[dict]) -> None:
+def _render_dataset_browser(rows: list[dict], groups: list[dict], user_email: str) -> None:
     local_tz = viewer_timezone()
     apply_dataset_card_theme()
     if st.toggle("Select datasets to delete", key="record_manager_dataset_delete_mode", on_change=_clear_dataset_selection):
@@ -241,7 +273,7 @@ def _render_dataset_browser(rows: list[dict], groups: list[dict]) -> None:
             st.caption(f"No datasets saved today. Showing the {len(featured)} latest datasets · Times in {local_tz}")
         _render_dataset_cards(featured, "featured", local_tz)
     with find_tab:
-        _render_dataset_search(rows, groups, local_tz)
+        _render_dataset_search(rows, groups, local_tz, user_email)
 
 
 def _set_dataset_page(page: int) -> None:
@@ -270,11 +302,24 @@ def _render_dataset_pagination(page: int, total: int) -> None:
                   on_click=_set_dataset_page, args=(page + 1,))
 
 
-def _render_dataset_search(rows: list[dict], groups: list[dict], local_tz) -> None:
-    with st.expander("Show / hide filters", expanded=False):
-        search = st.text_input("Search datasets", key="record_manager_dataset_search", max_chars=200,
-                               placeholder="Search by dataset name, page title, URL or record ID")
+@st.dialog("Filter datasets", on_dismiss=_close_modal)
+def _dataset_filters_modal(user_email: str) -> None:
+    _verify_dialog_access(user_email)
+    st.text_input("Search datasets", key="record_manager_dataset_search", max_chars=200,
+                  placeholder="Search by dataset name, page title, URL or record ID")
+    if st.button("Show datasets", key="record_manager_dataset_filters_apply", type="primary", width="stretch"):
+        _close_modal_and_rerun()
+
+
+def _render_dataset_search(rows: list[dict], groups: list[dict], local_tz, user_email: str) -> None:
+    search = str(st.session_state.get("record_manager_dataset_search") or "")
     query = search.strip()
+    with st.container(horizontal=True, vertical_alignment="center", key="record_manager_dataset_toolbar"):
+        st.button("", icon=":material/filter_list:", key="record_manager_dataset_filters_open",
+                  help="Filter datasets", on_click=_open_modal, args=("dataset_filters",))
+        st.caption(f'Search: "{query}"' if query else "No filters applied")
+    if st.session_state.get(MODAL_KEY) == "dataset_filters":
+        _dataset_filters_modal(user_email)
     if query:
         keys = {dataset_key(row) for row in filter_records(rows, None, None, None, search)}
         matches = [group for group in groups if group["key"] in keys]
@@ -286,7 +331,7 @@ def _render_dataset_search(rows: list[dict], groups: list[dict], local_tz) -> No
     scope = "matching datasets" if query else "datasets"
     st.caption(f"{len(matches)} {scope} · {sum(group['count'] for group in matches):,} records · Newest first")
     if not matches:
-        st.info("No datasets match your search. Open Show / hide filters to change or clear your search.")
+        st.info("No datasets match your search. Use the filter icon to change or clear your search.")
     else:
         pages = list(range(1, ceil(len(matches) / 12) + 1))
         if st.session_state.get("record_manager_dataset_page") not in pages:
@@ -383,7 +428,7 @@ def _render_dataset_rename(rows: list[dict], dataset: str | None) -> None:
             st.rerun()
 
 
-def render_record_management() -> None:
+def render_record_management(user_email: str = "") -> None:
     renamed = st.session_state.pop("record_manager_renamed_dataset", None)
     if renamed:
         st.session_state["record_manager_dataset"] = renamed
@@ -399,9 +444,10 @@ def render_record_management() -> None:
             st.warning(f"Renamed {len(result['renamed'])} records. "
                        f"{len(result['skipped'])} changed, {len(result['missing'])} were removed, "
                        f"and {len(result['unconfirmed'])} could not be confirmed. Refresh and review the remaining records before retrying.")
-    # Preserve the search when its widget is temporarily hidden by dataset details.
-    if "record_manager_dataset_search" in st.session_state:
-        st.session_state["record_manager_dataset_search"] = st.session_state["record_manager_dataset_search"]
+    # Filter widgets live in dialogs, so keep their values while the dialogs are closed.
+    for key in FILTER_KEYS:
+        if key in st.session_state:
+            st.session_state[key] = st.session_state[key]
     collection = get_setting("FIREBASE_COLLECTION", "raw_posts") or "raw_posts"
     if st.session_state.get("record_manager_collection") != collection:
         st.session_state.pop("record_manager_rows", None)
@@ -492,7 +538,7 @@ def render_record_management() -> None:
 
     dataset_groups = dataset_options(rows, None)
     if not st.session_state.get("record_manager_details"):
-        _render_dataset_browser(rows, dataset_groups)
+        _render_dataset_browser(rows, dataset_groups, user_email)
         return
     st.button("Back to datasets", key="record_manager_back", on_click=_back_to_datasets)
     groups = {group["key"]: group for group in dataset_groups}
@@ -519,18 +565,14 @@ def render_record_management() -> None:
             # Writing the value preserves it when Streamlit recreates a widget
             # whose options changed; relying on the old widget state resets it.
             st.session_state[key] = current
-    first, second, third = st.columns(3)
-    dataset = first.selectbox("Dataset", [None, *groups], key="record_manager_dataset", placeholder="All datasets",
-                              format_func=lambda key: "All datasets" if key is None else
-                              f"{groups[key]['title']} · {dataset_date_label(groups[key])}")
+    st.session_state.setdefault("record_manager_page_size", 50)
+    dataset = st.session_state.get("record_manager_dataset")
+    platform = st.session_state.get("record_manager_platform")
+    status = st.session_state.get("record_manager_status")
+    search = str(st.session_state.get("record_manager_search") or "")
+    per_page = st.session_state["record_manager_page_size"]
+    toolbar = st.container(horizontal=True, vertical_alignment="center", key="record_manager_toolbar")
     _render_dataset_rename(rows, dataset)
-    platform = second.selectbox("Source", [None, *platforms], key="record_manager_platform", placeholder="All sources",
-                                format_func=lambda value: value or "All sources")
-    status = third.selectbox("Status", [None, *statuses], key="record_manager_status", placeholder="All statuses",
-                             format_func=lambda value: value or "All statuses")
-    search = st.text_input("Search records", key="record_manager_search", max_chars=200,
-                           placeholder="Dataset, page title, URL or record ID")
-    per_page = st.selectbox("Records per page", [25, 50, 100, 200], index=1, key="record_manager_page_size")
     context = (collection, dataset, platform, status, search, per_page)
     if st.session_state.get("record_manager_context") != context:
         _clear_selection()
@@ -547,15 +589,50 @@ def render_record_management() -> None:
     if st.session_state.get("record_manager_view") != view:
         _clear_selection()
         st.session_state["record_manager_view"] = view
+    filters = [platform or "All sources", status or "All statuses"] + ([f'"{search.strip()}"'] if search.strip() else [])
+    toolbar.button("", icon=":material/filter_list:", key="record_manager_filters_open", help="Filter records",
+                   on_click=_open_modal, args=("record_filters",))
+    toolbar.button("", icon=":material/delete_sweep:", key="record_manager_delete_open",
+                   help="Delete multiple records", disabled=not visible, on_click=_open_modal, args=("delete_records",))
+    toolbar.caption(" · ".join(filters))
     st.caption(f"{len(rows)} saved records · {len(matching)} match your filters · {len(visible)} on this page")
     _render_dataset_deletion(rows, dataset)
     if not visible:
-        st.info("No records match. Try another dataset, source, status or search.")
-        return
-    _render_record_rows(visible)
-    with st.expander("View record table"):
-        st.dataframe(_table(visible), hide_index=True, width="stretch")
-    st.subheader("Delete multiple records")
+        st.info("No records match. Use the filter icon to try another dataset, source, status or search.")
+    else:
+        _render_record_rows(visible)
+        with st.expander("View record table"):
+            st.dataframe(_table(visible), hide_index=True, width="stretch")
+    if st.session_state.get(MODAL_KEY) == "record_filters":
+        _record_filters_modal(user_email, groups, platforms, statuses)
+    elif st.session_state.get(MODAL_KEY) == "delete_records" and visible:
+        _delete_records_modal(user_email, visible)
+
+
+@st.dialog("Filter records", on_dismiss=_close_modal)
+def _record_filters_modal(user_email: str, groups: dict, platforms: list[str], statuses: list[str]) -> None:
+    _verify_dialog_access(user_email)
+    st.selectbox("Dataset", [None, *groups], key="record_manager_dataset", placeholder="All datasets",
+                 format_func=lambda key: "All datasets" if key is None else
+                 f"{groups[key]['title']} · {dataset_date_label(groups[key])}")
+    st.selectbox("Source", [None, *platforms], key="record_manager_platform", placeholder="All sources",
+                 format_func=lambda value: value or "All sources")
+    st.selectbox("Status", [None, *statuses], key="record_manager_status", placeholder="All statuses",
+                 format_func=lambda value: value or "All statuses")
+    st.text_input("Search records", key="record_manager_search", max_chars=200,
+                  placeholder="Dataset, page title, URL or record ID")
+    st.selectbox("Records per page", [25, 50, 100, 200], key="record_manager_page_size")
+    if st.button("Show records", key="record_manager_filters_apply", type="primary", width="stretch"):
+        _close_modal_and_rerun()
+
+
+def _cancel_record_deletion() -> None:
+    st.session_state.pop("record_manager_pending", None)
+
+
+@st.dialog("Delete multiple records", width="large", on_dismiss=_close_modal)
+def _delete_records_modal(user_email: str, visible: list[dict]) -> None:
+    _verify_dialog_access(user_email)
     options = {row["_id"]: row for row in visible}
     if "record_manager_selection" in st.session_state:
         st.session_state["record_manager_selection"] = [ident for ident in st.session_state["record_manager_selection"]
@@ -564,7 +641,7 @@ def render_record_management() -> None:
     select.button("Select all records on this page", key="record_manager_select_all",
                   on_click=_select_page_records, args=(list(options),))
     clear.button("Clear selection", key="record_manager_clear", on_click=_clear_selection)
-    selected = st.multiselect("Records to delete", list(options), default=[], key="record_manager_selection",
+    selected = st.multiselect("Records to delete", list(options), key="record_manager_selection",
                               on_change=_clear_deletion_reviews,
                               format_func=lambda ident: f"{str(options[ident].get('title') or options[ident].get('url') or ident)[:100]} · {ident[:8]}")
     # Recheck the membership even if widget state contains IDs from another page.
@@ -587,6 +664,4 @@ def render_record_management() -> None:
             confirm, cancel = st.columns(2)
             if confirm.button(f"Permanently delete {len(pending)} record(s)", key="record_manager_confirm", type="primary"):
                 _delete_reviewed_records(pending)
-            if cancel.button("Cancel deletion", key="record_manager_cancel"):
-                st.session_state.pop("record_manager_pending", None)
-                st.rerun()
+            cancel.button("Cancel deletion", key="record_manager_cancel", on_click=_cancel_record_deletion)
