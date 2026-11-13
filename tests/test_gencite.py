@@ -93,11 +93,42 @@ class TransportTests(unittest.TestCase):
         config = body["generationConfig"]
         self.assertEqual(config["responseMimeType"], "application/json")
         self.assertEqual(config["thinkingConfig"], {"thinkingBudget": 0})
-        self.assertEqual(config["responseJsonSchema"]["properties"]["variations"]["minItems"], 50)
+        sent_schema = config["responseJsonSchema"]["properties"]["variations"]
+        self.assertNotIn("minItems", sent_schema)
+        self.assertEqual(sent_schema["items"]["properties"]["tag"]["enum"], list(gencite.ALLOWED_TAGS))
         self.assertIn('"crm software"', body["contents"][0]["parts"][0]["text"])
+        self.assertIn("exactly 50", body["contents"][0]["parts"][0]["text"])
         self.assertEqual((outcome["provider"], outcome["model"], outcome["fallback"]),
                          ("gemini", "gemini-2.5-flash", False))
         self.assertEqual(len(outcome["variations"]), 50)
+
+    def test_gemini_schemas_drop_counts_and_ranges_but_keep_shape_and_enums(self):
+        def keywords_in(node):
+            if isinstance(node, list):
+                return set().union(*map(keywords_in, node)) if node else set()
+            if not isinstance(node, dict):
+                return set()
+            found = set(node) - {"properties"}
+            for key, value in node.items():
+                found |= set().union(*map(keywords_in, value.values())) if key == "properties" else keywords_in(value)
+            return found
+
+        schemas = {"variations": gencite._variation_schema(), "analysis": gencite._analysis_schema(10),
+                   "recommendations": gencite._recommendation_schema(10), "keywords": gencite._keyword_schema(10)}
+        for name, schema in schemas.items():
+            with self.subTest(schema=name):
+                original = json.dumps(schema)
+                sent = gencite._gemini_schema(schema)
+                self.assertEqual(json.dumps(schema), original)  # the caller's schema is not modified
+                self.assertFalse(keywords_in(sent) & gencite.GEMINI_DROPPED_SCHEMA_KEYS)
+                self.assertTrue(keywords_in(schema) & gencite.GEMINI_DROPPED_SCHEMA_KEYS)
+                self.assertEqual(sent["required"], schema["required"])
+        keyword_item = gencite._gemini_schema(schemas["keywords"])["properties"]["keywords"]["items"]
+        self.assertEqual(keyword_item["properties"]["coverage"]["enum"], list(gencite.COVERAGE_LEVELS))
+        self.assertEqual(keyword_item["properties"]["relevance"], {"type": "integer"})
+        self.assertEqual(gencite._gemini_schema({"type": "object", "properties": {"maximum": {"type": "integer",
+                                                                                              "maximum": 5}}}),
+                         {"type": "object", "properties": {"maximum": {"type": "integer"}}})
 
     def test_thinking_stays_on_for_other_gemini_families(self):
         self.assertTrue(gencite._disables_thinking("models/gemini-2.5-flash-lite"))
@@ -128,7 +159,10 @@ class TransportTests(unittest.TestCase):
              patch("modules.openai.urlopen", return_value=openai_reply(variations())) as request:
             outcome = gencite.generate_variations("crm software")
             self.assertEqual((outcome["provider"], outcome["model"]), ("openai", "gpt-4.1-mini"))
-            self.assertEqual(json.loads(request.call_args.args[0].data)["model"], "gpt-4.1-mini")
+            body = json.loads(request.call_args.args[0].data)
+            self.assertEqual(body["model"], "gpt-4.1-mini")
+            # OpenAI strict mode supports item counts, so ChatGPT keeps the full schema.
+            self.assertEqual(body["text"]["format"]["schema"]["properties"]["variations"]["minItems"], 50)
         with patch.dict(os.environ, {"GEMINI_KEY": "", "GEMINI_API_KEY": "", "OPENAI_API_KEY": ""}), \
              patch("streamlit.secrets", {}):
             outcome = gencite.generate_variations("crm software")
@@ -581,7 +615,7 @@ class ProviderCheckTests(unittest.TestCase):
         config = json.loads(sent.data)["generationConfig"]
         self.assertEqual((config["temperature"], config["maxOutputTokens"], config["thinkingConfig"]),
                          (0.9, 12000, {"thinkingBudget": 0}))
-        self.assertEqual(config["responseJsonSchema"]["properties"]["results"]["minItems"], 1)
+        self.assertNotIn("minItems", config["responseJsonSchema"]["properties"]["results"])
         self.assertTrue(sent.full_url.endswith("/models/gemini-2.5-flash:generateContent"))
         self.assertNotIn("private-gemini", repr(report))
 
