@@ -111,11 +111,37 @@ def _disables_thinking(model: str) -> bool:
     return re.fullmatch(r"(?:models/)?gemini-2\.5-flash(?:-lite)?(?:-[\w.-]+)?", model) is not None
 
 
+# Gemini compiles a response schema into a decoding state machine and rejects one
+# over an undocumented budget with HTTP 400 ("too many states for serving"). Array
+# lengths (50 variations; 10 queries x 5 answers) and integer ranges cost the most,
+# so Gemini gets only the shape, field names and enums. The prompts still ask for
+# the exact counts and ranges, and every validator enforces them, as for the main
+# analysis schema in modules.processor.
+GEMINI_DROPPED_SCHEMA_KEYS = frozenset({"minItems", "maxItems", "minimum", "maximum"})
+
+
+def _gemini_schema(node: Any) -> Any:
+    if isinstance(node, list):
+        return [_gemini_schema(item) for item in node]
+    if not isinstance(node, dict):
+        return node
+    schema: Dict[str, Any] = {}
+    for key, value in node.items():
+        if key in GEMINI_DROPPED_SCHEMA_KEYS:
+            continue
+        if key == "properties" and isinstance(value, dict):
+            # Property names are data, not keywords: keep a field called "maximum".
+            schema[key] = {name: _gemini_schema(sub) for name, sub in value.items()}
+        else:
+            schema[key] = _gemini_schema(value)
+    return schema
+
+
 def _call_json(provider: str, api_key: str, model: str, prompt: str, schema: Dict[str, Any], *,
                temperature: float, max_output_tokens: int, timeout: float) -> Dict[str, Any]:
     """One structured-output request; raises AIError/ValueError with safe messages."""
     if provider == "gemini":
-        config: Dict[str, Any] = {"responseJsonSchema": schema, "temperature": temperature,
+        config: Dict[str, Any] = {"responseJsonSchema": _gemini_schema(schema), "temperature": temperature,
                                   "maxOutputTokens": max_output_tokens}
         if _disables_thinking(model):
             config["thinkingConfig"] = {"thinkingBudget": 0}
