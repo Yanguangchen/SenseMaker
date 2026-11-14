@@ -124,6 +124,7 @@ def _open_card(email: str, card_id: str) -> None:
     # Streamlit supports one dialog at a time; source collectors stay mounted.
     st.session_state.pop("focus_workspace_modal", None)
     st.session_state.pop("record_manager_modal", None)
+    st.session_state.pop("gencite_analysis_modal", None)
     st.session_state["x_focus_open"] = False
 
 

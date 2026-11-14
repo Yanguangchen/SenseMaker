@@ -71,7 +71,8 @@ def _clear_selection() -> None:
 def _open_modal(name: str) -> None:
     st.session_state[MODAL_KEY] = name
     # Streamlit supports one dialog at a time.
-    st.session_state.pop("focus_workspace_modal", None)
+    for key in ("focus_workspace_modal", "velocity_open_notepad", "gencite_analysis_modal"):
+        st.session_state.pop(key, None)
     st.session_state["x_focus_open"] = False
 
 

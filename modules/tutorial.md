@@ -299,13 +299,15 @@ Open **GenCite** in the sidebar to measure how often **Gemini** and **ChatGPT** 
 
 ### Provider status & access check
 
-At the top of **GenCite**, check which models and server keys are active for **Gemini** and **ChatGPT**. Expand **Check provider access** and click **Run check** to send a small test query to each configured provider and verify structured output support before running a full batch.
+At the top of **GenCite**, expand **Check provider access** and click **Run check** to send a small test query to each configured provider and verify structured output support before running a full batch.
 
 ### 1. Analyze tab (3-step workflow)
 
-1. **1 · Topic:** Enter a **Query or topic** (e.g., `bottled green tea brands in Cambodia`) and click **Generate query variations** (or **Continue to queries** if variations are already loaded).
-2. **2 · Queries to test:** Review the interactive table (`Test`, `Query`, `Intent`). Edit query wording, add custom rows, or use **Select all** / **Clear selection** to pick up to **50** queries. Each selected query is answered **3 times** by every selected provider. Click **Continue to brand** (or **Back to topic**).
-3. **3 · Brand:** Enter **Brand to track**, plus optional comma-separated **Aliases** (up to 8), **Competitors** (up to 8), **Market**, and **Region**. Select **Providers** (**Gemini**, **ChatGPT**) and click **Run analysis on … queries** (or **Back to queries**).
+Click **Start analysis** to open the setup in a modal. The Analyze tab itself shows the results.
+
+1. **1 · Provoker Signals:** Enter the **Provoker Signals** (e.g., `ThaiBev, Thailand, Thai, Boycotts`) and click **Generate query variations** (or **Continue to queries** if variations are already loaded).
+2. **2 · Queries to test:** Review the interactive table (`Test`, `Query`, `Intent`). Edit query wording, add custom rows, or use **Select all** / **Clear selection** to pick up to **50** queries. Each selected query is answered **3 times** by every selected provider. Click **Continue to brand** (or **Back to provoker signals**).
+3. **3 · Brand:** The **Brand to track** is always **Oyoshi Cambodia**. Add optional comma-separated **Aliases** (up to 8), **Competitors** (up to 8), **Market**, and **Region**. Select **Providers** (**Gemini**, **ChatGPT**) and click **Run analysis on … queries** (or **Back to queries**).
 4. **Share of voice results:** Review overall **Share of voice (%)**, **Answers mentioning brand**, **Queries**, **Sampling rounds**, per-model metrics, and the per-query chart and progress table. Click **Run again** to sample another round and merge the new answers into the cumulative totals, or enter an **Analysis name** and click **Save analysis**.
 
 ### 2. Recommendations tab

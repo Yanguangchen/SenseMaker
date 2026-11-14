@@ -12,7 +12,7 @@ import streamlit as st
 from modules import database
 from modules import gencite
 from modules import gencite_store as store
-from modules.config import AI_PROVIDERS, get_ai_key
+from modules.config import AI_PROVIDERS
 
 log = logging.getLogger(__name__)
 
@@ -26,8 +26,11 @@ KEYWORDS = "gencite_keywords"
 FLASH = "gencite_flash"
 QUEUED = "gencite_queued_keywords"
 STEP = "gencite_step"
-STEPS = ("Topic", "Queries to test", "Brand")
-INPUT_KEYS = ("gencite_query", "gencite_brand", "gencite_aliases", "gencite_competitors",
+SIGNALS = "Provoker Signals"
+STEPS = (SIGNALS, "Queries to test", "Brand")
+ANALYSIS_MODAL = "gencite_analysis_modal"
+BRAND = "Oyoshi Cambodia"
+INPUT_KEYS = ("gencite_query", "gencite_aliases", "gencite_competitors",
               "gencite_market", "gencite_region", "gencite_providers")
 
 
@@ -118,11 +121,6 @@ def _run(brand: str, queries: List[str], previous: Optional[Dict[str, Any]], con
 # --- Analyze ----------------------------------------------------------------------
 
 def _render_provider_status() -> None:
-    parts = []
-    for provider, label in AI_PROVIDERS.items():
-        model = gencite.provider_model(provider)
-        parts.append(f"{label} · {model} · {'key set' if get_ai_key(provider) else 'not configured'}")
-    st.caption("Providers: " + "  |  ".join(parts))
     with st.expander("Check provider access"):
         st.caption("Sends one small GenCite request with each configured server key to confirm the key can use "
                    "GenCite's model and structured answers. It cannot show remaining daily quota.")
@@ -141,9 +139,10 @@ def _render_provider_status() -> None:
 
 def _render_topic() -> None:
     with st.container(border=True, key="gencite_topic"):
-        st.markdown("**1 · Topic**")
-        query = st.text_input("Query or topic", key="gencite_query", max_chars=gencite.MAX_QUERY_CHARS,
-                              placeholder="e.g. project management software for agencies")
+        st.markdown(f"**1 · {SIGNALS}**")
+        query = st.text_input(SIGNALS, key="gencite_query", max_chars=gencite.MAX_QUERY_CHARS,
+                              placeholder="e.g. ThaiBev, Thailand, Thai, Boycotts",
+                              help="The names, places and themes that provoke the conversation, separated by commas.")
         if st.button("Generate query variations", key="gencite_generate_variations",
                      type="primary", disabled=not query.strip()):
             with st.spinner("Generating query variations…"):
@@ -208,7 +207,7 @@ def _render_brand() -> None:
     with st.container(border=True, key="gencite_brand_settings"):
         st.markdown("**3 · Brand**")
         brand_col, alias_col = st.columns(2)
-        brand_col.text_input("Brand to track", key="gencite_brand", max_chars=gencite.MAX_BRAND_CHARS)
+        brand_col.text_input("Brand to track", value=BRAND, disabled=True)
         alias_col.text_input("Aliases (optional, comma-separated)", key="gencite_aliases",
                              help=f"Other names that count as a brand mention, up to {gencite.MAX_NAMES}.")
         st.text_input("Competitors (optional, comma-separated)", key="gencite_competitors",
@@ -290,45 +289,86 @@ def _render_result(email: str) -> None:
             st.success(f"Saved as “{record['name']}”.")
 
 
-def _render_analyze(email: str) -> None:
-    # Streamlit otherwise discards inputs while their step is hidden.
-    for key in INPUT_KEYS:
-        if key in st.session_state:
-            st.session_state[key] = st.session_state[key]
-    step = st.session_state.setdefault(STEP, "Queries to test" if st.session_state.get(ROWS) else "Topic")
-    if step not in STEPS or (step != "Topic" and not st.session_state.get(ROWS)):
-        step = "Topic"
+def _open_analysis() -> None:
+    st.session_state[ANALYSIS_MODAL] = True
+    # Streamlit supports one dialog at a time.
+    for key in ("velocity_open_notepad", "focus_workspace_modal", "record_manager_modal"):
+        st.session_state.pop(key, None)
+    st.session_state["x_focus_open"] = False
+
+
+def _close_analysis() -> None:
+    if st.session_state.get(STEP) == "Queries to test":
+        _set_rows(st.session_state.get("gencite_current_rows", st.session_state.get(ROWS, [])))
+    st.session_state.pop(ANALYSIS_MODAL, None)
+
+
+@st.dialog("New analysis", width="large", on_dismiss=_close_analysis)
+def _analysis_modal(email: str) -> None:
+    # Dialog widgets rerun independently of the dashboard's authorization gate.
+    from modules.auth import allowed_emails, verify_access
+    try:
+        if verify_access(st.session_state.get("auth_token", ""), allowed_emails()) != email:
+            raise PermissionError()
+    except Exception:
+        _close_analysis()
+        st.rerun()
+    _render_steps()
+
+
+def _render_steps() -> None:
+    step = st.session_state.setdefault(STEP, "Queries to test" if st.session_state.get(ROWS) else SIGNALS)
+    if step not in STEPS or (step != SIGNALS and not st.session_state.get(ROWS)):
+        step = SIGNALS
     selected = _selected_queries(st.session_state.get(ROWS, []))
     if step == "Brand" and not 0 < len(selected) <= gencite.MAX_QUERIES:
         step = "Queries to test"
     st.session_state[STEP] = step
     st.caption(f"Step {STEPS.index(step) + 1} of {len(STEPS)} · {step}")
-    if step == "Topic":
+    if step == SIGNALS:
         _render_topic()
     elif step == "Queries to test":
         selected = _render_queries()
         back, next_step = st.columns(2)
-        back.button("Back to topic", key="gencite_back_topic", on_click=_go_to_step, args=("Topic",))
+        back.button(f"Back to {SIGNALS.lower()}", key="gencite_back_topic", on_click=_go_to_step, args=(SIGNALS,))
         next_step.button("Continue to brand", key="gencite_continue_brand", type="primary",
                          disabled=not 0 < len(selected) <= gencite.MAX_QUERIES,
                          on_click=_go_to_step, args=("Brand",))
     else:
         st.caption(f"{len(selected)} selected queries ready to test.")
         _render_brand()
-        brand = st.session_state.get("gencite_brand", "").strip()
-        ready = bool(brand and set(_providers()) & set(gencite.configured_providers()))
+        ready = bool(set(_providers()) & set(gencite.configured_providers()))
         back, run = st.columns(2)
         back.button("Back to queries", key="gencite_back_queries", on_click=_go_to_step, args=("Queries to test",))
         label = f"Run analysis on {len(selected)} quer{'y' if len(selected) == 1 else 'ies'}"
         if run.button(label, key="gencite_run", type="primary", use_container_width=True, disabled=not ready):
-            result = _run(brand, selected, None, _context(), f"Sampling {len(selected)} queries…")
+            result = _run(BRAND, selected, None, _context(), f"Sampling {len(selected)} queries…")
             if result:
                 _set_result(result)
+                _close_analysis()
+                st.rerun()
         if not gencite.configured_providers():
             st.error("No AI provider is configured. Ask the app administrator to set GEMINI_KEY or OPENAI_API_KEY.")
-        elif not brand:
-            st.caption("Enter a brand to run the analysis.")
+
+
+def _render_analyze(email: str) -> None:
+    # Streamlit otherwise discards inputs while the analysis modal is closed.
+    for key in INPUT_KEYS:
+        if key in st.session_state:
+            st.session_state[key] = st.session_state[key]
+    with st.container(horizontal=True, vertical_alignment="center", key="gencite_analyze_toolbar"):
+        st.button("Start analysis", key="gencite_start_analysis", type="primary", icon=":material/play_arrow:",
+                  on_click=_open_analysis)
+        if not st.session_state.get(RESULT):
+            st.caption("Enter provoker signals, pick the queries to test and your brand. Results appear here.")
     _render_result(email)
+    if not st.session_state.get(ANALYSIS_MODAL):
+        return
+    if any(st.session_state.get(key) for key in ("velocity_open_notepad", "focus_workspace_modal",
+                                                 "record_manager_modal", "x_focus_open")):
+        _close_analysis()
+        return
+    _analysis_modal(email)
 
 
 # --- Recommendations ----------------------------------------------------------------
@@ -506,7 +546,6 @@ def _open_saved(email: str, analysis_id: str) -> None:
         _set_result({k: v for k, v in record.items() if k not in ("id", "name", "savedAt", "queryCount")},
                     {"name": record["name"], "savedAt": record["savedAt"]})
         context = record.get("context") or {}
-        st.session_state["gencite_brand"] = record["brand"]
         st.session_state["gencite_aliases"] = ", ".join(context.get("aliases", []))
         st.session_state["gencite_competitors"] = ", ".join(context.get("competitors", []))
         _set_rows([{"Test": True, "Query": q["text"], "Intent": "Custom"} for q in record["queries"]])
@@ -593,8 +632,6 @@ def _render_saved(email: str) -> None:
 
 def render_gencite_workspace(email: str) -> None:
     st.subheader("GenCite · AI share of voice")
-    st.caption("Measure how often Gemini and ChatGPT mention your brand when answering the questions your "
-               "customers ask, then close the gaps with content and keyword recommendations.")
     _render_provider_status()
     _show_flash()
     analyze_tab, ideas_tab, saved_tab = st.tabs(["Analyze", "Recommendations", "Saved analyses"])

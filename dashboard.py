@@ -1693,6 +1693,7 @@ def _open_focus_modal(name: str) -> None:
     st.session_state[f"{name}_wizard_visited"] = True
     st.session_state["x_focus_open"] = False  # Streamlit allows one open dialog per run.
     st.session_state.pop("record_manager_modal", None)
+    st.session_state.pop("gencite_analysis_modal", None)
 
 
 def _close_focus_modal() -> None:
@@ -2199,6 +2200,7 @@ def _set_x_collection_step(step: int) -> None:
 def _open_x_collection_dialog() -> None:
     _close_focus_modal()
     st.session_state.pop("record_manager_modal", None)
+    st.session_state.pop("gencite_analysis_modal", None)
     st.session_state["x_focus_open"] = True
 
 

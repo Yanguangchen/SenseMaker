@@ -433,6 +433,8 @@ class GenCiteWorkspaceTests(unittest.TestCase):
     def run_app(self, db, fake):
         stack = [patch.dict(os.environ, KEYS), patch("modules.config.load_environment"), patch("streamlit.secrets", {}),
                  patch("modules.auth.require_access", return_value="editor@example.com"),
+                 patch("modules.auth.verify_access", return_value="editor@example.com"),
+                 patch("modules.auth.allowed_emails", return_value={"editor@example.com"}),
                  patch("modules.database.init_db", return_value=db), patch("modules.gencite._call_json", side_effect=fake)]
         for patcher in stack:
             patcher.start()
@@ -449,6 +451,10 @@ class GenCiteWorkspaceTests(unittest.TestCase):
         db, fake = MemoryDB(), FakeProviders()
         app = self.run_app(db, fake)
         self.assert_ok(app)
+        captions = [caption.value for caption in app.caption]
+        self.assertFalse(any(text.startswith(("Measure how often", "Providers:")) for text in captions))
+        self.assertNotIn("gencite_generate_variations", [button.key for button in app.button])
+        app.button(key="gencite_start_analysis").click().run()
         self.assertTrue(app.button(key="gencite_generate_variations").disabled)
         self.assertNotIn("gencite_run", [button.key for button in app.button])
         self.assertNotIn("gencite_brand", [field.key for field in app.text_input])
@@ -464,16 +470,20 @@ class GenCiteWorkspaceTests(unittest.TestCase):
         app.button(key="gencite_select_all").click().run()
         app.button(key="gencite_continue_brand").click().run()
         self.assertNotIn("**2 · Queries to test**", [block.value for block in app.markdown])
-        self.assertTrue(app.button(key="gencite_run").disabled)
-        app.text_input(key="gencite_brand").input("Acme").run()
-        app.text_input(key="gencite_aliases").input("ACM Labs").run()
+        brand = next(field for field in app.text_input if field.label == "Brand to track")
+        self.assertEqual((brand.value, brand.disabled), ("Oyoshi Cambodia", True))
+        self.assertFalse(app.button(key="gencite_run").disabled)
+        app.text_input(key="gencite_aliases").input("Acme, ACM Labs").run()
         app.text_input(key="gencite_competitors").input("Beta").run()
         self.assertEqual(app.button(key="gencite_run").label, "Run analysis on 50 queries")
         app.button(key="gencite_run").click().run()
         self.assert_ok(app)
         result = app.session_state["gencite_result"]
+        self.assertEqual(result["brand"], "Oyoshi Cambodia")
         self.assertEqual((result["totalRuns"], result["overallPct"], result["runCount"]), (500, 70, 1))
         self.assertIn("70%", [m.value for m in app.metric])
+        self.assertNotIn("gencite_run", [button.key for button in app.button])
+        self.assertNotIn("gencite_analysis_modal", app.session_state)
 
         app.button(key="gencite_run_again").click().run()
         self.assert_ok(app)
@@ -485,7 +495,7 @@ class GenCiteWorkspaceTests(unittest.TestCase):
         self.assertEqual(len(store.list_analyses(db, "editor@example.com")), 1)
         saved_names = app.dataframe[-1].value["Name"].tolist()
         self.assertEqual(len(saved_names), 1)
-        self.assertTrue(saved_names[0].startswith("Acme — "))
+        self.assertTrue(saved_names[0].startswith("Oyoshi Cambodia — "))
 
         app.button(key="gencite_generate_recs").click().run()
         self.assert_ok(app)
@@ -504,6 +514,7 @@ class GenCiteWorkspaceTests(unittest.TestCase):
 
     def test_step_navigation_preserves_edits_and_requires_regeneration_for_a_changed_topic(self):
         app = self.run_app(MemoryDB(), FakeProviders())
+        app.button(key="gencite_start_analysis").click().run()
         app.text_input(key="gencite_query").input("crm software").run()
         app.button(key="gencite_generate_variations").click().run()
 
@@ -518,7 +529,6 @@ class GenCiteWorkspaceTests(unittest.TestCase):
             app.run()
         app.button(key="gencite_continue_brand").click().run()
         self.assertEqual(app.button(key="gencite_run").label, "Run analysis on 49 queries")
-        app.text_input(key="gencite_brand").input("Acme").run()
         app.text_input(key="gencite_aliases").input("ACM").run()
         app.text_input(key="gencite_competitors").input("Beta").run()
         app.text_input(key="gencite_market").input("SaaS").run()
@@ -531,7 +541,7 @@ class GenCiteWorkspaceTests(unittest.TestCase):
         self.assertEqual(app.text_input(key="gencite_query").value, "crm software")
         app.button(key="gencite_continue_queries").click().run()
         app.button(key="gencite_continue_brand").click().run()
-        for key, value in (("brand", "Acme"), ("aliases", "ACM"), ("competitors", "Beta"),
+        for key, value in (("aliases", "ACM"), ("competitors", "Beta"),
                            ("market", "SaaS"), ("region", "Singapore")):
             self.assertEqual(app.text_input(key=f"gencite_{key}").value, value)
         self.assertEqual(app.multiselect(key="gencite_providers").value, ["openai"])
@@ -560,8 +570,9 @@ class GenCiteWorkspaceTests(unittest.TestCase):
         self.assertEqual(app.session_state["gencite_result"]["brand"], "Acme")
         self.assertEqual(app.session_state["gencite_aliases"], "ACM")
         self.assertEqual(app.session_state["gencite_step"], "Brand")
-        self.assertFalse(app.button(key="gencite_run").disabled)
         self.assertTrue(any("Opened from saved analysis" in i.value for i in app.info))
+        app.button(key="gencite_start_analysis").click().run()
+        self.assertFalse(app.button(key="gencite_run").disabled)
         app.text_input(key=f"gencite_rename_{record['id']}").input("Relaunch").run()
         app.button(key="gencite_rename_saved").click().run()
         self.assertEqual(store.list_analyses(db, "editor@example.com")[0]["name"], "Relaunch")
@@ -575,6 +586,7 @@ class GenCiteWorkspaceTests(unittest.TestCase):
         os.environ.update({"GEMINI_KEY": "", "OPENAI_API_KEY": ""})
         app.run()
         self.assert_ok(app)
+        app.button(key="gencite_start_analysis").click().run()
         app.text_input(key="gencite_query").input("crm software").run()
         app.button(key="gencite_generate_variations").click().run()
         self.assertTrue(any("standard templates" in warning.value for warning in app.warning))
