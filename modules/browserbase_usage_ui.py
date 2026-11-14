@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 from datetime import datetime, timezone
+from html import escape
 from pathlib import Path
 
 import streamlit as st
@@ -17,26 +18,28 @@ def _usage_markup(usage: BrowserbaseUsage, allowance_label: str, limit: float | 
     tone = "normal"
     meter = ""
     if limit is None:
-        summary = f"<b>{used:,.0f}</b> browser min used"
+        summary = f"{used:,.0f} browser min used"
         remaining = "Confirm your allowance in Browserbase"
+        meter = '<span class="sm-bb-status">Allowance unavailable</span>'
     else:
         ratio = used / limit
         tone = "full" if ratio >= 1 else "near" if ratio >= 0.8 else "normal"
-        summary = f"<b>{used:,.0f}</b> / {limit:,.0f} browser min"
+        summary = f"{used:,.0f} / {limit:,.0f} browser min"
         remaining = (f"{used - limit:,.0f} min over allowance" if used > limit else f"{limit - used:,.0f} min remaining")
         remaining += f" · {ratio:.0%} used"
         percent = min(100, max(0, ratio * 100))
-        meter = (f'<div class="sm-bb-meter" role="progressbar" aria-label="Browserbase browser time used" '
+        meter = (f'<div class="sm-bb-meter" role="progressbar" aria-label="BrowserBase browser time used" '
                  f'aria-valuemin="0" aria-valuemax="100" aria-valuenow="{percent:.2f}" '
                  f'aria-valuetext="{used:g} of {limit:g} browser minutes used">'
                  f'<span style="width:{percent:.2f}%"></span></div>')
     checked = datetime.fromtimestamp(usage.checked_at, timezone.utc).strftime("%H:%M UTC")
-    meta = f'<div class="sm-bb-meta">Last successful update {checked} · Refresh unavailable</div>' if stale else ""
+    details = f"{summary} · {remaining}"
+    if stale:
+        details += f" · Last successful update {checked} · Refresh unavailable"
     return (
-        f'<div class="sm-bb sm-bb--{tone}">'
-        '<div class="sm-bb-heading"><strong>Browserbase</strong></div>'
-        f'<div class="sm-bb-summary"><span>{summary}</span><span>{remaining}</span></div>{meter}'
-        f'{meta}</div>'
+        f'<div class="sm-bb sm-bb--{tone}" title="{escape(details, quote=True)}" '
+        f'aria-label="{escape(details, quote=True)}" tabindex="0">'
+        f'<span class="sm-bb-label">BrowserBase usage:</span>{meter}</div>'
     )
 
 
@@ -57,16 +60,10 @@ def render_browserbase_usage_bar(user_email: str) -> None:
     st.html(Path(__file__).parent / "theme" / "browserbase-usage.css")
     api_key, project_id = get_setting("BROWSERBASE_API_KEY"), get_setting("BROWSERBASE_PROJECT_ID")
     identity = hashlib.sha256(f"{api_key}:{project_id}".encode()).hexdigest()
-    with st.container(border=True, key="browserbase_usage_bar"):
-        content, actions = st.columns([9, 1], vertical_alignment="center")
-        with actions:
-            refresh = st.button("↻", key="refresh_browserbase_usage", help="Refresh Browserbase usage",
-                                disabled=not api_key, width="stretch")
+    with st.container(border=False):
         if not api_key:
-            content.markdown("**Browserbase** · Not configured")
+            st.markdown("BrowserBase usage: Not configured")
             return
-        if refresh:
-            load_browserbase_usage.clear(api_key, project_id)
         usage = load_browserbase_usage(api_key, project_id)
         previous = st.session_state.get("browserbase_usage_snapshot")
         stale = bool(usage.error)
@@ -76,7 +73,7 @@ def render_browserbase_usage_bar(user_email: str) -> None:
             usage = previous[1]
         else:
             st.session_state.pop("browserbase_usage_snapshot", None)
-            content.markdown(f"**Browserbase** · {usage.error}")
+            st.markdown(f"BrowserBase usage: {usage.error}")
             return
         label, limit = browser_allowance()
-        content.markdown(_usage_markup(usage, label, limit, stale=stale), unsafe_allow_html=True)
+        st.markdown(_usage_markup(usage, label, limit, stale=stale), unsafe_allow_html=True)

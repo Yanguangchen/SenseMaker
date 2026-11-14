@@ -111,7 +111,7 @@ class BrowserbaseUsageUITests(unittest.TestCase):
         app.session_state["auth_token"] = "signed-token"
         return app.run()
 
-    def test_bar_shows_remaining_and_refreshes_only_safe_aggregates(self):
+    def test_bar_shows_usage_details_and_refreshes_only_safe_aggregates(self):
         app = self.app()
         self.assertFalse(app.exception)
         self.assertNotIn("Developer allowance", app.markdown[0].value)
@@ -122,9 +122,9 @@ class BrowserbaseUsageUITests(unittest.TestCase):
         self.assertNotIn("Refreshes every minute", app.markdown[0].value)
         self.assertNotIn("server-only-key", str(app))
         self.load.return_value = BrowserbaseUsage(6000, 0, 25, 120)
-        app.button(key="refresh_browserbase_usage").click().run()
+        app.run()
         self.assertFalse(app.exception)
-        self.load.clear.assert_called_once_with("server-only-key", "project")
+        self.load.clear.assert_not_called()
         self.assertIn("sm-bb--full", app.markdown[0].value)
         self.assertIn("0 min remaining · 100% used", app.markdown[0].value)
 
@@ -144,14 +144,14 @@ class BrowserbaseUsageUITests(unittest.TestCase):
         self.settings["BROWSERBASE_PROJECT_ID"] = "different-project"
         self.load.return_value = BrowserbaseUsage(error="Usage unavailable")
         app.run()
-        self.assertEqual(app.markdown[0].value, "**Browserbase** · Usage unavailable")
+        self.assertEqual(app.markdown[0].value, "BrowserBase usage: Usage unavailable")
         self.assertNotIn("browserbase_usage_snapshot", app.session_state)
 
     def test_missing_credentials_or_failed_first_reading_do_not_render_a_false_meter(self):
         self.settings["BROWSERBASE_API_KEY"] = ""
         app = self.app()
         self.load.assert_not_called()
-        self.assertTrue(app.button(key="refresh_browserbase_usage").disabled)
+        self.assertFalse(app.button)
         self.assertIn("Not configured", app.markdown[0].value)
         self.settings["BROWSERBASE_API_KEY"] = "key"
         self.load.return_value = BrowserbaseUsage(error="Usage unavailable")

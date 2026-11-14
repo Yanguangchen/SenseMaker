@@ -558,8 +558,9 @@ usage limits apply. Local Facebook login continues to open Chrome on your comput
 
 A Browserbase usage bar appears above the workspaces after sign-in. It reads project browser
 minutes, proxy traffic and the concurrency limit through the read-only Browserbase API, with
-a shared 60-second cache, automatic refresh and a manual refresh button. Failed refreshes
-label the last successful reading as stale instead of showing zero usage.
+a shared 60-second cache and automatic refresh. Hover over the compact bar for usage and
+remaining allowance details. Failed refreshes mark the last successful reading as stale
+in the tooltip instead of showing zero usage.
 Set `BROWSERBASE_PROJECT_ID` if your key can access more than one project.
 The public API does not return the plan's browser-hour allowance: set `BROWSERBASE_PLAN`
 to `developer` (the default, 100 hours), `free` (1 hour), or `startup` (500 hours).
