@@ -97,18 +97,18 @@ GenCite web app itself is unchanged and can keep running separately.
 Follow one step at a time. Later steps stay hidden until you complete the current one;
 the Back buttons preserve your entries and query selections.
 
-1. **Topic**: enter a query or topic and click **Generate query variations**. Gemini (or ChatGPT when
+1. **Query**: the query is Oyoshi Cambodia. Click **Generate query variations**. Gemini (or ChatGPT when
    only it is configured) writes 50 queries across ten search intents: direct, comparative,
    alternatives, evaluative, ranked list, discovery, pricing, use case, problem-solving and
    audience-specific. If generation fails, 50 template variations are used and the cause is shown.
 2. **Queries to test**: opens after generating variations. Tick, edit or add queries (up to 50),
-   then click **Continue to brand**.
-3. **Brand**: enter the brand, optional aliases and competitors (up to five each), and optional
+   then click **Continue to provoker signals**.
+3. **Provoker signals**: enter the signals that provoke the conversation, optional aliases, and optional
    market and region. Choose the providers and click **Run analysis**.
 
 Each selected provider answers every query five times, in batches of ten queries with up to three
 parallel requests per provider. An answer counts when it mentions the brand or an alias
-(case-insensitive). Competitor mentions are counted the same way. Results show the overall share of
+(case-insensitive). Results show the overall share of
 voice, each provider's rate, a per-query chart and table. **Run again** adds another round of answers
 to the totals instead of replacing them, and shows the change. If one provider or batch fails, the
 other answers still count and the failure is shown. Analysis has a 180-second budget.

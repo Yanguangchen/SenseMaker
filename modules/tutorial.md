@@ -305,9 +305,9 @@ At the top of **GenCite**, expand **Check provider access** and click **Run chec
 
 Click **Start analysis** to open the setup in a modal. The Analyze tab itself shows the results.
 
-1. **1 · Provoker Signals:** Enter the **Provoker Signals** (e.g., `ThaiBev, Thailand, Thai, Boycotts`) and click **Generate query variations** (or **Continue to queries** if variations are already loaded).
-2. **2 · Queries to test:** Review the interactive table (`Test`, `Query`, `Intent`). Edit query wording, add custom rows, or use **Select all** / **Clear selection** to pick up to **50** queries. Each selected query is answered **3 times** by every selected provider. Click **Continue to brand** (or **Back to provoker signals**).
-3. **3 · Brand:** The **Brand to track** is always **Oyoshi Cambodia**. Add optional comma-separated **Aliases** (up to 8), **Competitors** (up to 8), **Market**, and **Region**. Select **Providers** (**Gemini**, **ChatGPT**) and click **Run analysis on … queries** (or **Back to queries**).
+1. **1 · Query:** The query is **Oyoshi Cambodia**. Click **Generate query variations** (or **Continue to queries** if variations are already loaded).
+2. **2 · Queries to test:** Review the interactive table (`Test`, `Query`, `Intent`). Edit query wording, add custom rows, or use **Select all** / **Clear selection** to pick up to **50** queries. Each selected query is answered **3 times** by every selected provider. Click **Continue to provoker signals** (or **Back to query**).
+3. **3 · Provoker signals:** Enter **Provoker signals** (e.g., `ThaiBev, Thailand, Thai, Boycotts`) and optional comma-separated **Aliases** (up to 8), **Market**, and **Region**. Select **Providers** (**Gemini**, **ChatGPT**) and click **Run analysis on … queries** (or **Back to queries**).
 4. **Share of voice results:** Review overall **Share of voice (%)**, **Answers mentioning brand**, **Queries**, **Sampling rounds**, per-model metrics, and the per-query chart and progress table. Click **Run again** to sample another round and merge the new answers into the cumulative totals, or enter an **Analysis name** and click **Save analysis**.
 
 ### 2. Recommendations tab

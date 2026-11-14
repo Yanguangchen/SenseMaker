@@ -26,11 +26,12 @@ KEYWORDS = "gencite_keywords"
 FLASH = "gencite_flash"
 QUEUED = "gencite_queued_keywords"
 STEP = "gencite_step"
-SIGNALS = "Provoker Signals"
-STEPS = (SIGNALS, "Queries to test", "Brand")
+QUERY_STEP = "Query"
+SIGNALS = "Provoker signals"
+STEPS = (QUERY_STEP, "Queries to test", SIGNALS)
 ANALYSIS_MODAL = "gencite_analysis_modal"
 BRAND = "Oyoshi Cambodia"
-INPUT_KEYS = ("gencite_query", "gencite_aliases", "gencite_competitors",
+INPUT_KEYS = ("gencite_query", "gencite_signals", "gencite_aliases",
               "gencite_market", "gencite_region", "gencite_providers")
 
 
@@ -85,7 +86,8 @@ def _set_result(result: Optional[Dict[str, Any]], viewing: Optional[Dict[str, st
 def _context() -> Dict[str, Any]:
     return {
         "aliases": gencite.parse_name_list(st.session_state.get("gencite_aliases", "")),
-        "competitors": gencite.parse_name_list(st.session_state.get("gencite_competitors", "")),
+        "competitors": [],
+        "signals": st.session_state.get("gencite_signals", "").strip()[:300],
         "market": st.session_state.get("gencite_market", "").strip()[:200],
         "region": st.session_state.get("gencite_region", "").strip()[:120],
     }
@@ -139,10 +141,10 @@ def _render_provider_status() -> None:
 
 def _render_topic() -> None:
     with st.container(border=True, key="gencite_topic"):
-        st.markdown(f"**1 · {SIGNALS}**")
-        query = st.text_input(SIGNALS, key="gencite_query", max_chars=gencite.MAX_QUERY_CHARS,
-                              placeholder="e.g. ThaiBev, Thailand, Thai, Boycotts",
-                              help="The names, places and themes that provoke the conversation, separated by commas.")
+        st.markdown(f"**1 · {QUERY_STEP}**")
+        if "gencite_query" not in st.session_state:
+            st.session_state["gencite_query"] = BRAND
+        query = st.text_input("Query", key="gencite_query", max_chars=gencite.MAX_QUERY_CHARS, disabled=True)
         if st.button("Generate query variations", key="gencite_generate_variations",
                      type="primary", disabled=not query.strip()):
             with st.spinner("Generating query variations…"):
@@ -203,15 +205,14 @@ def _render_queries() -> List[str]:
         return selected
 
 
-def _render_brand() -> None:
+def _render_signals() -> None:
     with st.container(border=True, key="gencite_brand_settings"):
-        st.markdown("**3 · Brand**")
-        brand_col, alias_col = st.columns(2)
-        brand_col.text_input("Brand to track", value=BRAND, disabled=True)
-        alias_col.text_input("Aliases (optional, comma-separated)", key="gencite_aliases",
-                             help=f"Other names that count as a brand mention, up to {gencite.MAX_NAMES}.")
-        st.text_input("Competitors (optional, comma-separated)", key="gencite_competitors",
-                      help=f"Up to {gencite.MAX_NAMES}. Their mentions are counted the same way to find gaps.")
+        st.markdown(f"**3 · {SIGNALS}**")
+        st.text_input(SIGNALS, key="gencite_signals", max_chars=300,
+                      placeholder="e.g. ThaiBev, Thailand, Thai, Boycotts",
+                      help="The names, places and themes that provoke the conversation, separated by commas.")
+        st.text_input("Aliases (optional, comma-separated)", key="gencite_aliases",
+                      help=f"Other names that count as a brand mention, up to {gencite.MAX_NAMES}.")
         market_col, region_col = st.columns(2)
         market_col.text_input("Market (optional)", key="gencite_market", max_chars=200,
                               help="Used to ground recommendations, e.g. 'B2B SaaS for agencies'.")
@@ -257,7 +258,7 @@ def _render_result(email: str) -> None:
     st.dataframe(pd.DataFrame(gencite.query_rows(result)), use_container_width=True, hide_index=True,
                  column_config={"Share of voice": st.column_config.ProgressColumn(
                      "Share of voice", format="%d%%", min_value=0, max_value=100)})
-    st.caption("A mention is a case-insensitive match of the brand, an alias or a competitor in a sampled "
+    st.caption("A mention is a case-insensitive match of the brand or an alias in a sampled "
                "model answer. It is not a source citation, and samples vary between runs.")
 
     again, name_col, save = st.columns([1, 2, 1], vertical_alignment="bottom")
@@ -317,26 +318,26 @@ def _analysis_modal(email: str) -> None:
 
 
 def _render_steps() -> None:
-    step = st.session_state.setdefault(STEP, "Queries to test" if st.session_state.get(ROWS) else SIGNALS)
-    if step not in STEPS or (step != SIGNALS and not st.session_state.get(ROWS)):
-        step = SIGNALS
+    step = st.session_state.setdefault(STEP, "Queries to test" if st.session_state.get(ROWS) else QUERY_STEP)
+    if step not in STEPS or (step != QUERY_STEP and not st.session_state.get(ROWS)):
+        step = QUERY_STEP
     selected = _selected_queries(st.session_state.get(ROWS, []))
-    if step == "Brand" and not 0 < len(selected) <= gencite.MAX_QUERIES:
+    if step == SIGNALS and not 0 < len(selected) <= gencite.MAX_QUERIES:
         step = "Queries to test"
     st.session_state[STEP] = step
     st.caption(f"Step {STEPS.index(step) + 1} of {len(STEPS)} · {step}")
-    if step == SIGNALS:
+    if step == QUERY_STEP:
         _render_topic()
     elif step == "Queries to test":
         selected = _render_queries()
         back, next_step = st.columns(2)
-        back.button(f"Back to {SIGNALS.lower()}", key="gencite_back_topic", on_click=_go_to_step, args=(SIGNALS,))
-        next_step.button("Continue to brand", key="gencite_continue_brand", type="primary",
+        back.button(f"Back to {QUERY_STEP.lower()}", key="gencite_back_topic", on_click=_go_to_step, args=(QUERY_STEP,))
+        next_step.button("Continue to provoker signals", key="gencite_continue_brand", type="primary",
                          disabled=not 0 < len(selected) <= gencite.MAX_QUERIES,
-                         on_click=_go_to_step, args=("Brand",))
+                         on_click=_go_to_step, args=(SIGNALS,))
     else:
         st.caption(f"{len(selected)} selected queries ready to test.")
-        _render_brand()
+        _render_signals()
         ready = bool(set(_providers()) & set(gencite.configured_providers()))
         back, run = st.columns(2)
         back.button("Back to queries", key="gencite_back_queries", on_click=_go_to_step, args=("Queries to test",))
@@ -360,7 +361,7 @@ def _render_analyze(email: str) -> None:
         st.button("Start analysis", key="gencite_start_analysis", type="primary", icon=":material/play_arrow:",
                   on_click=_open_analysis)
         if not st.session_state.get(RESULT):
-            st.caption("Enter provoker signals, pick the queries to test and your brand. Results appear here.")
+            st.caption("Oyoshi Cambodia is the first query. Add provoker signals and aliases, then run the analysis.")
     _render_result(email)
     if not st.session_state.get(ANALYSIS_MODAL):
         return
@@ -512,7 +513,7 @@ def _render_keywords(result: Dict[str, Any]) -> None:
                 _set_rows([{"Test": True, "Query": kw, "Intent": next(
                     k["tag"] for k in cached["keywords"] if k["keyword"] == kw)} for kw in queued_now])
                 _set_result(outcome)
-                st.session_state[STEP] = "Brand"
+                st.session_state[STEP] = SIGNALS
                 st.session_state.pop(VARIATION_META, None)
                 _flash("success", "The queued keywords were tested. See the new results in Analyze.")
                 st.rerun()
@@ -523,8 +524,6 @@ def _render_ideas(email: str) -> None:
     if not result:
         st.info("Run an analysis in Analyze, or open a saved one, to get recommendations from its measured gaps.")
         return
-    if not any(q.get("competitors") for q in result["queries"]):
-        st.caption("Add competitors before running the analysis to measure mention gaps against them.")
     _render_recommendations(email, result)
     _render_keywords(result)
 
@@ -547,9 +546,9 @@ def _open_saved(email: str, analysis_id: str) -> None:
                     {"name": record["name"], "savedAt": record["savedAt"]})
         context = record.get("context") or {}
         st.session_state["gencite_aliases"] = ", ".join(context.get("aliases", []))
-        st.session_state["gencite_competitors"] = ", ".join(context.get("competitors", []))
+        st.session_state["gencite_signals"] = context.get("signals", "")
         _set_rows([{"Test": True, "Query": q["text"], "Intent": "Custom"} for q in record["queries"]])
-        st.session_state[STEP] = "Brand"
+        st.session_state[STEP] = SIGNALS
         st.session_state.pop(VARIATION_META, None)
         _flash("success", f"Opened “{record['name']}”. Its results are in Analyze.")
 
