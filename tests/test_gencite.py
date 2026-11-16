@@ -50,7 +50,7 @@ def recommendation(i, indexes=(0,)):
 
 
 def keyword(text, coverage="missing", indexes=()):
-    return {"keyword": text, "tag": "Pricing", "coverage": coverage, "rationale": "Untested intent.",
+    return {"keyword": text, "tag": "Ownership", "coverage": coverage, "rationale": "Untested intent.",
             "opportunity": 90, "relevance": 70, "confidence": "high", "relatedQueryIndexes": list(indexes)}
 
 
@@ -191,7 +191,7 @@ class TransportTests(unittest.TestCase):
 class VariationValidationTests(unittest.TestCase):
     def test_duplicates_and_invalid_items_are_dropped_but_too_few_are_rejected(self):
         items = variations()["variations"]
-        noisy = items + [items[0] | {"text": "QUERY 0"}, {"text": "x", "tag": "Unknown"}, {"text": "", "tag": "Pricing"}]
+        noisy = items + [items[0] | {"text": "QUERY 0"}, {"text": "x", "tag": "Unknown"}, {"text": "", "tag": "Ownership"}]
         self.assertEqual(gencite.validate_variations({"variations": noisy}), items)
         self.assertIsNone(gencite.validate_variations({"variations": items[:39]}))
         self.assertIsNone(gencite.validate_variations({"variations": "bad"}))
@@ -201,6 +201,15 @@ class VariationValidationTests(unittest.TestCase):
         self.assertEqual(len(local), 50)
         self.assertEqual({v["tag"] for v in local}, set(gencite.ALLOWED_TAGS))
         self.assertIsNotNone(gencite.validate_variations(local))
+
+    def test_variations_revolve_around_ownership_and_origins(self):
+        prompt = gencite._variation_prompt("Oyoshi Cambodia")
+        self.assertIn("ownership and origins", prompt)
+        self.assertIn(", ".join(gencite.ALLOWED_TAGS), prompt)
+        texts = [v["text"] for v in gencite.local_variations("Oyoshi Cambodia")]
+        self.assertIn("who owns Oyoshi Cambodia?", texts)
+        self.assertIn("where does Oyoshi Cambodia come from?", texts)
+        self.assertFalse(any(word in text for text in texts for word in ("pricing", "for startups", "top 10")))
 
 
 class AnalysisTests(unittest.TestCase):

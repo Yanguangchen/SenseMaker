@@ -3,7 +3,8 @@
 A Python port of the GenCite web app's Cloud Functions and client-side scoring,
 running on CrisisRadar's server with CrisisRadar's provider credentials:
 
-1. Expand a source query into tagged variations across ten search intents.
+1. Expand a source query into tagged variations across ten ownership and origin
+   intents (who owns the brand, where it comes from, whether it is local).
 2. Ask each provider for five independently worded answers per query and count
    answers that mention the brand (or an alias) and each competitor.
 3. Combine providers side by side; "Run again" adds new samples to the totals.
@@ -19,7 +20,6 @@ import json
 import re
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from datetime import datetime, timezone
 from typing import Any, Callable, Dict, List, Optional
 
 from modules import openai as openai_transport
@@ -46,9 +46,11 @@ MIN_RECOMMENDATIONS = 3
 KEYWORD_COUNT = 8
 MIN_KEYWORDS = 4
 
+# Every query variation revolves around who owns the brand and where it comes from.
 ALLOWED_TAGS = (
-    "Direct query", "Comparative", "Alternatives", "Evaluative", "Ranked list",
-    "Discovery", "Pricing", "Use case", "Problem-solving", "Audience-specific",
+    "Ownership", "Parent company", "Country of origin", "Founding & history", "Local vs foreign",
+    "Manufacturing", "Investors & shareholders", "Licensing & distribution", "Origin comparison",
+    "Consumer choice",
 )
 CONFIDENCE_LEVELS = ("high", "medium", "experimental")
 COVERAGE_LEVELS = ("missing", "weak", "adjacent")
@@ -256,6 +258,11 @@ def _variation_prompt(query: str) -> str:
     return "\n".join([
         f"Generate exactly {VARIATION_COUNT} natural-language search queries that a person might ask an AI assistant.",
         f"The source query or topic is: {_json(query)}.",
+        "Every query must revolve around the ownership and origins of that brand: who owns it, its parent company "
+        "and corporate group, which country it and its owners come from, how and where it was founded, whether it "
+        "is locally or foreign-owned, where its products are made, who has invested in it, who licenses or "
+        "distributes it, how its origins compare with other brands, and whether its origins should affect "
+        "a buying decision.",
         f"Spread the queries evenly across these intents, roughly {VARIATION_COUNT // len(ALLOWED_TAGS)} per intent: "
         + ", ".join(ALLOWED_TAGS) + ".",
         "Vary the phrasing, angle, and specificity within each intent so no two queries are near-duplicates.",
@@ -281,29 +288,35 @@ def validate_variations(value: Any) -> Optional[List[Dict[str, str]]]:
 
 
 def local_variations(query: str) -> List[Dict[str, str]]:
-    """Deterministic fallback with five phrasings per intent, as in GenCite."""
-    q, year = query.strip(), datetime.now(timezone.utc).year
+    """Deterministic fallback with five ownership and origin phrasings per intent."""
+    q = query.strip()
     groups = {
-        "Direct query": [q, f"{q} overview", f"tell me about {q}", f"what is {q}?", f"{q} explained"],
-        "Comparative": [f"best {q}", f"{q} vs competitors", f"{q} compared to alternatives",
-                        f"{q} head to head", f"which {q} is best"],
-        "Alternatives": [f"{q} alternatives", f"alternatives to {q}", f"similar tools to {q}",
-                         f"{q} substitutes", f"other options like {q}"],
-        "Evaluative": [f"is {q} worth it?", f"{q} pros and cons", f"{q} review", f"is {q} any good?",
-                       f"{q} strengths and weaknesses"],
-        "Ranked list": [f"top {q} in {year}", f"best {q} ranked", f"top 10 {q}", f"leading {q} providers",
-                        f"most popular {q}"],
-        "Discovery": [f"how to find the right {q}", f"getting started with {q}", f"{q} for beginners",
-                      f"where to start with {q}", f"exploring {q} options"],
-        "Pricing": [f"{q} pricing and costs", f"how much does {q} cost?", f"{q} pricing plans",
-                    f"is {q} affordable?", f"{q} free vs paid"],
-        "Use case": [f"how to use {q} for a growing team", f"{q} for daily workflows", f"{q} use cases",
-                     f"using {q} at scale", f"{q} for remote teams"],
-        "Problem-solving": [f"what problems does {q} solve?", f"{q} to fix common issues",
-                            f"how {q} improves productivity", f"solving challenges with {q}",
-                            f"{q} for reducing costs"],
-        "Audience-specific": [f"{q} for small businesses", f"{q} for enterprises", f"{q} for startups",
-                              f"{q} for freelancers", f"{q} for students"],
+        "Ownership": [f"who owns {q}?", f"{q} owner", f"who is the owner of {q}?", f"{q} ownership",
+                      f"who controls {q}?"],
+        "Parent company": [f"what is the parent company of {q}?", f"{q} parent company",
+                           f"which group does {q} belong to?", f"is {q} a subsidiary?",
+                           f"{q} holding company"],
+        "Country of origin": [f"where does {q} come from?", f"{q} country of origin",
+                              f"which country is {q} from?", f"is {q} a foreign brand?",
+                              f"where is {q} headquartered?"],
+        "Founding & history": [f"who founded {q}?", f"when was {q} founded?", f"{q} history",
+                               f"how did {q} start?", f"the story behind {q}"],
+        "Local vs foreign": [f"is {q} locally owned?", f"is {q} a local brand?", f"is {q} foreign-owned?",
+                             f"is {q} owned by a foreign company?", f"is {q} a homegrown brand?"],
+        "Manufacturing": [f"where is {q} made?", f"who makes {q}?", f"where are {q} products produced?",
+                          f"{q} factory location", f"is {q} imported or made locally?"],
+        "Investors & shareholders": [f"who are the shareholders of {q}?", f"who invested in {q}?",
+                                     f"{q} investors", f"is {q} backed by foreign investment?",
+                                     f"{q} major shareholders"],
+        "Licensing & distribution": [f"who distributes {q}?", f"is {q} a licensed brand?",
+                                     f"{q} franchise or license", f"{q} official distributor",
+                                     f"who holds the rights to {q}?"],
+        "Origin comparison": [f"{q} vs local brands", f"is {q} the same company as other brands with that name?",
+                              f"{q} compared to locally owned alternatives", f"brands similar to {q} by ownership",
+                              f"local alternatives to {q}"],
+        "Consumer choice": [f"should I buy {q}?", f"does buying {q} support local businesses?",
+                            f"is {q} affected by boycotts?", f"is it ethical to buy {q}?",
+                            f"where does my money go when I buy {q}?"],
     }
     return [{"text": text[:MAX_VARIATION_CHARS], "tag": tag} for tag, texts in groups.items() for text in texts]
 

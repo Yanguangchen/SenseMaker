@@ -98,9 +98,10 @@ Follow one step at a time. Later steps stay hidden until you complete the curren
 the Back buttons preserve your entries and query selections.
 
 1. **Query**: the query is Oyoshi Cambodia. Click **Generate query variations**. Gemini (or ChatGPT when
-   only it is configured) writes 50 queries across ten search intents: direct, comparative,
-   alternatives, evaluative, ranked list, discovery, pricing, use case, problem-solving and
-   audience-specific. If generation fails, 50 template variations are used and the cause is shown.
+   only it is configured) writes 50 queries about the ownership and origins of Oyoshi Cambodia, across
+   ten intents: ownership, parent company, country of origin, founding & history, local vs foreign,
+   manufacturing, investors & shareholders, licensing & distribution, origin comparison and consumer
+   choice. If generation fails, 50 template variations are used and the cause is shown.
 2. **Queries to test**: opens after generating variations. Tick, edit or add queries (up to 50),
    then click **Continue to provoker signals**.
 3. **Provoker signals**: enter the signals that provoke the conversation, optional aliases, and optional
