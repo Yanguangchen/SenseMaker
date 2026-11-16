@@ -305,7 +305,7 @@ At the top of **GenCite**, expand **Check provider access** and click **Run chec
 
 Click **Start analysis** to open the setup in a modal. The Analyze tab itself shows the results.
 
-1. **1 · Query:** The query is **Oyoshi Cambodia**. Click **Generate query variations** (or **Continue to queries** if variations are already loaded).
+1. **1 · Query:** The query is **Oyoshi Cambodia**. Click **Generate query variations** to get 50 queries about who owns Oyoshi Cambodia and where it comes from (ownership, parent company, country of origin, founding & history, local vs foreign, manufacturing, investors & shareholders, licensing & distribution, origin comparison and consumer choice) (or **Continue to queries** if variations are already loaded).
 2. **2 · Queries to test:** Review the interactive table (`Test`, `Query`, `Intent`). Edit query wording, add custom rows, or use **Select all** / **Clear selection** to pick up to **50** queries. Each selected query is answered **3 times** by every selected provider. Click **Continue to provoker signals** (or **Back to query**).
 3. **3 · Provoker signals:** Enter **Provoker signals** (e.g., `ThaiBev, Thailand, Thai, Boycotts`) and optional comma-separated **Aliases** (up to 8), **Market**, and **Region**. Select **Providers** (**Gemini**, **ChatGPT**) and click **Run analysis on … queries** (or **Back to queries**).
 4. **Share of voice results:** Review overall **Share of voice (%)**, **Answers mentioning brand**, **Queries**, **Sampling rounds**, per-model metrics, and the per-query chart and progress table. Click **Run again** to sample another round and merge the new answers into the cumulative totals, or enter an **Analysis name** and click **Save analysis**.
