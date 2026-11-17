@@ -325,7 +325,7 @@ Click **Start analysis** to open the setup in a modal. The Analyze tab itself sh
 
 ### Fixed invoice details
 
-Open **Invoices** to create a PDF for **CrisisRadar with Browserbase Pro - Oyoshi**,
+Open **Invoices** to create a PDF for **CrisisRadar with Browserbase Pro - Oyoshi - Monthly**,
 billed to **MSA MARKETING SOLUTIONS ASIA LTD.** The amount, subtotal and total are
 fixed at **SGD 85.00**, and the supplied template's branding and payment details
 are preserved.

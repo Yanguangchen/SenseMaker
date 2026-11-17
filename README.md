@@ -20,7 +20,7 @@ The [CrisisRadar tutorial](modules/tutorial.md) is also available in this reposi
 
 Open **Invoices** in the sidebar to download a PDF using the supplied Web Wizards SG
 template. The customer and payment details remain fixed, with **CrisisRadar with
-Browserbase Pro - Oyoshi** as the description and **SGD 85.00** for the line amount,
+Browserbase Pro - Oyoshi - Monthly** as the description and **SGD 85.00** for the line amount,
 subtotal and total. Only the invoice date is editable; it defaults to today in
 Singapore. Optionally append that date as `YYYYMMDD` to the generated number.
 

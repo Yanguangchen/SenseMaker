@@ -17,7 +17,7 @@ from reportlab.pdfgen import canvas
 from modules.saved_links import library_owner_id
 
 TEMPLATE_PATH = Path(__file__).parent / "invoice_assets" / "invoice-template.pdf"
-DESCRIPTION = "CrisisRadar with Browserbase Pro - Oyoshi"
+DESCRIPTION = "CrisisRadar with Browserbase Pro - Oyoshi - Monthly"
 AMOUNT_CENTS = 8500
 CURRENCY = "SGD"
 CUSTOMER = "MSA MARKETING SOLUTIONS ASIA LTD."
