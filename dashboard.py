@@ -43,6 +43,7 @@ from modules.ai_errors import AIError, redact
 from modules.config import AI_PROVIDERS, get_ai_key, get_ai_model, get_ai_provider, get_setting, load_environment
 from modules.database import delete_processed_posts, get_post_id, init_db, upsert_post
 from modules.gencite_ui import render_gencite_workspace
+from modules.invoice_ui import render_invoice_workspace
 from modules.client_report import (
     CSS_PATH as REPORT_CSS, content_type, negative_records, npr_sheet, platform_label, report_document,
     report_number, report_record, sentiment_sheet,
@@ -2821,7 +2822,7 @@ def main() -> None:
                             _get_facebook_session(_facebook_storage_path()))
     except Exception:
         facebook_session = FacebookSession()
-    scrape_tab, records_tab, analysis_tab, velocity_tab, trends_tab, content_tab, gencite_tab, tutorial_tab = dashboard_views(user_email, facebook_session)
+    scrape_tab, records_tab, analysis_tab, velocity_tab, trends_tab, content_tab, gencite_tab, invoices_tab, tutorial_tab = dashboard_views(user_email, facebook_session)
 
     with scrape_tab:
         _render_scrape_workspace(user_email, facebook_session)
@@ -2844,6 +2845,9 @@ def main() -> None:
 
     with gencite_tab:
         render_gencite_workspace(user_email)
+
+    with invoices_tab:
+        render_invoice_workspace(user_email)
 
     with tutorial_tab:
         render_tutorial_workspace()

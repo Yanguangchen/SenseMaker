@@ -29,6 +29,7 @@ Run your first end-to-end analysis with a public website article—no social med
 | **Sentiment Trends** | Track **Sentiment over time** (`−100` to `+100`) and **Border tension risk over time** (`0`–`100`), or reset shared timeline history. | Shared across approved users |
 | **Content plan** | Turn up to 30 analyzed records into target keywords, content outlines, drafts, and verification checklists in **English**, **Khmer**, or **Thai**. | Current browser session · CSV/JSON export |
 | **GenCite** | Measure brand share of voice across sampled **Gemini** and **ChatGPT** answers, generate gap-closing recommendations, and save runs. | Private to your account |
+| **Invoices** | Generate the fixed SGD 85 Oyoshi invoice with an editable date and an automatically assigned invoice number. | PDF download · Permanent shared number registry |
 | **Tutorial** | Browse or search this interactive guide by chapter, subsection, or keyword. | Built-in reference |
 
 ### Navigation, theme & Browserbase usage bar
@@ -319,6 +320,30 @@ Click **Start analysis** to open the setup in a modal. The Analyze tab itself sh
 
 - Browse all GenCite analyses saved under your account in a summary table showing **Name**, **Brand**, **Share of voice**, **Mentions**, **Queries**, **Rounds**, **Providers**, and **Saved** timestamp.
 - Select an **Analysis** from the dropdown to **Open** it back into **Analyze** and **Recommendations**, **Rename** it, **Delete** → **Delete permanently**, or click **Refresh** to sync across devices.
+
+## Invoices
+
+### Fixed invoice details
+
+Open **Invoices** to create a PDF for **CrisisRadar with Browserbase Pro - Oyoshi**,
+billed to **MSA MARKETING SOLUTIONS ASIA LTD.** The amount, subtotal and total are
+fixed at **SGD 85.00**, and the supplied template's branding and payment details
+are preserved.
+
+### Date and invoice number
+
+1. Review **Invoice date**, which starts at today's date in Singapore. This is the only editable invoice field.
+2. Optionally select **Append date to invoice number** to add the selected date as `YYYYMMDD` (for example, `A1B2C-20261117`).
+
+### Generate and download
+
+Click **Generate invoice**, then **Download invoice PDF**. The five-character hexadecimal code is generated automatically and reserved across all users so it cannot be reused.
+
+Click **New invoice** for another invoice with today's date. Changing the date or suffix clears the old download; generating again assigns a new code.
+
+Keep your downloaded PDFs. Downloads remain available in the current session;
+invoice numbers remain reserved permanently. If generation fails, retry: the app
+only offers an invoice after its number has been saved successfully.
 
 ## Troubleshooting, privacy & admin setup
 

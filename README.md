@@ -16,6 +16,25 @@ Read it directly in the app: use **Contents** to jump to a chapter, **Previous c
 **Next chapter** to follow the guide, or search and open a matching chapter.
 The [CrisisRadar tutorial](modules/tutorial.md) is also available in this repository.
 
+## Invoices
+
+Open **Invoices** in the sidebar to download a PDF using the supplied Web Wizards SG
+template. The customer and payment details remain fixed, with **CrisisRadar with
+Browserbase Pro - Oyoshi** as the description and **SGD 85.00** for the line amount,
+subtotal and total. Only the invoice date is editable; it defaults to today in
+Singapore. Optionally append that date as `YYYYMMDD` to the generated number.
+
+Numbers use five random uppercase hexadecimal characters (`0-9`, `A-F`). Each code
+is reserved by an atomic Firestore create in `sensemaker_invoice_numbers/{code}`
+before the PDF is offered for download. Codes are unique across users and dates;
+collisions retry, and database failures never produce an unreserved invoice.
+Keep this registry permanently to prevent number reuse. A five-digit hex code has
+1,048,576 possible values; allocation fails safely after 32 conflicting attempts.
+**New invoice** resets the date to today and assigns a fresh number on generation.
+Changing the date or suffix removes the previous download until a new invoice is
+generated. The bundled template is losslessly compressed from `85-updated.pdf`;
+PDF generation runs locally on the server without an external rendering service.
+
 ## AI provider setup
 
 Configure credentials once on the server in `.env.local` or `.env`; dashboard users choose **Gemini**

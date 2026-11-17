@@ -4,3 +4,5 @@ firebase-admin
 streamlit
 certifi
 browserbase==1.23.0
+pypdf==7.1.0
+reportlab==5.1.0
